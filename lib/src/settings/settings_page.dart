@@ -1,0 +1,365 @@
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+
+import '../app_settings.dart';
+import '../printer/escpos.dart';
+import '../terminal/terminal_channel.dart';
+import '../terminal/terminal_session.dart';
+
+/// Réglages : adresse de la boutique, terminal détecté, imprimante, code d'accès.
+/// Affiché au premier lancement ([firstRun]) puis par 5 touchers dans le coin de la caisse.
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key, required this.session, this.firstRun = false, this.onDone});
+
+  final TerminalSession session;
+  final bool firstRun;
+
+  /// Appelé après enregistrement au premier lancement (sinon la page se referme).
+  final VoidCallback? onDone;
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  late final TextEditingController _url = TextEditingController(text: _settings.shopUrl);
+  late final TextEditingController _serialPath = TextEditingController(text: _settings.serialPath);
+  late final TextEditingController _code = TextEditingController(text: _settings.adminCode);
+  late String _driver = _settings.driver;
+  late int _paper = _settings.paperWidth;
+  late int _baud = _settings.serialBaud;
+  late String _btAddress = _settings.bluetoothAddress;
+
+  List<Map<String, dynamic>> _btDevices = const [];
+  List<Map<String, dynamic>> _serialPorts = const [];
+  String? _urlError;
+  String? _message;
+  bool _busy = false;
+
+  TerminalSession get _session => widget.session;
+  AppSettings get _settings => _session.settings;
+  TerminalInfo get _info => _session.info;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadLists();
+  }
+
+  Future<void> _loadLists() async {
+    final ch = _session.channel;
+    final bt = await ch.bluetoothDevices();
+    final serial = await ch.serialPorts();
+    if (mounted) setState(() => (_btDevices = bt, _serialPorts = serial));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.firstRun ? 'Configuration du terminal' : 'Réglages'),
+        automaticallyImplyLeading: !widget.firstRun,
+      ),
+      body: AbsorbPointer(
+        absorbing: _busy,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+          children: [
+            _Section(title: 'Boutique', children: [
+              TextField(
+                controller: _url,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  labelText: 'Adresse de la boutique',
+                  hintText: 'boutique.exemple.ci',
+                  helperText: 'Sans chemin, la caisse (/caisse) est ouverte.',
+                  errorText: _urlError,
+                  prefixIcon: const Icon(Icons.storefront),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(onPressed: _testUrl, icon: const Icon(Icons.wifi_find), label: const Text('Tester la connexion')),
+              ),
+            ]),
+            _Section(title: 'Terminal', children: [
+              _Info('Appareil', _info.label.isEmpty ? '—' : _info.label),
+              _Info('Android', _info.android.isEmpty ? '—' : _info.android),
+              _Info('Imprimante détectée', _info.detectedLabel),
+              _Info('Papier détecté', _info.detectedPaper > 0 ? '${_info.detectedPaper} mm' : 'inconnu'),
+              _Info('Afficheur client', _info.hasSecondaryDisplay ? 'second écran détecté' : 'aucun second écran'),
+              _Info('Pilote actif', driverLabels[_session.activeDriver] ?? _session.activeDriver),
+            ]),
+            _Section(title: 'Imprimante', children: [
+              DropdownButtonFormField<String>(
+                initialValue: _driver,
+                decoration: const InputDecoration(labelText: 'Pilote', prefixIcon: Icon(Icons.print)),
+                items: [
+                  for (final e in driverLabels.entries)
+                    DropdownMenuItem(
+                      value: e.key,
+                      child: Text(e.key == 'auto' ? 'Automatique (${_info.detectedLabel})' : e.value, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _driver = v ?? 'auto'),
+              ),
+              if (_driver == 'bluetooth') ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _btDevices.any((d) => d['address'] == _btAddress) ? _btAddress : '',
+                  decoration: const InputDecoration(labelText: 'Périphérique Bluetooth appairé'),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('InnerPrinter (automatique)')),
+                    for (final d in _btDevices) DropdownMenuItem(value: d['address'] as String, child: Text('${d['name']} — ${d['address']}')),
+                  ],
+                  onChanged: (v) => setState(() => _btAddress = v ?? ''),
+                ),
+              ],
+              if (_driver == 'serial') ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _serialPath,
+                  decoration: InputDecoration(
+                    labelText: 'Port série',
+                    helperText: _serialPorts.isEmpty
+                        ? 'Aucun port /dev/tty* visible'
+                        : 'Ports : ${_serialPorts.map((p) => '${p['path']}${p['writable'] == true ? '' : ' (protégé)'}').join(', ')}',
+                    helperMaxLines: 3,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue: _baud,
+                  decoration: const InputDecoration(labelText: 'Débit (bauds)'),
+                  items: const [9600, 19200, 38400, 57600, 115200]
+                      .map((b) => DropdownMenuItem(value: b, child: Text('$b')))
+                      .toList(),
+                  onChanged: (v) => setState(() => _baud = v ?? 115200),
+                ),
+              ],
+              const SizedBox(height: 16),
+              Text('Largeur du rouleau (tickets HTML)', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 8),
+              SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('Auto')),
+                  ButtonSegment(value: 58, label: Text('58 mm')),
+                  ButtonSegment(value: 80, label: Text('80 mm')),
+                ],
+                selected: {_paper},
+                onSelectionChanged: (s) => setState(() => _paper = s.first),
+              ),
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.tonalIcon(onPressed: _testPrint, icon: const Icon(Icons.receipt_long), label: const Text('Ticket de test')),
+                  OutlinedButton.icon(onPressed: _openDrawer, icon: const Icon(Icons.point_of_sale), label: const Text('Ouvrir le tiroir')),
+                  OutlinedButton.icon(onPressed: _status, icon: const Icon(Icons.info_outline), label: const Text('État')),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Dans ShopiKaiss, Réglages › Terminaux : choisir l’imprimante « Imprimante intégrée par l’application ShopiKaiss Bridge » '
+                'pour que les tickets partent directement sur cette imprimante.',
+                style: theme.textTheme.bodySmall,
+              ),
+            ]),
+            _Section(title: 'Sécurité', children: [
+              TextField(
+                controller: _code,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'Code d’accès aux réglages (facultatif)',
+                  helperText: 'Demandé après les 5 touchers dans le coin haut gauche de la caisse.',
+                  prefixIcon: Icon(Icons.lock_outline),
+                ),
+              ),
+            ]),
+            if (_message != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Card(
+                  color: theme.colorScheme.secondaryContainer,
+                  child: Padding(padding: const EdgeInsets.all(12), child: Text(_message!)),
+                ),
+              ),
+            const SizedBox(height: 16),
+            FilledButton.icon(
+              onPressed: _save,
+              style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
+              icon: _busy ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.check),
+              label: Text(widget.firstRun ? 'Enregistrer et ouvrir la caisse' : 'Enregistrer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Recopie le formulaire dans les réglages et reconfigure le pilote natif.
+  Future<bool> _apply({bool persist = false}) async {
+    final url = normalizeShopUrl(_url.text);
+    setState(() => _urlError = url == null && persist ? 'Adresse invalide' : null);
+    if (url == null && persist) return false;
+    _settings
+      ..shopUrl = url ?? _settings.shopUrl
+      ..driver = _driver
+      ..paperWidth = _paper
+      ..serialPath = _serialPath.text.trim()
+      ..serialBaud = _baud
+      ..bluetoothAddress = _btAddress
+      ..adminCode = _code.text.trim();
+    if (persist) {
+      await _session.save();
+    } else {
+      await _session.refresh();
+    }
+    return true;
+  }
+
+  Future<void> _run(Future<String> Function() action) async {
+    setState(() => (_busy = true, _message = null));
+    try {
+      final message = await action();
+      if (mounted) setState(() => _message = message);
+    } catch (e) {
+      if (mounted) setState(() => _message = 'Erreur : $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _testUrl() => _run(() async {
+        final url = normalizeShopUrl(_url.text);
+        if (url == null) return 'Adresse invalide.';
+        _url.text = url;
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
+        try {
+          final request = await client.getUrl(Uri.parse(url)).timeout(const Duration(seconds: 10));
+          request.followRedirects = true;
+          final response = await request.close().timeout(const Duration(seconds: 10));
+          await response.drain<void>();
+          return response.statusCode < 500
+              ? 'Boutique joignable (HTTP ${response.statusCode}).'
+              : 'Le serveur répond par une erreur HTTP ${response.statusCode}.';
+        } on TimeoutException {
+          return 'Pas de réponse en 10 s : vérifiez le réseau et l’adresse.';
+        } on SocketException catch (e) {
+          return 'Boutique injoignable : ${e.message}';
+        } on HandshakeException {
+          return 'Certificat HTTPS refusé par le terminal.';
+        } finally {
+          client.close(force: true);
+        }
+      });
+
+  void _testPrint() => _run(() async {
+        await _apply();
+        final paper = _session.rollWidth > 0 ? _session.rollWidth : 58;
+        final now = DateTime.now();
+        final result = await _session.channel.printRaw(EscPos.testTicket(paperWidth: paper, lines: [
+          'Terminal : ${_info.label}',
+          'Pilote   : ${_session.activeDriver}',
+          'Papier   : $paper mm',
+          'Date     : ${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} '
+              '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+        ]));
+        return result.ok ? 'Ticket de test envoyé à l’imprimante (${driverLabels[_session.activeDriver]}).' : _describe(result.error);
+      });
+
+  void _openDrawer() => _run(() async {
+        await _apply();
+        final result = await _session.channel.openDrawer();
+        return result.ok ? 'Impulsion d’ouverture envoyée au tiroir.' : _describe(result.error);
+      });
+
+  void _status() => _run(() async {
+        await _apply();
+        final r = await _session.channel.status();
+        if (!r.ok && r.data['paper'] == null) return _describe(r.error);
+        return 'Papier : ${r.data['paper']} · Capot : ${r.data['cover']}${r.error != null ? ' · ${_describe(r.error)}' : ''}';
+      });
+
+  Future<void> _save() async {
+    setState(() => _busy = true);
+    final ok = await _apply(persist: true);
+    if (!mounted) return;
+    setState(() => _busy = false);
+    if (!ok) return;
+    if (widget.onDone != null) {
+      widget.onDone!();
+    } else {
+      Navigator.of(context).pop();
+    }
+  }
+
+  static String _describe(String? code) => switch (code) {
+        'printer_not_configured' => 'Aucune imprimante : choisissez un pilote.',
+        'sdk_absent' => 'Service d’impression SUNMI absent de ce terminal.',
+        'usb_printer_not_found' => 'Aucune imprimante USB branchée.',
+        'usb_permission_pending' => 'Acceptez l’autorisation USB affichée par Android, puis réessayez.',
+        'bluetooth_permission_pending' => 'Acceptez l’autorisation Bluetooth affichée par Android, puis réessayez.',
+        'bluetooth_disabled' => 'Activez le Bluetooth du terminal.',
+        'bluetooth_printer_not_found' => 'Aucune imprimante Bluetooth appairée (InnerPrinter introuvable).',
+        'paper_out' => 'Plus de papier.',
+        'cover_open' => 'Capot ouvert.',
+        null => 'Échec sans précision.',
+        _ => 'Échec : $code',
+      };
+}
+
+class _Section extends StatelessWidget {
+  const _Section({required this.title, required this.children});
+
+  final String title;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              const SizedBox(height: 12),
+              ...children,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Info extends StatelessWidget {
+  const _Info(this.label, this.value);
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(width: 150, child: Text(label, style: Theme.of(context).textTheme.bodySmall)),
+          Expanded(child: Text(value)),
+        ],
+      ),
+    );
+  }
+}

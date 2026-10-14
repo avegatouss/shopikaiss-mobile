@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Appareils USB pour lesquels Android propose d’ouvrir ShopiKaiss au branchement (et de
+  mémoriser l'accord). Classe 7 = imprimante. Ajouter une ligne vendor-id/product-id (décimal)
+  si l’imprimante interne se déclare en classe constructeur (255) : voir `lsusb`.
+-->
+<resources>
+    <usb-device class="7" />
+</resources>

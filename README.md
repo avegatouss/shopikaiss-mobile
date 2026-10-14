@@ -1,0 +1,93 @@
+# ShopiKaiss Terminal (Flutter)
+
+Application mobile qui ouvre la caisse **ShopiKaiss** d'une boutique et la relie au matériel du terminal :
+imprimante thermique intégrée, tiroir-caisse, bip et afficheur client (second écran).
+
+Elle remplace, en multi-terminal, l'application Kotlin `android/shopikaiss-bridge` de shopikaiss-web. Elle
+expose **le même contrat** `window.ShopiKaissNative`, donc **aucune modification du site n'est nécessaire**.
+
+## Mise en service sur un terminal
+
+1. Installer `ShopiKaiss-terminal.apk`.
+2. Au premier lancement, saisir l'adresse de la boutique (par exemple `boutique.exemple.ci`). Sans chemin,
+   l'application ouvre `/caisse`.
+3. Vérifier le **terminal détecté** et l'**imprimante détectée**, puis imprimer le **ticket de test**.
+4. Dans ShopiKaiss, aller dans *Réglages › Terminaux* et choisir l'imprimante « Imprimante intégrée par
+   l'application ShopiKaiss Bridge » (mode `native-bridge`), avec la largeur 58 ou 80 mm. Les tickets partent
+   alors directement sur l'imprimante, sans boîte de dialogue.
+5. Pour revenir aux réglages depuis la caisse : **5 touchers en 3 s dans le coin haut gauche**. Un code
+   d'accès peut être demandé (facultatif).
+
+## Adaptation au terminal
+
+| Terminal | Pilote choisi en « Automatique » |
+|---|---|
+| SUNMI (V2, V2s, P2, T2, D2, K2…) | service `woyou.aidlservice.jiuiv5` via `com.sunmi:printerlibrary` |
+| Imprimante interne USB (iMin, Rockchip…) | USB classe 7, endpoint bulk (permission Android au premier envoi) |
+| Imprimante virtuelle Bluetooth « InnerPrinter » | Bluetooth SPP |
+| Port série `/dev/ttyS*` (ST-T40, Telpo…) | réglage **manuel** uniquement (chemin et débit) |
+| Téléphone ou tablette sans imprimante | « Aucune » : les documents passent par l'impression Android |
+
+La largeur du rouleau est lue sur l'imprimante quand le pilote le permet (SUNMI). Sinon, elle se règle à la
+main (58 ou 80 mm).
+
+## Ce qui est imprimé, et par où
+
+| Origine dans la caisse | Traitement |
+|---|---|
+| `ShopiKaissPrinter` (ticket ESC/POS de `escpos-ticket.js`, mode `native-bridge`) | octets envoyés tels quels à l'imprimante intégrée |
+| `window.print()` d'un ticket HTML (`[data-paper-width]` : fin de vente, page ticket, ticket test…) | rendu PDF, rastérisation à la largeur du rouleau, puis ESC/POS `GS v 0` vers l'imprimante intégrée |
+| `window.print()` d'un document A4 (facture, devis, rapports, étiquettes…) | boîte d'impression Android (imprimante réseau, « Enregistrer en PDF ») |
+| Tiroir, état, bip | `openDrawer`, `getPrinterStatus`, `beep` du contrat |
+| Afficheur client (`native-presentation`) | `Presentation` Android sur le second écran |
+
+## Architecture
+
+```
+lib/
+  main.dart                       premier lancement → réglages, sinon caisse
+  src/web/bridge_script.dart      JS injecté : window.ShopiKaissNative + interception de window.print()
+  src/web/caisse_page.dart        WebView (flutter_inappwebview), confinée à l'origine de la boutique
+  src/printer/html_printer.dart   ticket HTML → raster ESC/POS ; A4 → impression système
+  src/printer/escpos.dart         ticket de test, bitmap 1 bit, GS v 0
+  src/terminal/                   canal natif, session (réglages + pilote actif)
+  src/settings/settings_page.dart configuration et tests matériel
+android/app/src/main/kotlin/ci/khoga/shopikaiss/terminal/
+  TerminalPlugin.kt               canal ci.khoga.shopikaiss/terminal
+  printer/                        pilotes SUNMI, USB, Bluetooth, série (USB et série repris du Bridge)
+  display/                        afficheur client (Presentation)
+```
+
+Le pont Flutter est asynchrone. `callNative()` (`ticket-printer.js`) adopte la Promise renvoyée, et chaque
+`{ok:false}` devient un rejet qui porte `code` et `permanent`, comme avec le pont Kotlin.
+`showCustomerDisplay` reste synchrone, car `caisse-afficheur-client.blade.php` en lit le retour avec
+`JSON.parse`.
+
+Le pont ne répond qu'aux pages de l'origine configurée (`origin_not_allowed` sinon). Les liens vers une autre
+origine s'ouvrent dans le navigateur du système.
+
+## Compiler
+
+Prérequis sur ce poste : Flutter (`C:\dev\flutter`), SDK Android (`C:\dev\android-sdk`), JDK 21
+(`C:\Program Files\Android\openjdk\jdk-21.0.8`).
+
+```bash
+export JAVA_HOME="/c/Program Files/Android/openjdk/jdk-21.0.8" PATH="/c/dev/flutter/bin:$PATH"
+flutter test
+flutter build apk --release
+```
+
+L'APK est produit dans `build/app/outputs/flutter-apk/app-release.apk`.
+
+Signature : `android/key.properties` et `android/shopikaiss-release.jks` ne sont pas versionnés. **Il faut
+les sauvegarder**, car sans cette clé on ne peut plus publier de mise à jour installable par-dessus les APK
+déjà déployés. En leur absence, le build utilise la clé de debug.
+
+## iOS (plus tard)
+
+La partie Dart (caisse, pont, tickets HTML) est commune. Pour iOS, il restera à écrire :
+
+- l'implémentation native du canal `ci.khoga.shopikaiss/terminal`, aujourd'hui Android seulement. Sans
+  elle, les impressions passent par AirPrint ;
+- un pilote Bluetooth LE ou réseau pour les imprimantes ESC/POS. iOS n'a ni SPP ni USB hôte ;
+- la compilation sur un Mac avec Xcode et un compte Apple Developer.
