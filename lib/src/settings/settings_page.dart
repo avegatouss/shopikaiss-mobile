@@ -31,9 +31,11 @@ class _SettingsPageState extends State<SettingsPage> {
   late int _paper = _settings.paperWidth;
   late int _baud = _settings.serialBaud;
   late String _btAddress = _settings.bluetoothAddress;
+  late String _usbDevice = _settings.usbDevice;
 
   List<Map<String, dynamic>> _btDevices = const [];
   List<Map<String, dynamic>> _serialPorts = const [];
+  List<Map<String, dynamic>> _usbDevices = const [];
   String? _urlError;
   String? _message;
   bool _busy = false;
@@ -52,7 +54,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final ch = _session.channel;
     final bt = await ch.bluetoothDevices();
     final serial = await ch.serialPorts();
-    if (mounted) setState(() => (_btDevices = bt, _serialPorts = serial));
+    final usb = await ch.usbDevices();
+    if (mounted) setState(() => (_btDevices = bt, _serialPorts = serial, _usbDevices = usb));
   }
 
   @override
@@ -108,6 +111,22 @@ class _SettingsPageState extends State<SettingsPage> {
                 ],
                 onChanged: (v) => setState(() => _driver = v ?? 'auto'),
               ),
+              if (_driver == 'usb') ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _usbDevices.any((d) => '${d['vendorId']}:${d['productId']}' == _usbDevice) ? _usbDevice : '',
+                  decoration: const InputDecoration(labelText: 'Appareil USB', helperText: 'Choisir l\u2019appareil si l\u2019imprimante ne se déclare pas comme imprimante USB.'),
+                  items: [
+                    const DropdownMenuItem(value: '', child: Text('Première imprimante USB (automatique)')),
+                    for (final d in _usbDevices)
+                      DropdownMenuItem(
+                        value: '${d['vendorId']}:${d['productId']}',
+                        child: Text('${d['name']} — ${(d['vendorId'] as int).toRadixString(16).padLeft(4, '0')}:${(d['productId'] as int).toRadixString(16).padLeft(4, '0')}${d['printer'] == true ? ' (imprimante)' : ''}', overflow: TextOverflow.ellipsis),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() => _usbDevice = v ?? ''),
+                ),
+              ],
               if (_driver == 'bluetooth') ...[
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
@@ -216,6 +235,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ..serialPath = _serialPath.text.trim()
       ..serialBaud = _baud
       ..bluetoothAddress = _btAddress
+      ..usbDevice = _usbDevice
       ..adminCode = _code.text.trim();
     if (persist) {
       await _session.save();

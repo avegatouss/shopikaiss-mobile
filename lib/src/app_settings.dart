@@ -11,6 +11,7 @@ class AppSettings {
     required this.serialPath,
     required this.serialBaud,
     required this.bluetoothAddress,
+    required this.usbDevice,
     required this.adminCode,
   });
 
@@ -27,6 +28,9 @@ class AppSettings {
   int serialBaud;
   String bluetoothAddress;
 
+  /// Imprimante USB choisie, `vendorId:productId` en décimal ; vide = première interface de classe imprimante.
+  String usbDevice;
+
   /// Code protégeant l'accès aux réglages depuis la caisse (vide = pas de code).
   String adminCode;
 
@@ -40,6 +44,8 @@ class AppSettings {
         serialPath: serialPath,
         serialBaud: serialBaud,
         bluetoothAddress: bluetoothAddress,
+        usbVendorId: int.tryParse(usbDevice.split(':').first) ?? 0,
+        usbProductId: usbDevice.contains(':') ? int.tryParse(usbDevice.split(':').last) ?? 0 : 0,
       );
 
   static Future<AppSettings> load() async {
@@ -51,6 +57,7 @@ class AppSettings {
       serialPath: p.getString('serialPath') ?? '/dev/ttyS1',
       serialBaud: p.getInt('serialBaud') ?? 115200,
       bluetoothAddress: p.getString('bluetoothAddress') ?? '',
+      usbDevice: p.getString('usbDevice') ?? '',
       adminCode: p.getString('adminCode') ?? '',
     );
   }
@@ -63,6 +70,7 @@ class AppSettings {
     await p.setString('serialPath', serialPath);
     await p.setInt('serialBaud', serialBaud);
     await p.setString('bluetoothAddress', bluetoothAddress);
+    await p.setString('usbDevice', usbDevice);
     await p.setString('adminCode', adminCode);
   }
 }

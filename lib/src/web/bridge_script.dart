@@ -12,13 +12,18 @@ import 'dart:convert';
 ///   Kotlin ;
 /// - `showCustomerDisplay`, `hideCustomerDisplay`, `getDeviceInfo` restent **synchrones** :
 ///   `caisse-afficheur-client.blade.php` fait `JSON.parse(pont.showCustomerDisplay(url))`. L'ordre
-///   part en tâche de fond ; un échec tardif devient un toast `pos-toast`.
+///   part toujours au natif (qui mémorise l'URL et rouvre l'afficheur à son branchement, comme le pont
+///   Kotlin) ; un échec tardif devient un toast `pos-toast`.
 ///
 /// Il remplace aussi `window.print()` (fenêtre principale et cadres de même origine, y compris les
 /// `iframe srcdoc` des tickets) : le document est sérialisé et confié à l'application, qui l'envoie à
 /// l'imprimante intégrée (ticket `[data-paper-width]`) ou à la boîte d'impression Android (A4).
-String buildBridgeScript({required Map<String, dynamic> deviceInfo, required bool hasSecondaryDisplay}) {
-  final config = jsonEncode({'deviceInfo': deviceInfo, 'hasSecondaryDisplay': hasSecondaryDisplay});
+///
+/// Chaque appel porte [secret], tiré au lancement de l'application et présent seulement dans ce script
+/// du cadre principal : le gestionnaire Dart refuse un appel sans lui, donc une iframe d'une autre
+/// origine (qui voit `flutter_inappwebview.callHandler` mais pas ce script) ne peut pas imprimer.
+String buildBridgeScript({required Map<String, dynamic> deviceInfo, required String secret}) {
+  final config = jsonEncode({'deviceInfo': deviceInfo, 'secret': secret});
   return _template.replaceFirst('__SHOPIKAISS_CONFIG__', config);
 }
 
@@ -39,10 +44,27 @@ const String _template = r'''
     printer_not_configured: 'Aucune imprimante configurée dans l’application ShopiKaiss (réglages : 5 touchers en haut à gauche).',
     paper_out: 'Plus de papier dans l’imprimante.',
     cover_open: 'Capot de l’imprimante ouvert.',
+    printer_error: 'Imprimante en erreur : vérifiez-la puis réimprimez.',
+    printer_overheated: 'Tête d’impression trop chaude : patientez quelques secondes puis réimprimez.',
+    cutter_error: 'Massicot de l’imprimante bloqué.',
+    sunmi_service_timeout: 'Le service d’impression du terminal ne répond pas : réimprimez dans un instant.',
+    usb_printer_not_found: 'Imprimante USB introuvable : vérifiez qu’elle est branchée et allumée.',
+    usb_open_failed: 'Imprimante USB inaccessible : débranchez-la, rebranchez-la puis réimprimez.',
+    usb_claim_failed: 'Imprimante USB occupée par une autre application.',
+    usb_write_failed: 'Envoi à l’imprimante USB interrompu : réimprimez.',
+    bluetooth_absent: 'Ce terminal n’a pas de Bluetooth : choisissez un autre pilote dans les réglages de l’application.',
+    bluetooth_disabled: 'Bluetooth désactivé : activez-le sur le terminal puis réimprimez.',
+    bluetooth_printer_not_found: 'Imprimante Bluetooth non appairée (InnerPrinter introuvable) : appairez-la ou changez de pilote.',
     no_secondary_display: 'Aucun second écran détecté : vérifiez le câble de l’afficheur client.',
-    origin_not_allowed: 'Adresse de la caisse non autorisée par l’application ShopiKaiss (boutique à reconfigurer).'
+    display_invalid: 'Second écran inutilisable : rebranchez l’afficheur client.',
+    origin_not_allowed: 'Adresse de la caisse non autorisée par l’application ShopiKaiss (boutique à reconfigurer).',
+    unknown_method: 'Fonction inconnue de l’application ShopiKaiss : mettez l’application à jour.',
+    bridge_error: 'Erreur interne de l’application ShopiKaiss : réessayez, puis redémarrez l’application.'
   };
-  var PERMANENT = ['payload_not_base64', 'payload_too_large', 'sdk_absent', 'printer_not_configured', 'no_secondary_display', 'origin_not_allowed'];
+  /* Erreurs qu'un nouvel essai automatique ne corrigera pas (une intervention est nécessaire). */
+  var PERMANENT = ['payload_not_base64', 'payload_too_large', 'sdk_absent', 'printer_not_configured', 'paper_out', 'cover_open', 'cutter_error',
+    'usb_printer_not_found', 'usb_claim_failed', 'bluetooth_absent', 'bluetooth_disabled', 'bluetooth_printer_not_found',
+    'no_secondary_display', 'display_invalid', 'origin_not_allowed', 'unknown_method'];
 
   var ready = new Promise(function (resolve) {
     if (window.flutter_inappwebview && typeof window.flutter_inappwebview.callHandler === 'function') { resolve(); return; }
@@ -51,7 +73,7 @@ const String _template = r'''
 
   function call(method, args) {
     return ready
-      .then(function () { return window.flutter_inappwebview.callHandler('ShopiKaissNative', method, args || []); })
+      .then(function () { return window.flutter_inappwebview.callHandler('ShopiKaissNative', cfg.secret, method, args || []); })
       .then(function (raw) {
         var parsed = typeof raw === 'string' ? JSON.parse(raw) : (raw || {});
         if (parsed && parsed.ok === false) {
@@ -75,7 +97,6 @@ const String _template = r'''
     getPrinterStatus: function () { return call('getPrinterStatus'); },
     beep: function (ms) { return call('beep', [Number(ms) || 80]); },
     showCustomerDisplay: function (url) {
-      if (!cfg.hasSecondaryDisplay) { return '{"ok":false,"error":"no_secondary_display"}'; }
       call('showCustomerDisplay', [String(url || '')]).catch(function (error) { toast('Afficheur client non affiché : ' + error.message); });
       return '{"ok":true}';
     },

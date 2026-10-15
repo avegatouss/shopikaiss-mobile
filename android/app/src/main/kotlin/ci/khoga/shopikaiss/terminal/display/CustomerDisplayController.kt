@@ -94,7 +94,12 @@ class CustomerDisplayController(private val activity: Activity) : DisplayManager
     }
 
     override fun onDisplayRemoved(displayId: Int) {
-        if (presentation?.display?.displayId == displayId) dismiss()
+        val current = presentation ?: return
+        if (current.display.displayId != displayId) return
+        // La page de l'afficheur renouvelle son jeton (/etat puis replaceState) : on rouvrira son URL courante,
+        // pas celle du premier affichage, dont le jeton peut avoir expiré entre-temps.
+        current.currentUrl()?.takeIf { originOf(it) == allowedOrigin }?.let { requestedUrl = it }
+        dismiss()
     }
 
     override fun onDisplayChanged(displayId: Int) {}
@@ -128,6 +133,9 @@ class CustomerDisplayController(private val activity: Activity) : DisplayManager
         fun load(url: String) {
             if (webView?.url != url) webView?.loadUrl(url)
         }
+
+        /** URL affichée, y compris après un `history.replaceState` de la page. */
+        fun currentUrl(): String? = webView?.url
 
         fun destroyWebView() {
             webView?.apply {

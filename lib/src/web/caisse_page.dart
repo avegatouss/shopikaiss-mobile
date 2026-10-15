@@ -1,6 +1,8 @@
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:math';
 
+import 'package:flutter/foundation.dart' show debugPrint, kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
@@ -26,6 +28,9 @@ class CaissePage extends StatefulWidget {
 
 class _CaissePageState extends State<CaissePage> {
   static const _maxPayloadBytes = 512 * 1024;
+
+  /// Secret du pont (voir buildBridgeScript) : tiré une fois par écran, connu du seul script du cadre principal.
+  final String _bridgeSecret = _randomSecret();
 
   InAppWebViewController? _controller;
   late final HtmlPrinter _htmlPrinter = HtmlPrinter(widget.session.channel);
@@ -58,6 +63,8 @@ class _CaissePageState extends State<CaissePage> {
                 initialUrlRequest: URLRequest(url: WebUri(_settings.shopUrl)),
                 initialUserScripts: UnmodifiableListView([_userScript()]),
                 initialSettings: InAppWebViewSettings(
+                  // Inspectable (chrome://inspect) hors release : recette sur terminal avec le banc de test du pont.
+                  isInspectable: !kReleaseMode,
                   javaScriptEnabled: true,
                   domStorageEnabled: true,
                   databaseEnabled: true,
@@ -119,10 +126,14 @@ class _CaissePageState extends State<CaissePage> {
     );
   }
 
-  /// Appel de `ShopiKaissNative` : `[méthode, [arguments]]` → chaîne JSON du contrat n°4.
+  /// Appel de `ShopiKaissNative` : `[secret, méthode, [arguments]]` → chaîne JSON du contrat n°4.
   Future<String> _onBridgeCall(List<dynamic> data) async {
-    final method = data.isNotEmpty ? data[0] as String : '';
-    final args = data.length > 1 && data[1] is List ? data[1] as List : const [];
+    // Sans le secret, l'appel ne vient pas du script du cadre principal (iframe, autre page).
+    if (data.isEmpty || data[0] != _bridgeSecret) {
+      return jsonEncode({'ok': false, 'error': 'origin_not_allowed'});
+    }
+    final method = data.length > 1 && data[1] is String ? data[1] as String : '';
+    final args = data.length > 2 && data[2] is List ? data[2] as List : const [];
     final page = await _controller?.getUrl();
     if (originOf(page?.toString()) != _settings.origin) {
       return jsonEncode({'ok': false, 'error': 'origin_not_allowed'});
@@ -150,15 +161,17 @@ class _CaissePageState extends State<CaissePage> {
           result = NativeResult.failure('unknown_method');
       }
       return jsonEncode(result.data);
-    } catch (e) {
-      return jsonEncode({'ok': false, 'error': e.toString()});
+    } catch (e, stack) {
+      // Code stable pour la page (libellé « bridge_error ») ; le détail reste dans le journal.
+      debugPrint('Pont ShopiKaiss : $method en échec : $e\n$stack');
+      return jsonEncode({'ok': false, 'error': 'bridge_error'});
     }
   }
 
   UserScript _userScript() => UserScript(
         source: buildBridgeScript(
           deviceInfo: _session.info.toDeviceInfo(_session.appVersion),
-          hasSecondaryDisplay: _session.info.hasSecondaryDisplay,
+          secret: _bridgeSecret,
         ),
         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
         forMainFrameOnly: true,
@@ -198,7 +211,7 @@ class _CaissePageState extends State<CaissePage> {
     final previousUrl = _settings.shopUrl;
     await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SettingsPage(session: _session)));
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    // Le script injecté porte l'état des écrans (afficheur client) : il est remplacé, puis la page rechargée.
+    // Le script injecté porte la description du terminal (getDeviceInfo) : il est remplacé, puis la page rechargée.
     await _controller?.removeAllUserScripts();
     await _controller?.addUserScript(userScript: _userScript());
     if (previousUrl != _settings.shopUrl) {
@@ -267,4 +280,9 @@ class _ErrorPanel extends StatelessWidget {
       ),
     );
   }
+}
+
+String _randomSecret() {
+  final random = Random.secure();
+  return List.generate(24, (_) => random.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
 }
