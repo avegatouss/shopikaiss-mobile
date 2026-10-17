@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_settings.dart';
 import '../printer/escpos.dart';
@@ -27,6 +28,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _url = TextEditingController(text: _settings.shopUrl);
   late final TextEditingController _serialPath = TextEditingController(text: _settings.serialPath);
   late final TextEditingController _code = TextEditingController(text: _settings.adminCode);
+  late final TextEditingController _displayUrl = TextEditingController(text: _settings.customerDisplayUrl);
   late String _driver = _settings.driver;
   late int _paper = _settings.paperWidth;
   late int _baud = _settings.serialBaud;
@@ -38,6 +40,7 @@ class _SettingsPageState extends State<SettingsPage> {
   List<Map<String, dynamic>> _serialPorts = const [];
   List<Map<String, dynamic>> _usbDevices = const [];
   String? _urlError;
+  String? _displayUrlError;
   String? _message;
   bool _busy = false;
 
@@ -191,6 +194,34 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: theme.textTheme.bodySmall,
               ),
             ]),
+            _Section(title: 'Afficheur client', children: [
+              _Info('Second écran', _info.hasSecondaryDisplay ? 'détecté : la caisse y affiche le panier d’elle-même' : 'aucun : pas d’affichage client'),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _displayUrl,
+                keyboardType: TextInputType.url,
+                autocorrect: false,
+                decoration: InputDecoration(
+                  labelText: 'Lien imposé à l’afficheur (facultatif)',
+                  helperText: 'Vide = lien envoyé automatiquement par la caisse. Sinon, coller le lien « page web » copié dans '
+                      'ShopiKaiss, Réglages › Afficheur client (même adresse que la boutique).',
+                  helperMaxLines: 3,
+                  errorText: _displayUrlError,
+                  prefixIcon: const Icon(Icons.connected_tv),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(onPressed: _pasteDisplayUrl, icon: const Icon(Icons.content_paste), label: const Text('Coller')),
+                  if (_session.lastDisplayUrl?.isNotEmpty == true)
+                    OutlinedButton.icon(onPressed: _copyDisplayUrl, icon: const Icon(Icons.copy), label: const Text('Copier le lien reçu de la caisse')),
+                  FilledButton.tonalIcon(onPressed: _testDisplay, icon: const Icon(Icons.tv), label: const Text('Afficher sur le second écran')),
+                ],
+              ),
+            ]),
             _Section(title: 'Clavier', children: [
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
@@ -236,8 +267,13 @@ class _SettingsPageState extends State<SettingsPage> {
   /// Recopie le formulaire dans les réglages et reconfigure le pilote natif.
   Future<bool> _apply({bool persist = false}) async {
     final url = normalizeShopUrl(_url.text);
-    setState(() => _urlError = url == null && persist ? 'Adresse invalide' : null);
-    if (url == null && persist) return false;
+    final displayUrl = _displayUrl.text.trim();
+    final displayOk = displayUrl.isEmpty || originOf(displayUrl) == originOf(url ?? _settings.shopUrl);
+    setState(() {
+      _urlError = url == null && persist ? 'Adresse invalide' : null;
+      _displayUrlError = displayOk ? null : 'Le lien doit être sur la même adresse que la boutique.';
+    });
+    if ((url == null && persist) || !displayOk) return false;
     _settings
       ..shopUrl = url ?? _settings.shopUrl
       ..driver = _driver
@@ -247,6 +283,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ..bluetoothAddress = _btAddress
       ..usbDevice = _usbDevice
       ..hideSoftKeyboard = _hideKeyboard
+      ..customerDisplayUrl = displayUrl
       ..adminCode = _code.text.trim();
     if (persist) {
       await _session.save();
@@ -304,6 +341,32 @@ class _SettingsPageState extends State<SettingsPage> {
               '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
         ]));
         return result.ok ? 'Ticket de test envoyé à l’imprimante (${driverLabels[_session.activeDriver]}).' : _describe(result.error);
+      });
+
+  Future<void> _pasteDisplayUrl() async {
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text?.trim() ?? '';
+    if (text.isNotEmpty) setState(() => (_displayUrl.text = text, _displayUrlError = null));
+  }
+
+  Future<void> _copyDisplayUrl() async {
+    await Clipboard.setData(ClipboardData(text: _session.lastDisplayUrl ?? ''));
+    if (mounted) {
+      setState(() => _message = 'Lien de l’afficheur copié. Il expire vite (jeton de la caisse) : pour un lien durable, '
+          'utiliser le lien « page web » de Réglages › Afficheur client.');
+    }
+  }
+
+  void _testDisplay() => _run(() async {
+        if (!await _apply()) return 'Lien de l’afficheur refusé.';
+        final url = _session.displayUrlFor(_session.lastDisplayUrl ?? '');
+        if (url.isEmpty) return 'Aucun lien : collez un lien, ou ouvrez d’abord la caisse pour recevoir le sien.';
+        final result = await _session.channel.showCustomerDisplay(url, _settings.origin);
+        return result.ok ? 'Lien ouvert sur le second écran.' : switch (result.error) {
+          'no_secondary_display' => 'Aucun second écran détecté.',
+          'origin_not_allowed' => 'Lien refusé : il doit être sur la même adresse que la boutique.',
+          _ => _describe(result.error),
+        };
       });
 
   void _openDrawer() => _run(() async {

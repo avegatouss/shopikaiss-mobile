@@ -36,6 +36,7 @@ class _CaissePageState extends State<CaissePage> {
   late final HtmlPrinter _htmlPrinter = HtmlPrinter(widget.session.channel);
   double _progress = 0;
   String? _error;
+  String? _forcedDisplayShown;
   final List<DateTime> _cornerTaps = [];
 
   TerminalSession get _session => widget.session;
@@ -104,7 +105,10 @@ class _CaissePageState extends State<CaissePage> {
                   await launchUrl(request.url, mode: LaunchMode.externalApplication);
                 },
                 onProgressChanged: (controller, progress) => setState(() => _progress = progress / 100),
-                onLoadStop: (controller, url) => setState(() => _error = null),
+                onLoadStop: (controller, url) {
+                  setState(() => _error = null);
+                  _showForcedDisplay(url?.toString());
+                },
                 onReceivedError: (controller, request, error) {
                   if (request.isForMainFrame ?? true) setState(() => _error = error.description);
                 },
@@ -178,7 +182,9 @@ class _CaissePageState extends State<CaissePage> {
         case 'beep':
           result = await channel.beep(args.isNotEmpty ? (args[0] as num).toInt() : 80);
         case 'showCustomerDisplay':
-          result = await channel.showCustomerDisplay(args.isNotEmpty ? args[0] as String : '', _settings.origin);
+          final fromPage = args.isNotEmpty ? args[0] as String : '';
+          _session.lastDisplayUrl = fromPage;
+          result = await channel.showCustomerDisplay(_session.displayUrlFor(fromPage), _settings.origin);
         case 'hideCustomerDisplay':
           result = await channel.hideCustomerDisplay();
         case 'printHtml':
@@ -206,6 +212,15 @@ class _CaissePageState extends State<CaissePage> {
       );
 
   /// Bascule le clavier de l'écran : appliqué tout de suite à la page, mémorisé, et repris aux pages suivantes.
+  /// Lien d'afficheur imposé dans les réglages : ouvert sur le second écran dès la première page de la boutique chargée,
+  /// sans attendre la caisse (écran de connexion compris). Sans second écran, le natif répond `no_secondary_display` : rien.
+  Future<void> _showForcedDisplay(String? page) async {
+    final forced = _settings.customerDisplayUrl;
+    if (forced.isEmpty || forced == _forcedDisplayShown || originOf(page) != _settings.origin || !_session.info.hasSecondaryDisplay) return;
+    _forcedDisplayShown = forced;
+    await _session.channel.showCustomerDisplay(forced, _settings.origin);
+  }
+
   Future<void> _toggleSoftKeyboard() async {
     setState(() => _settings.hideSoftKeyboard = !_settings.hideSoftKeyboard);
     await _settings.save();

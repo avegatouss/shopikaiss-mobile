@@ -14,6 +14,7 @@ class AppSettings {
     required this.usbDevice,
     required this.adminCode,
     this.hideSoftKeyboard = false,
+    this.customerDisplayUrl = '',
   });
 
   /// Adresse de la caisse, ex. `https://boutique.exemple.ci/caisse`. Vide = pas encore configurée.
@@ -37,6 +38,10 @@ class AppSettings {
 
   /// Clavier de l'écran masqué sur les champs de la caisse (clavier externe ou douchette) : saisie physique intacte.
   bool hideSoftKeyboard;
+
+  /// Lien imposé à l'afficheur client (second écran), même origine que la boutique ; vide = lien envoyé par la caisse.
+  /// Typiquement le lien « page web » copié depuis Réglages › Afficheur client, pour vérifier l'affichage.
+  String customerDisplayUrl;
 
   bool get configured => shopUrl.isNotEmpty;
 
@@ -64,6 +69,7 @@ class AppSettings {
       usbDevice: p.getString('usbDevice') ?? '',
       adminCode: p.getString('adminCode') ?? '',
       hideSoftKeyboard: p.getBool('hideSoftKeyboard') ?? false,
+      customerDisplayUrl: p.getString('customerDisplayUrl') ?? '',
     );
   }
 
@@ -78,6 +84,7 @@ class AppSettings {
     await p.setString('usbDevice', usbDevice);
     await p.setString('adminCode', adminCode);
     await p.setBool('hideSoftKeyboard', hideSoftKeyboard);
+    await p.setString('customerDisplayUrl', customerDisplayUrl);
   }
 }
 

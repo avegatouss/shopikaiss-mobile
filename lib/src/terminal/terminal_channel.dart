@@ -40,6 +40,8 @@ class TerminalInfo {
         'model': label,
         'android': android,
         'displays': displays,
+        // Second écran présent : la caisse ouvre l'afficheur client d'elle-même (profil « automatique »).
+        'hasSecondaryDisplay': hasSecondaryDisplay,
       };
 
   static const unsupported = TerminalInfo({'manufacturer': '', 'model': 'Appareil', 'detectedDriver': 'none'});

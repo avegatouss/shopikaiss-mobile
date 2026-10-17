@@ -15,6 +15,12 @@ class TerminalSession extends ChangeNotifier {
   /// Pilote réellement retenu par le natif (`auto` résolu) : `sunmi`, `usb`, `bluetooth`, `serial`, `none`.
   String activeDriver = 'none';
 
+  /// Dernier lien d'afficheur client envoyé par la caisse (copiable depuis les réglages).
+  String? lastDisplayUrl;
+
+  /// Lien à ouvrir sur le second écran : celui imposé dans les réglages, sinon celui de la caisse.
+  String displayUrlFor(String fromPage) => settings.customerDisplayUrl.isNotEmpty ? settings.customerDisplayUrl : fromPage;
+
   final TerminalChannel channel = TerminalChannel.instance;
 
   static Future<TerminalSession> start() async {
