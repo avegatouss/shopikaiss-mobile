@@ -107,6 +107,14 @@ const String _template = r'''
     hideCustomerDisplay: function () { call('hideCustomerDisplay').catch(function () {}); return '{"ok":true}'; },
     getDeviceInfo: function () { return JSON.stringify(cfg.deviceInfo); }
   };
+  /* Largeur du rouleau pour le serveur (TerminalReceiptFormat) : les tickets HTML sont mis en page à 58 ou 80 mm. */
+  try {
+    var rouleau = cfg.deviceInfo && cfg.deviceInfo.printer && cfg.deviceInfo.printer.available ? Number(cfg.deviceInfo.printer.paperWidth) : 0;
+    if (rouleau === 58 || rouleau === 80) {
+      document.cookie = 'sk_terminal_paper=' + rouleau + '; path=/; max-age=31536000; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');
+    }
+  } catch (e) { /* cookies refusés : largeur de la boutique */ }
+
   try {
     Object.defineProperty(window, 'ShopiKaissNative', { value: Object.freeze(api), writable: false, configurable: false });
   } catch (e) { window.ShopiKaissNative = api; }

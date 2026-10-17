@@ -54,9 +54,10 @@ class HtmlPrinter {
     // ignore: deprecated_member_use
     final pdf = await Printing.convertHtml(format: format, html: job.html, baseUrl: job.baseUrl);
     final bitmap = MonoBitmap(dots);
-    final dpi = dots * 25.4 / job.paperWidth;
+    // Rendu à deux fois la résolution de la tête puis moyenne 2×2 (MonoBitmap) : contours nets, sans traits empâtés.
+    final dpi = 2 * dots * 25.4 / job.paperWidth;
     await for (final page in Printing.raster(pdf, dpi: dpi)) {
-      bitmap.addPage(page.pixels, page.width, page.height);
+      bitmap.addPage(page.pixels, page.width, page.height, threshold: 150);
     }
     if (bitmap.height == 0) return NativeResult.failure('ticket_vide');
     return channel.printRaw(EscPos.raster(bitmap.bits, dots, bitmap.height));

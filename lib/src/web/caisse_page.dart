@@ -213,7 +213,11 @@ class _CaissePageState extends State<CaissePage> {
 
   UserScript _userScript() => UserScript(
         source: buildBridgeScript(
-          deviceInfo: _session.info.toDeviceInfo(_session.appVersion),
+          deviceInfo: {
+            ..._session.info.toDeviceInfo(_session.appVersion),
+            // Imprimante de l'application : la caisse l'utilise d'office (ESC/POS texte) si son profil n'en déclare aucune.
+            'printer': {'available': _session.hasPrinter, 'driver': _session.activeDriver, 'paperWidth': _session.rollWidth},
+          },
           secret: _bridgeSecret,
           hideSoftKeyboard: _settings.hideSoftKeyboard,
         ),
