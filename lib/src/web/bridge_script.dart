@@ -116,8 +116,8 @@ const String _template = r'''
   var EDITABLE = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]):not([type=range]):not([type=color]), textarea, [contenteditable=""], [contenteditable=true]';
   var clavierMasque = !!cfg.hideSoftKeyboard;
   function masquer(el) {
-    if (el.hasAttribute('data-sk-inputmode')) { return; }
-    el.setAttribute('data-sk-inputmode', el.getAttribute('inputmode') || '');
+    if (el.getAttribute('inputmode') === 'none' && el.hasAttribute('data-sk-inputmode')) { return; }
+    if (!el.hasAttribute('data-sk-inputmode')) { el.setAttribute('data-sk-inputmode', el.getAttribute('inputmode') || ''); }
     el.setAttribute('inputmode', 'none');
   }
   function retablir(el) {
@@ -131,16 +131,31 @@ const String _template = r'''
     for (var i = 0; i < liste.length; i++) { clavierMasque ? masquer(liste[i]) : retablir(liste[i]); }
     if (racine && racine.matches && racine.matches(EDITABLE)) { clavierMasque ? masquer(racine) : retablir(racine); }
   }
+  // Livewire (morph) remet à chaque rendu les attributs du serveur : `inputmode` et le repère disparaissent des champs
+  // existants (le clavier revenait après quelques produits). Les changements d'attribut sont donc surveillés aussi.
   new MutationObserver(function (mutations) {
     if (!clavierMasque) { return; }
     for (var i = 0; i < mutations.length; i++) {
-      for (var j = 0; j < mutations[i].addedNodes.length; j++) {
-        var noeud = mutations[i].addedNodes[j];
+      var m = mutations[i];
+      if (m.type === 'attributes') {
+        if (m.target.matches && m.target.matches(EDITABLE) && m.target.getAttribute('inputmode') !== 'none') { masquer(m.target); }
+        continue;
+      }
+      for (var j = 0; j < m.addedNodes.length; j++) {
+        var noeud = m.addedNodes[j];
         if (noeud.nodeType === 1) { appliquerClavier(noeud); }
       }
     }
-  }).observe(document.documentElement, { childList: true, subtree: true });
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['inputmode', 'data-sk-inputmode', 'type', 'contenteditable'] });
   document.addEventListener('DOMContentLoaded', function () { appliquerClavier(document); });
+  // Filet : un champ pris au focus sans `inputmode="none"` est masqué puis repris, avant que le clavier ne s'ouvre.
+  document.addEventListener('focusin', function (e) {
+    var el = e.target;
+    if (!clavierMasque || !el || !el.matches || !el.matches(EDITABLE) || el.getAttribute('inputmode') === 'none') { return; }
+    masquer(el);
+    el.blur();
+    setTimeout(function () { el.focus({ preventScroll: true }); }, 0);
+  }, true);
   window.__skClavier = function (masque) {
     clavierMasque = !!masque;
     appliquerClavier(document);
