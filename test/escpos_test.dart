@@ -42,11 +42,18 @@ void main() {
       return out;
     }
 
-    test('seuil, ordre des bits et suppression du blanc final', () {
+    test('seuil, ordre des bits et suppression du blanc de tête et de fin', () {
       // 16 px de large, 6 lignes : seule la ligne 1 porte deux points noirs (x=0 et x=9).
       final bitmap = MonoBitmap(16)..addPage(rgba(16, 6, (x, y) => y == 1 && (x == 0 || x == 9)), 16, 6);
-      expect(bitmap.height, 2);
-      expect(bitmap.bits, [0x00, 0x00, 0x80, 0x40]);
+      expect(bitmap.height, 1);
+      expect(bitmap.bits, [0x80, 0x40]);
+    });
+
+    test('longue bande blanche avant le ticket rognée (impression du navigateur)', () {
+      // 300 lignes blanches puis 3 lignes de ticket, puis 50 lignes blanches : seules les 3 lignes restent.
+      final bitmap = MonoBitmap(8)..addPage(rgba(8, 353, (x, y) => y >= 300 && y < 303), 8, 353);
+      expect(bitmap.height, 3);
+      expect(bitmap.bits, [0xFF, 0xFF, 0xFF]);
     });
 
     test('mise à l’échelle à la largeur de l’imprimante', () {

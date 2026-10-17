@@ -119,6 +119,33 @@ class _CaissePageState extends State<CaissePage> {
                 height: 56,
                 child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _onCornerTap),
               ),
+              // Clavier de l'écran : masqué pour un clavier externe ou une douchette, rétabli d'un toucher.
+              Positioned(
+                left: 8,
+                bottom: 8,
+                child: Opacity(
+                  opacity: 0.75,
+                  child: Material(
+                    color: _settings.hideSoftKeyboard ? const Color(0xFF0F3E2E) : Colors.white,
+                    shape: const CircleBorder(side: BorderSide(color: Color(0xFF0F3E2E))),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _toggleSoftKeyboard,
+                      child: Tooltip(
+                        message: _settings.hideSoftKeyboard ? 'Afficher le clavier de l’écran' : 'Masquer le clavier de l’écran',
+                        child: SizedBox.square(
+                          dimension: 40,
+                          child: Icon(
+                            _settings.hideSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard,
+                            size: 22,
+                            color: _settings.hideSoftKeyboard ? Colors.white : const Color(0xFF0F3E2E),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -172,10 +199,29 @@ class _CaissePageState extends State<CaissePage> {
         source: buildBridgeScript(
           deviceInfo: _session.info.toDeviceInfo(_session.appVersion),
           secret: _bridgeSecret,
+          hideSoftKeyboard: _settings.hideSoftKeyboard,
         ),
         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
         forMainFrameOnly: true,
       );
+
+  /// Bascule le clavier de l'écran : appliqué tout de suite à la page, mémorisé, et repris aux pages suivantes.
+  Future<void> _toggleSoftKeyboard() async {
+    setState(() => _settings.hideSoftKeyboard = !_settings.hideSoftKeyboard);
+    await _settings.save();
+    await _controller?.evaluateJavascript(source: 'window.__skClavier && window.__skClavier(${_settings.hideSoftKeyboard})');
+    await _controller?.removeAllUserScripts();
+    await _controller?.addUserScript(userScript: _userScript());
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Text(_settings.hideSoftKeyboard
+            ? 'Clavier de l’écran masqué : le clavier externe et la douchette restent actifs.'
+            : 'Clavier de l’écran rétabli.'),
+      ));
+  }
 
   Future<NativeResult> _printEscPos(String? base64) async {
     if (base64 == null || base64.isEmpty) return NativeResult.failure('payload_not_base64');

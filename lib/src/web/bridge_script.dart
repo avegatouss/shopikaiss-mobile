@@ -22,8 +22,12 @@ import 'dart:convert';
 /// Chaque appel porte [secret], tiré au lancement de l'application et présent seulement dans ce script
 /// du cadre principal : le gestionnaire Dart refuse un appel sans lui, donc une iframe d'une autre
 /// origine (qui voit `flutter_inappwebview.callHandler` mais pas ce script) ne peut pas imprimer.
-String buildBridgeScript({required Map<String, dynamic> deviceInfo, required String secret}) {
-  final config = jsonEncode({'deviceInfo': deviceInfo, 'secret': secret});
+///
+/// [hideSoftKeyboard] : `inputmode="none"` posé sur les champs (et les champs ajoutés ensuite) pour qu'Android n'ouvre
+/// pas son clavier virtuel ; un clavier externe ou une douchette saisissent toujours. `window.__skClavier(bool)` bascule
+/// sans recharger la page (bouton ⌨ de l'application).
+String buildBridgeScript({required Map<String, dynamic> deviceInfo, required String secret, bool hideSoftKeyboard = false}) {
+  final config = jsonEncode({'deviceInfo': deviceInfo, 'secret': secret, 'hideSoftKeyboard': hideSoftKeyboard});
   return _template.replaceFirst('__SHOPIKAISS_CONFIG__', config);
 }
 
@@ -106,6 +110,45 @@ const String _template = r'''
   try {
     Object.defineProperty(window, 'ShopiKaissNative', { value: Object.freeze(api), writable: false, configurable: false });
   } catch (e) { window.ShopiKaissNative = api; }
+
+  /* ---------------------------------------------------------------- clavier de l'écran */
+
+  var EDITABLE = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]):not([type=range]):not([type=color]), textarea, [contenteditable=""], [contenteditable=true]';
+  var clavierMasque = !!cfg.hideSoftKeyboard;
+  function masquer(el) {
+    if (el.hasAttribute('data-sk-inputmode')) { return; }
+    el.setAttribute('data-sk-inputmode', el.getAttribute('inputmode') || '');
+    el.setAttribute('inputmode', 'none');
+  }
+  function retablir(el) {
+    if (!el.hasAttribute('data-sk-inputmode')) { return; }
+    var avant = el.getAttribute('data-sk-inputmode');
+    if (avant) { el.setAttribute('inputmode', avant); } else { el.removeAttribute('inputmode'); }
+    el.removeAttribute('data-sk-inputmode');
+  }
+  function appliquerClavier(racine) {
+    var liste = (racine || document).querySelectorAll ? (racine || document).querySelectorAll(EDITABLE) : [];
+    for (var i = 0; i < liste.length; i++) { clavierMasque ? masquer(liste[i]) : retablir(liste[i]); }
+    if (racine && racine.matches && racine.matches(EDITABLE)) { clavierMasque ? masquer(racine) : retablir(racine); }
+  }
+  new MutationObserver(function (mutations) {
+    if (!clavierMasque) { return; }
+    for (var i = 0; i < mutations.length; i++) {
+      for (var j = 0; j < mutations[i].addedNodes.length; j++) {
+        var noeud = mutations[i].addedNodes[j];
+        if (noeud.nodeType === 1) { appliquerClavier(noeud); }
+      }
+    }
+  }).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener('DOMContentLoaded', function () { appliquerClavier(document); });
+  window.__skClavier = function (masque) {
+    clavierMasque = !!masque;
+    appliquerClavier(document);
+    // Champ déjà actif : le quitter puis y revenir applique le nouveau mode immédiatement.
+    var actif = document.activeElement;
+    if (actif && actif.matches && actif.matches(EDITABLE)) { actif.blur(); setTimeout(function () { actif.focus(); }, 30); }
+    return clavierMasque;
+  };
 
   /* ---------------------------------------------------------------- window.print() */
 

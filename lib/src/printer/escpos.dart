@@ -71,12 +71,15 @@ class MonoBitmap {
   int height = 0;
 
   /// Ajoute une page : mise à l'échelle sur [widthDots] (moyenne des pixels couverts), seuil de
-  /// luminance, puis suppression des lignes blanches finales (bas de page vide).
+  /// luminance, puis suppression des lignes blanches de tête et de fin. Le rendu « impression » du
+  /// navigateur laisse en haut de page l'espace des éléments masqués de la caisse : sans ce rognage,
+  /// une longue bande blanche sortait avant le ticket.
   void addPage(Uint8List rgba, int width, int height, {int threshold = 170}) {
     if (width <= 0 || height <= 0) return;
     final scale = width / widthDots;
     final targetHeight = (height / scale).floor();
     final page = Uint8List(targetHeight * widthBytes);
+    var firstInk = -1;
     var lastInk = -1;
     for (var ty = 0; ty < targetHeight; ty++) {
       final sy0 = (ty * scale).floor();
@@ -98,13 +101,14 @@ class MonoBitmap {
         }
         if (count > 0 && sum ~/ count < threshold) {
           page[ty * widthBytes + (tx >> 3)] |= 0x80 >> (tx & 7);
+          if (firstInk < 0) firstInk = ty;
           lastInk = ty;
         }
       }
     }
     if (lastInk < 0) return;
-    final keep = lastInk + 1;
-    _rows.add(Uint8List.sublistView(page, 0, keep * widthBytes));
+    final keep = lastInk - firstInk + 1;
+    _rows.add(Uint8List.sublistView(page, firstInk * widthBytes, (lastInk + 1) * widthBytes));
     this.height += keep;
   }
 

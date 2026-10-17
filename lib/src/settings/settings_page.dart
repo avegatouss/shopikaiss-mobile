@@ -32,6 +32,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late int _baud = _settings.serialBaud;
   late String _btAddress = _settings.bluetoothAddress;
   late String _usbDevice = _settings.usbDevice;
+  late bool _hideKeyboard = _settings.hideSoftKeyboard;
 
   List<Map<String, dynamic>> _btDevices = const [];
   List<Map<String, dynamic>> _serialPorts = const [];
@@ -190,6 +191,15 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: theme.textTheme.bodySmall,
               ),
             ]),
+            _Section(title: 'Clavier', children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _hideKeyboard,
+                onChanged: (v) => setState(() => _hideKeyboard = v),
+                title: const Text('Masquer le clavier de l’écran dans la caisse'),
+                subtitle: const Text('Pour un clavier externe ou une douchette : les champs restent saisissables au clavier physique. Le bouton ⌨ en bas à gauche de la caisse bascule à tout moment.'),
+              ),
+            ]),
             _Section(title: 'Sécurité', children: [
               TextField(
                 controller: _code,
@@ -236,6 +246,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ..serialBaud = _baud
       ..bluetoothAddress = _btAddress
       ..usbDevice = _usbDevice
+      ..hideSoftKeyboard = _hideKeyboard
       ..adminCode = _code.text.trim();
     if (persist) {
       await _session.save();

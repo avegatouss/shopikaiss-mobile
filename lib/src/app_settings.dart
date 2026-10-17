@@ -13,6 +13,7 @@ class AppSettings {
     required this.bluetoothAddress,
     required this.usbDevice,
     required this.adminCode,
+    this.hideSoftKeyboard = false,
   });
 
   /// Adresse de la caisse, ex. `https://boutique.exemple.ci/caisse`. Vide = pas encore configurée.
@@ -33,6 +34,9 @@ class AppSettings {
 
   /// Code protégeant l'accès aux réglages depuis la caisse (vide = pas de code).
   String adminCode;
+
+  /// Clavier de l'écran masqué sur les champs de la caisse (clavier externe ou douchette) : saisie physique intacte.
+  bool hideSoftKeyboard;
 
   bool get configured => shopUrl.isNotEmpty;
 
@@ -59,6 +63,7 @@ class AppSettings {
       bluetoothAddress: p.getString('bluetoothAddress') ?? '',
       usbDevice: p.getString('usbDevice') ?? '',
       adminCode: p.getString('adminCode') ?? '',
+      hideSoftKeyboard: p.getBool('hideSoftKeyboard') ?? false,
     );
   }
 
@@ -72,6 +77,7 @@ class AppSettings {
     await p.setString('bluetoothAddress', bluetoothAddress);
     await p.setString('usbDevice', usbDevice);
     await p.setString('adminCode', adminCode);
+    await p.setBool('hideSoftKeyboard', hideSoftKeyboard);
   }
 }
 
