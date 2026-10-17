@@ -46,7 +46,17 @@ class _CaissePageState extends State<CaissePage> {
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _applyKeyboardBlock();
   }
+
+  @override
+  void dispose() {
+    _session.channel.setSoftKeyboardBlocked(false);
+    super.dispose();
+  }
+
+  /// Blocage Android du clavier de l'écran, seulement pendant la caisse : les réglages et le code d'accès en ont besoin.
+  Future<void> _applyKeyboardBlock() => _session.channel.setSoftKeyboardBlocked(_settings.hideSoftKeyboard);
 
   @override
   Widget build(BuildContext context) {
@@ -224,6 +234,7 @@ class _CaissePageState extends State<CaissePage> {
   Future<void> _toggleSoftKeyboard() async {
     setState(() => _settings.hideSoftKeyboard = !_settings.hideSoftKeyboard);
     await _settings.save();
+    await _applyKeyboardBlock();
     await _controller?.evaluateJavascript(source: 'window.__skClavier && window.__skClavier(${_settings.hideSoftKeyboard})');
     await _controller?.removeAllUserScripts();
     await _controller?.addUserScript(userScript: _userScript());
@@ -267,10 +278,16 @@ class _CaissePageState extends State<CaissePage> {
   }
 
   Future<void> _openSettings() async {
-    if (_settings.adminCode.isNotEmpty && !await _askCode()) return;
-    if (!mounted) return;
     final previousUrl = _settings.shopUrl;
-    await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SettingsPage(session: _session)));
+    await _session.channel.setSoftKeyboardBlocked(false);
+    try {
+      if (_settings.adminCode.isNotEmpty && !await _askCode()) return;
+      if (!mounted) return;
+      await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SettingsPage(session: _session)));
+    } finally {
+      await _applyKeyboardBlock();
+    }
+    if (!mounted) return;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     // Le script injecté porte la description du terminal (getDeviceInfo) : il est remplacé, puis la page rechargée.
     await _controller?.removeAllUserScripts();

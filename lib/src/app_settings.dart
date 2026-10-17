@@ -13,7 +13,7 @@ class AppSettings {
     required this.bluetoothAddress,
     required this.usbDevice,
     required this.adminCode,
-    this.hideSoftKeyboard = false,
+    this.hideSoftKeyboard = true,
     this.customerDisplayUrl = '',
   });
 
@@ -37,6 +37,8 @@ class AppSettings {
   String adminCode;
 
   /// Clavier de l'écran masqué sur les champs de la caisse (clavier externe ou douchette) : saisie physique intacte.
+  /// Masqué par défaut ; le bouton ⌨ de la caisse l'autorise. Préférence `softKeyboardAllowed` (l'ancienne clé
+  /// `hideSoftKeyboard`, enregistrée à false par défaut, n'est plus lue).
   bool hideSoftKeyboard;
 
   /// Lien imposé à l'afficheur client (second écran), même origine que la boutique ; vide = lien envoyé par la caisse.
@@ -68,7 +70,7 @@ class AppSettings {
       bluetoothAddress: p.getString('bluetoothAddress') ?? '',
       usbDevice: p.getString('usbDevice') ?? '',
       adminCode: p.getString('adminCode') ?? '',
-      hideSoftKeyboard: p.getBool('hideSoftKeyboard') ?? false,
+      hideSoftKeyboard: !(p.getBool('softKeyboardAllowed') ?? false),
       customerDisplayUrl: p.getString('customerDisplayUrl') ?? '',
     );
   }
@@ -83,7 +85,7 @@ class AppSettings {
     await p.setString('bluetoothAddress', bluetoothAddress);
     await p.setString('usbDevice', usbDevice);
     await p.setString('adminCode', adminCode);
-    await p.setBool('hideSoftKeyboard', hideSoftKeyboard);
+    await p.setBool('softKeyboardAllowed', !hideSoftKeyboard);
     await p.setString('customerDisplayUrl', customerDisplayUrl);
   }
 }

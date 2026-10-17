@@ -228,7 +228,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 value: _hideKeyboard,
                 onChanged: (v) => setState(() => _hideKeyboard = v),
                 title: const Text('Masquer le clavier de l’écran dans la caisse'),
-                subtitle: const Text('Pour un clavier externe ou une douchette : les champs restent saisissables au clavier physique. Le bouton ⌨ en bas à gauche de la caisse bascule à tout moment.'),
+                subtitle: const Text('Activé par défaut : le clavier Android ne s’ouvre plus au toucher des champs de la caisse (bloqué aussi par Android). '
+                    'Le clavier externe et la douchette saisissent toujours. Le bouton ⌨ en bas à gauche de la caisse l’autorise à tout moment.'),
               ),
             ]),
             _Section(title: 'Sécurité', children: [

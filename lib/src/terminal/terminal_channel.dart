@@ -112,6 +112,9 @@ class TerminalChannel {
 
   Future<NativeResult> hideCustomerDisplay() => _call('hideCustomerDisplay');
 
+  /// Blocage Android du clavier de l'écran : refermé dès qu'il s'ouvre (filet de `inputmode="none"`).
+  Future<NativeResult> setSoftKeyboardBlocked(bool blocked) => _call('setSoftKeyboardBlocked', {'blocked': blocked});
+
   /// Imprimantes Bluetooth appairées : `[{name, address}]`.
   Future<List<Map<String, dynamic>>> bluetoothDevices() => _list('bluetoothDevices');
 
