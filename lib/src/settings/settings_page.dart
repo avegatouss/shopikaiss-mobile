@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_settings.dart';
+import '../offline/offline_settings_section.dart';
 import '../printer/escpos.dart';
 import '../terminal/terminal_channel.dart';
 import '../terminal/terminal_session.dart';
@@ -232,6 +233,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     'Le clavier externe et la douchette saisissent toujours. Le bouton ⌨ en bas à gauche de la caisse l’autorise à tout moment.'),
               ),
             ]),
+            OfflineSettingsSection(session: _session),
             _Section(title: 'Sécurité', children: [
               TextField(
                 controller: _code,

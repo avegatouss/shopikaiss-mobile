@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
@@ -10,6 +11,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../app_settings.dart';
+import '../offline/engine.dart';
+import '../offline/offline_register_page.dart';
 import '../printer/html_printer.dart';
 import '../settings/settings_page.dart';
 import '../terminal/terminal_channel.dart';
@@ -39,20 +42,99 @@ class _CaissePageState extends State<CaissePage> {
   String? _forcedDisplayShown;
   final List<DateTime> _cornerTaps = [];
 
+  /// Surveillance de la boutique pendant la caisse web (ADR-421) : deux tests réseau manqués de suite = hors ligne.
+  Timer? _watch;
+  int _missedProbes = 0;
+  bool _offlineShown = false;
+
   TerminalSession get _session => widget.session;
   AppSettings get _settings => _session.settings;
+  OfflineEngine get _offline => _session.offline;
 
   @override
   void initState() {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _applyKeyboardBlock();
+    _startWatch();
   }
 
   @override
   void dispose() {
+    _watch?.cancel();
     _session.channel.setSoftKeyboardBlocked(false);
     super.dispose();
+  }
+
+  void _startWatch() {
+    _watch?.cancel();
+    if (!_offline.paired) return;
+    final seconds = _offline.snapshot?.rules.probeSeconds ?? 20;
+    _watch = Timer.periodic(Duration(seconds: seconds), (_) => _checkShop());
+    unawaited(_checkShop());
+  }
+
+  /// Test de la boutique : en ligne, envoie la file et rafraîchit le catalogue ; injoignable deux fois, bascule.
+  Future<void> _checkShop() async {
+    if (_offlineShown || !_offline.paired) return;
+    final ok = await _offline.probe();
+    if (ok) {
+      _missedProbes = 0;
+      if (_offline.pendingCount > 0) await _offline.sync();
+      if (_offline.snapshotStale) await _offline.refreshSnapshot();
+      return;
+    }
+    if (!_offline.lastUnreachable) return;
+    _missedProbes++;
+    if (_missedProbes >= 2) {
+      final automatic = _offline.snapshot?.rules.automaticSwitch ?? true;
+      if (automatic && _offline.blockReason == null) {
+        await _openOffline();
+      } else if (mounted) {
+        setState(() => _error ??= 'La boutique ne répond plus.');
+      }
+    }
+  }
+
+  /// Caisse hors ligne en plein écran ; au retour de la connexion (file envoyée), la caisse web est rechargée.
+  Future<void> _openOffline() async {
+    if (_offlineShown || !mounted) return;
+    _offlineShown = true;
+    await _session.channel.setSoftKeyboardBlocked(false);
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (context) => OfflineRegisterPage(
+        engine: _offline,
+        session: _session,
+        onBackOnline: () => Navigator.of(context).pop(),
+      ),
+    ));
+    _offlineShown = false;
+    _missedProbes = 0;
+    await _applyKeyboardBlock();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    _reload();
+  }
+
+  /// Clé web de l'application en cookie sur la boutique : exigée quand le terminal est réservé à l'application (ADR-421).
+  Future<void> _applyDeviceCookie() async {
+    final origin = _settings.origin;
+    if (origin.isEmpty) return;
+    final cookies = CookieManager.instance();
+    final key = _offline.webToken;
+    if (key == null) {
+      await cookies.deleteCookie(url: WebUri(origin), name: 'sk_appareil');
+      return;
+    }
+    await cookies.setCookie(
+      url: WebUri(origin),
+      name: 'sk_appareil',
+      value: key,
+      path: '/',
+      isSecure: origin.startsWith('https://'),
+      isHttpOnly: true,
+      expiresDate: DateTime.now().add(const Duration(days: 3650)).millisecondsSinceEpoch,
+    );
   }
 
   /// Blocage Android du clavier de l'écran, seulement pendant la caisse : les réglages et le code d'accès en ont besoin.
@@ -89,8 +171,9 @@ class _CaissePageState extends State<CaissePage> {
                   thirdPartyCookiesEnabled: true,
                   applicationNameForUserAgent: 'ShopiKaissTerminal/${_session.appVersion}',
                 ),
-                onWebViewCreated: (controller) {
+                onWebViewCreated: (controller) async {
                   _controller = controller;
+                  await _applyDeviceCookie();
                   controller.addJavaScriptHandler(handlerName: bridgeHandlerName, callback: _onBridgeCall);
                 },
                 shouldOverrideUrlLoading: (controller, action) async {
@@ -120,11 +203,21 @@ class _CaissePageState extends State<CaissePage> {
                   _showForcedDisplay(url?.toString());
                 },
                 onReceivedError: (controller, request, error) {
-                  if (request.isForMainFrame ?? true) setState(() => _error = error.description);
+                  if (request.isForMainFrame ?? true) {
+                    setState(() => _error = error.description);
+                    unawaited(_checkShop());
+                  }
                 },
               ),
               if (_progress < 1) LinearProgressIndicator(value: _progress, minHeight: 3),
-              if (_error != null) _ErrorPanel(message: _error!, onRetry: _reload, onSettings: _openSettings),
+              if (_error != null)
+                _ErrorPanel(
+                  message: _error!,
+                  onRetry: _reload,
+                  onSettings: _openSettings,
+                  onOffline: _offline.paired && _offline.snapshot != null ? _openOffline : null,
+                  offlineBlocked: _offline.paired ? _offline.blockReason : null,
+                ),
               // Accès aux réglages : 5 touchers en 3 s dans le coin haut gauche.
               Positioned(
                 left: 0,
@@ -293,6 +386,8 @@ class _CaissePageState extends State<CaissePage> {
     }
     if (!mounted) return;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    await _applyDeviceCookie();
+    _startWatch();
     // Le script injecté porte la description du terminal (getDeviceInfo) : il est remplacé, puis la page rechargée.
     await _controller?.removeAllUserScripts();
     await _controller?.addUserScript(userScript: _userScript());
@@ -327,11 +422,15 @@ class _CaissePageState extends State<CaissePage> {
 }
 
 class _ErrorPanel extends StatelessWidget {
-  const _ErrorPanel({required this.message, required this.onRetry, required this.onSettings});
+  const _ErrorPanel({required this.message, required this.onRetry, required this.onSettings, this.onOffline, this.offlineBlocked});
 
   final String message;
   final VoidCallback onRetry;
   final VoidCallback onSettings;
+
+  /// Caisse hors ligne disponible (application appairée, catalogue reçu).
+  final VoidCallback? onOffline;
+  final String? offlineBlocked;
 
   @override
   Widget build(BuildContext context) {
@@ -348,10 +447,21 @@ class _ErrorPanel extends StatelessWidget {
               Text('Boutique injoignable', style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
               Text(message, textAlign: TextAlign.center),
+              if (offlineBlocked != null) ...[
+                const SizedBox(height: 8),
+                Text(offlineBlocked!, textAlign: TextAlign.center, style: const TextStyle(color: Color(0xFFB45309))),
+              ],
               const SizedBox(height: 24),
               Wrap(
                 spacing: 12,
                 children: [
+                  if (onOffline != null)
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(backgroundColor: const Color(0xFFB45309)),
+                      onPressed: onOffline,
+                      icon: const Icon(Icons.cloud_off),
+                      label: const Text('Caisse hors ligne'),
+                    ),
                   FilledButton.icon(onPressed: onRetry, icon: const Icon(Icons.refresh), label: const Text('Réessayer')),
                   OutlinedButton.icon(onPressed: onSettings, icon: const Icon(Icons.settings), label: const Text('Réglages')),
                 ],

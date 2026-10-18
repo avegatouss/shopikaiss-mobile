@@ -18,6 +18,13 @@ expose **le même contrat** `window.ShopiKaissNative`, donc **aucune modificatio
 5. Pour revenir aux réglages depuis la caisse : **5 touchers en 3 s dans le coin haut gauche**. Un code
    d'accès peut être demandé (facultatif).
 
+## Caisse hors ligne (branche `hors-ligne/caisse-mobile-2026-10-18`)
+
+Appairée à son terminal (code généré dans ShopiKaiss, Paramètres › Caisse hors ligne), l'application continue de vendre
+quand la boutique ne répond plus : dernier catalogue reçu, PIN du caissier, ticket `HL-<terminal>-<séquence>`, ventes
+gardées en SQLite et envoyées au retour de la connexion, où chacune devient une vente ordinaire. Plusieurs terminaux d'une
+même boutique vendent hors ligne indépendamment. Détails, tests et recette : [docs/CAISSE-HORS-LIGNE.md](docs/CAISSE-HORS-LIGNE.md).
+
 ## Adaptation au terminal
 
 | Terminal | Pilote choisi en « Automatique » |

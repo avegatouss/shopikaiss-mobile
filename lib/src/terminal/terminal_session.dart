@@ -2,13 +2,19 @@ import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../app_settings.dart';
+import '../offline/api.dart';
+import '../offline/engine.dart';
+import '../offline/store.dart';
 import 'terminal_channel.dart';
 
 /// État partagé de l'application : réglages, terminal détecté, pilote d'imprimante actif.
 class TerminalSession extends ChangeNotifier {
-  TerminalSession._(this.settings, this.info, this.appVersion);
+  TerminalSession._(this.settings, this.info, this.appVersion, this.offline);
 
   final AppSettings settings;
+
+  /// Caisse hors ligne de ce terminal (ADR-421) : appairage, catalogue, file des ventes.
+  final OfflineEngine offline;
   TerminalInfo info;
   final String appVersion;
 
@@ -26,7 +32,12 @@ class TerminalSession extends ChangeNotifier {
   static Future<TerminalSession> start() async {
     final settings = await AppSettings.load();
     final package = await PackageInfo.fromPlatform();
-    final session = TerminalSession._(settings, TerminalInfo.unsupported, package.version);
+    final offline = OfflineEngine(
+      store: await SqfliteOfflineStore.open(),
+      transport: HttpRegisterTransport(appVersion: package.version),
+    );
+    if (settings.configured) await offline.load(settings.origin);
+    final session = TerminalSession._(settings, TerminalInfo.unsupported, package.version, offline);
     await session.refresh();
     return session;
   }
@@ -49,6 +60,7 @@ class TerminalSession extends ChangeNotifier {
 
   Future<void> save() async {
     await settings.save();
+    if (settings.configured) await offline.load(settings.origin);
     await refresh();
   }
 }
