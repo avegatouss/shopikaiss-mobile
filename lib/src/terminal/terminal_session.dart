@@ -1,15 +1,20 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../app_settings.dart';
 import '../offline/api.dart';
 import '../offline/engine.dart';
 import '../offline/store.dart';
+import '../ui/screen_profile.dart';
 import 'terminal_channel.dart';
 
 /// État partagé de l'application : réglages, terminal détecté, pilote d'imprimante actif.
 class TerminalSession extends ChangeNotifier {
   TerminalSession._(this.settings, this.info, this.appVersion, this.offline);
+
+  /// Session sans canal natif, pour les tests d'écran.
+  @visibleForTesting
+  TerminalSession.forTest({required this.settings, required this.offline, this.info = TerminalInfo.unsupported, this.appVersion = 'test'});
 
   final AppSettings settings;
 
@@ -43,6 +48,12 @@ class TerminalSession extends ChangeNotifier {
   }
 
   bool get hasPrinter => activeDriver != 'none';
+
+  /// Disposition des écrans de l'application pour ce terminal (réglage, sinon taille réelle de l'écran).
+  ScreenLayout layoutOf(BuildContext context) =>
+      resolveScreenLayout(setting: settings.screenLayout, logicalSize: MediaQuery.sizeOf(context), nativeInches: info.screenInches);
+
+  bool isCompact(BuildContext context) => layoutOf(context) == ScreenLayout.compact;
 
   /// Largeur du rouleau : réglage explicite, sinon celle que le pilote connaît (0 = inconnue).
   int get rollWidth => settings.paperWidth > 0 ? settings.paperWidth : info.detectedPaper;

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 
 import '../app_settings.dart';
 import '../offline/offline_settings_section.dart';
+import '../ui/screen_profile.dart';
 import '../printer/escpos.dart';
 import '../terminal/terminal_channel.dart';
 import '../terminal/terminal_session.dart';
@@ -36,6 +37,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late String _btAddress = _settings.bluetoothAddress;
   late String _usbDevice = _settings.usbDevice;
   late bool _hideKeyboard = _settings.hideSoftKeyboard;
+  late String _screenLayout = _settings.screenLayout;
 
   List<Map<String, dynamic>> _btDevices = const [];
   List<Map<String, dynamic>> _serialPorts = const [];
@@ -233,6 +235,26 @@ class _SettingsPageState extends State<SettingsPage> {
                     'Le clavier externe et la douchette saisissent toujours. Le bouton ⌨ en bas à gauche de la caisse l’autorise à tout moment.'),
               ),
             ]),
+            _Section(title: 'Affichage', children: [
+              DropdownButtonFormField<String>(
+                initialValue: screenLayoutLabels.containsKey(_screenLayout) ? _screenLayout : 'auto',
+                decoration: const InputDecoration(labelText: 'Disposition de l’écran', prefixIcon: Icon(Icons.smartphone)),
+                items: [for (final e in screenLayoutLabels.entries) DropdownMenuItem(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis))],
+                onChanged: (v) => setState(() => _screenLayout = v ?? 'auto'),
+              ),
+              const SizedBox(height: 8),
+              Builder(builder: (context) {
+                final size = MediaQuery.sizeOf(context);
+                final inches = displayedInches(size, _info.screenInches);
+                final layout = resolveScreenLayout(setting: _screenLayout, logicalSize: size, nativeInches: _info.screenInches);
+                return Text(
+                  'Écran ${_info.screenInches >= 3 ? 'mesuré' : 'estimé'} : ${inches.toStringAsFixed(1).replaceAll('.', ',')} pouces '
+                  '(${size.width.round()} × ${size.height.round()} points) → disposition ${layout == ScreenLayout.compact ? 'compacte' : 'standard'}. '
+                  'La caisse hors ligne s’adapte aux petits téléphones ; la caisse web suit la mise en page du site.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                );
+              }),
+            ]),
             OfflineSettingsSection(session: _session),
             _Section(title: 'Sécurité', children: [
               TextField(
@@ -286,6 +308,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ..bluetoothAddress = _btAddress
       ..usbDevice = _usbDevice
       ..hideSoftKeyboard = _hideKeyboard
+      ..screenLayout = _screenLayout
       ..customerDisplayUrl = displayUrl
       ..adminCode = _code.text.trim();
     if (persist) {

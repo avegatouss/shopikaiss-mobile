@@ -22,6 +22,24 @@ shopikaiss-web (migration `2026_10_18_100000_create_offline_register_tables`).
 Arrêt de la vente hors ligne : durée dépassée depuis le dernier contact (72 h), file pleine (500), licence expirée,
 vente désactivée par la boutique, application révoquée.
 
+## Petits écrans (téléphones de moins de 6 pouces)
+
+L'application mesure la diagonale réelle de l'écran (densité physique déclarée par Android) :
+
+| Écran | Disposition |
+|---|---|
+| téléphone de moins de 6 pouces | **compacte** |
+| téléphone de 6 à 7 pouces, terminal ou tablette de 7-8 pouces, terminal de 14 pouces | **standard**, inchangée |
+
+Disposition compacte de la caisse hors ligne : bandeau sur une ligne (reconnexion en icône, journal et changement de
+caissier dans un menu), articles et panier en onglets avec une barre fixe « Panier · total · Encaisser », tuiles plus
+étroites, paiement en plein écran avec les boutons en bas, écrans PIN, ouverture de session et blocage qui défilent.
+
+Décidé : un appareil dont le côté le plus court atteint 600 points (tablette, terminal) n'est jamais compact en
+automatique ; une mesure invraisemblable (hors 3 à 30 pouces, densité mal déclarée par certains terminaux) est ignorée
+au profit de la largeur logique (compacte sous 360 points). Réglable : Réglages › Affichage › Disposition de l'écran
+(Automatique, Compacte, Standard), avec la taille détectée affichée. La caisse web, elle, suit la mise en page du site.
+
 ## Mise en service
 
 1. Installer l'APK, saisir l'adresse de la boutique (inchangé).
@@ -50,7 +68,7 @@ lib/src/offline/
 ```bash
 export JAVA_HOME="/c/Program Files/Android/openjdk/jdk-21.0.8" PATH="/c/dev/flutter/bin:$PATH"
 flutter analyze
-flutter test                       # 22 tests, dont 306 paniers calculés par le serveur
+flutter test                       # 29 tests, dont 306 paniers et le rendu de la caisse hors ligne à 4, 5, 6,5, 8 et 14 pouces calculés par le serveur
 flutter build apk --release
 ```
 

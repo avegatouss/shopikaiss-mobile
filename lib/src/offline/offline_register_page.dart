@@ -37,7 +37,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   bool _probing = false;
   String? _lastSyncMessage;
 
+  /// Disposition compacte (téléphone de moins de 6 pouces) : onglet affiché, 0 = articles, 1 = panier.
+  int _compactTab = 0;
+
   OfflineEngine get _engine => widget.engine;
+
+  /// Petit téléphone : bandeau resserré, articles et panier en onglets, paiement en plein écran. Les terminaux et
+  /// tablettes (6 à 8 pouces, 14 pouces) gardent la disposition standard.
+  bool get _compact => widget.session.isCompact(context);
   Snapshot? get _snapshot => _engine.snapshot;
 
   @override
@@ -113,14 +120,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         body: SafeArea(
           child: Column(
             children: [
-              _banner(),
+              _compact ? _compactBanner() : _banner(),
               Expanded(
                 child: reason != null || snapshot == null
-                    ? _Blocked(message: reason ?? 'Catalogue absent.', onRetry: () => _tryOnline())
+                    ? _scrollable(_Blocked(message: reason ?? 'Catalogue absent.', onRetry: () => _tryOnline()))
                     : _operator == null
-                    ? _OperatorLogin(engine: _engine, onLogged: (o) => setState(() => _operator = o))
+                    ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() => _operator = o)))
                     : !_engine.sessionOpen
-                    ? _SessionOpening(engine: _engine, operator: _operator!, onOpened: () => setState(() {}))
+                    ? _scrollable(_SessionOpening(engine: _engine, operator: _operator!, onOpened: () => setState(() {})))
                     : _register(snapshot),
               ),
             ],
@@ -182,7 +189,115 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     );
   }
 
+  /// Petit téléphone : l'écran défile (clavier ouvert, écran court) ; disposition standard inchangée.
+  Widget _scrollable(Widget child) => _compact ? SingleChildScrollView(padding: const EdgeInsets.symmetric(vertical: 12), child: child) : child;
+
+  /// Bandeau d'un petit téléphone : une ligne, reconnexion en icône, caissier et journal dans un menu.
+  Widget _compactBanner() {
+    final remaining = _engine.remaining;
+    return Material(
+      color: _offline,
+      child: Padding(
+        padding: const EdgeInsets.only(left: 10),
+        child: Row(
+          children: [
+            const Icon(Icons.cloud_off, color: Colors.white, size: 20),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                'Hors ligne${remaining != null ? ' · reste ${remaining.inHours} h' : ''} · ${_engine.pendingCount} en attente',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            IconButton(
+              tooltip: 'Reconnecter',
+              color: Colors.white,
+              onPressed: _engine.syncing ? null : () => _tryOnline(),
+              icon: _engine.syncing
+                  ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.wifi_find),
+            ),
+            PopupMenuButton<String>(
+              iconColor: Colors.white,
+              onSelected: (choice) {
+                if (choice == 'journal') {
+                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PendingOperationsPage(engine: _engine)));
+                } else if (choice == 'caissier') {
+                  setState(() => _operator = null);
+                }
+              },
+              itemBuilder: (context) => [
+                if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
+                const PopupMenuItem(value: 'journal', child: Text('Opérations hors ligne')),
+                if (_operator != null)
+                  PopupMenuItem(
+                    value: 'caissier',
+                    enabled: _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true),
+                    child: Text('Changer de caissier (${_operator!.name})'),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Petit téléphone : articles ou panier en plein écran, barre fixe avec le total et « Encaisser ».
+  Widget _compactRegister(Snapshot snapshot) {
+    final totals = saleTotals([for (final l in _cart) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded);
+    final count = _cart.length;
+    return Column(
+      children: [
+        Expanded(
+          child: IndexedStack(index: _compactTab, children: [_catalogue(snapshot), _cartPanel(snapshot, footer: false)]),
+        ),
+        Material(
+          key: const ValueKey('compact-checkout-bar'),
+          color: Colors.white,
+          elevation: 8,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Row(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () => setState(() => _compactTab = _compactTab == 0 ? 1 : 0),
+                  icon: Badge(
+                    isLabelVisible: count > 0 && _compactTab == 0,
+                    label: Text('$count'),
+                    child: Icon(_compactTab == 0 ? Icons.shopping_cart : Icons.grid_view),
+                  ),
+                  label: Text(_compactTab == 0 ? 'Panier' : 'Articles'),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: FittedBox(
+                    alignment: Alignment.centerRight,
+                    fit: BoxFit.scaleDown,
+                    child: Text(
+                      formatFcfa(totals.payable),
+                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _brand),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: _brand, minimumSize: const Size(0, 48)),
+                  onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
+                  child: const Text('Encaisser'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _register(Snapshot snapshot) {
+    if (_compact) return _compactRegister(snapshot);
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 760;
@@ -208,8 +323,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   Widget _catalogue(Snapshot snapshot) {
     final results = snapshot.search(_search.text);
+    final compact = _compact;
     return Padding(
-      padding: const EdgeInsets.all(12),
+      padding: EdgeInsets.all(compact ? 8 : 12),
       child: Column(
         children: [
           TextField(
@@ -232,12 +348,19 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             child: results.isEmpty
                 ? const Center(child: Text('Aucun article.'))
                 : GridView.builder(
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 220,
-                      mainAxisExtent: 92,
-                      crossAxisSpacing: 8,
-                      mainAxisSpacing: 8,
-                    ),
+                    gridDelegate: compact
+                        ? const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 180,
+                            mainAxisExtent: 84,
+                            crossAxisSpacing: 6,
+                            mainAxisSpacing: 6,
+                          )
+                        : const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 220,
+                            mainAxisExtent: 92,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                          ),
                     itemCount: results.length,
                     itemBuilder: (context, index) => _productTile(results[index]),
                   ),
@@ -270,15 +393,27 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               const Spacer(),
               Row(
                 children: [
-                  Text(
-                    formatFcfa(product.price),
-                    style: const TextStyle(color: _brand, fontWeight: FontWeight.bold),
+                  // Prix réduit plutôt que coupé si la tuile est étroite (gros montant, petit écran).
+                  Flexible(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        formatFcfa(product.price),
+                        style: const TextStyle(color: _brand, fontWeight: FontWeight.bold),
+                      ),
+                    ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 4),
                   if (!product.unlimitedStock)
-                    Text(
-                      'stock ${formatMicros(stock.abs())}${stock.isNegative ? ' (−)' : ''}',
-                      style: TextStyle(fontSize: 11, color: low ? Colors.red : Colors.black54),
+                    Flexible(
+                      child: Text(
+                        'stock ${formatMicros(stock.abs())}${stock.isNegative ? ' (−)' : ''}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: TextStyle(fontSize: 11, color: low ? Colors.red : Colors.black54),
+                      ),
                     ),
                 ],
               ),
@@ -335,7 +470,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _searchFocus.requestFocus();
   }
 
-  Widget _cartPanel(Snapshot snapshot) {
+  /// [footer] : total et bouton « Encaisser » sous le panier (la disposition compacte les porte dans sa barre fixe).
+  Widget _cartPanel(Snapshot snapshot, {bool footer = true}) {
+    final compact = _compact;
     final totals = saleTotals([for (final l in _cart) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded);
     return Material(
       color: Colors.white,
@@ -366,6 +503,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             IconButton(
+                              visualDensity: compact ? VisualDensity.compact : null,
                               icon: const Icon(Icons.remove_circle_outline),
                               onPressed: () => setState(() {
                                 line.quantity -= BigInt.from(1000000);
@@ -375,6 +513,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                             ),
                             Text(formatFcfa(line.total), style: const TextStyle(fontWeight: FontWeight.w600)),
                             IconButton(
+                              visualDensity: compact ? VisualDensity.compact : null,
                               icon: const Icon(Icons.add_circle_outline),
                               onPressed: () => setState(() => line.quantity += BigInt.from(1000000)),
                             ),
@@ -384,37 +523,38 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     },
                   ),
           ),
-          const Divider(height: 1),
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              children: [
-                if (snapshot.store.hasVat)
-                  Row(children: [Text(snapshot.store.vatIncluded ? 'dont TVA' : 'TVA'), const Spacer(), Text(formatFcfa(totals.vat))]),
-                Row(
-                  children: [
-                    const Text('Total', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                    const Spacer(),
-                    Text(
-                      formatFcfa(totals.payable),
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: _brand),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: _brand),
-                    onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
-                    icon: const Icon(Icons.payments),
-                    label: const Text('Encaisser', style: TextStyle(fontSize: 18)),
+          if (footer) const Divider(height: 1),
+          if (footer)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: [
+                  if (snapshot.store.hasVat)
+                    Row(children: [Text(snapshot.store.vatIncluded ? 'dont TVA' : 'TVA'), const Spacer(), Text(formatFcfa(totals.vat))]),
+                  Row(
+                    children: [
+                      const Text('Total', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                      const Spacer(),
+                      Text(
+                        formatFcfa(totals.payable),
+                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: _brand),
+                      ),
+                    ],
                   ),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(backgroundColor: _brand),
+                      onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
+                      icon: const Icon(Icons.payments),
+                      label: const Text('Encaisser', style: TextStyle(fontSize: 18)),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -473,11 +613,18 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Future<void> _checkout(Snapshot snapshot, int payable) async {
-    final payments = await showDialog<List<CartPayment>>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable),
-    );
+    final payments = _compact
+        ? await Navigator.of(context).push<List<CartPayment>>(
+            MaterialPageRoute(
+              fullscreenDialog: true,
+              builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable, fullScreen: true),
+            ),
+          )
+        : await showDialog<List<CartPayment>>(
+            context: context,
+            barrierDismissible: false,
+            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable),
+          );
     if (payments == null || !mounted) return;
     final OfflineOperation operation;
     try {
@@ -760,10 +907,13 @@ class _SessionOpeningState extends State<_SessionOpening> {
 
 /// Encaissement : un ou plusieurs moyens autorisés hors ligne ; les espèces calculent la monnaie.
 class _PaymentDialog extends StatefulWidget {
-  const _PaymentDialog({required this.snapshot, required this.payable});
+  const _PaymentDialog({required this.snapshot, required this.payable, this.fullScreen = false});
 
   final Snapshot snapshot;
   final int payable;
+
+  /// Petit téléphone : page plein écran qui défile, boutons en bas (au lieu d'une boîte de dialogue).
+  final bool fullScreen;
 
   @override
   State<_PaymentDialog> createState() => _PaymentDialogState();
@@ -794,91 +944,107 @@ class _PaymentDialogState extends State<_PaymentDialog> {
     final cash = _method.isCash;
     final received = int.tryParse(_received.text);
     final amount = int.tryParse(_amount.text) ?? 0;
-    return AlertDialog(
-      title: Text('Encaisser ${formatFcfa(widget.payable)}'),
-      content: SizedBox(
-        width: 420,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            for (final p in _payments)
-              ListTile(
-                dense: true,
-                title: Text(p.method.name),
-                subtitle: p.change > 0 ? Text('reçu ${formatFcfa(p.received!)} · monnaie ${formatFcfa(p.change)}') : null,
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(formatFcfa(p.amount)),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      onPressed: () => setState(() {
-                        _payments.remove(p);
-                        _reset();
-                      }),
-                    ),
-                  ],
+    final title = Text('Encaisser ${formatFcfa(widget.payable)}');
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final p in _payments)
+          ListTile(
+            dense: true,
+            title: Text(p.method.name),
+            subtitle: p.change > 0 ? Text('reçu ${formatFcfa(p.received!)} · monnaie ${formatFcfa(p.change)}') : null,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(formatFcfa(p.amount)),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => setState(() {
+                    _payments.remove(p);
+                    _reset();
+                  }),
                 ),
-              ),
-            if (_remaining > 0) ...[
-              Wrap(
-                spacing: 6,
-                children: [
-                  for (final m in widget.snapshot.methods)
-                    ChoiceChip(label: Text(m.name), selected: m.code == _method.code, onSelected: (_) => setState(() => _method = m)),
-                ],
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _amount,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: InputDecoration(labelText: 'Montant réglé (reste ${formatFcfa(_remaining)})'),
-                onChanged: (_) => setState(() {}),
-              ),
-              if (cash)
-                TextField(
-                  controller: _received,
-                  autofocus: true,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: InputDecoration(
-                    labelText: 'Espèces reçues',
-                    helperText: received != null && received > amount ? 'Monnaie : ${formatFcfa(received - amount)}' : null,
-                  ),
-                  onChanged: (_) => setState(() {}),
-                  onSubmitted: (_) => _addPayment(),
-                ),
-              if (cash)
-                Wrap(
-                  spacing: 6,
-                  children: [
-                    for (final note in _quickNotes(amount))
-                      ActionChip(label: Text(formatFcfa(note)), onPressed: () => setState(() => _received.text = '$note')),
-                  ],
-                ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(onPressed: _addPayment, icon: const Icon(Icons.add), label: const Text('Ajouter ce paiement')),
+              ],
+            ),
+          ),
+        if (_remaining > 0) ...[
+          Wrap(
+            spacing: 6,
+            children: [
+              for (final m in widget.snapshot.methods)
+                ChoiceChip(label: Text(m.name), selected: m.code == _method.code, onSelected: (_) => setState(() => _method = m)),
             ],
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _amount,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            decoration: InputDecoration(labelText: 'Montant réglé (reste ${formatFcfa(_remaining)})'),
+            onChanged: (_) => setState(() {}),
+          ),
+          if (cash)
+            TextField(
+              controller: _received,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                labelText: 'Espèces reçues',
+                helperText: received != null && received > amount ? 'Monnaie : ${formatFcfa(received - amount)}' : null,
               ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
-        FilledButton(
-          onPressed: () {
-            if (_remaining > 0 && !_addPayment()) return;
-            if (_remaining == 0) Navigator.pop(context, _payments);
-          },
-          child: const Text('Valider la vente'),
-        ),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _addPayment(),
+            ),
+          if (cash)
+            Wrap(
+              spacing: 6,
+              children: [
+                for (final note in _quickNotes(amount))
+                  ActionChip(label: Text(formatFcfa(note)), onPressed: () => setState(() => _received.text = '$note')),
+              ],
+            ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(onPressed: _addPayment, icon: const Icon(Icons.add), label: const Text('Ajouter ce paiement')),
+        ],
+        if (_error != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(_error!, style: const TextStyle(color: Colors.red)),
+          ),
       ],
+    );
+    final cancel = TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler'));
+    final validate = FilledButton(
+      onPressed: () {
+        if (_remaining > 0 && !_addPayment()) return;
+        if (_remaining == 0) Navigator.pop(context, _payments);
+      },
+      child: const Text('Valider la vente'),
+    );
+    if (widget.fullScreen) {
+      return Scaffold(
+        appBar: AppBar(title: title, automaticallyImplyLeading: false),
+        body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: content),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Row(
+              children: [
+                Expanded(child: cancel),
+                const SizedBox(width: 8),
+                Expanded(flex: 2, child: SizedBox(height: 52, child: validate)),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return AlertDialog(
+      title: title,
+      content: SizedBox(width: 420, child: content),
+      actions: [cancel, validate],
     );
   }
 

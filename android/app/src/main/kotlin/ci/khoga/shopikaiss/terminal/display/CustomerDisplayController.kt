@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.DisplayMetrics
 import android.view.Display
 import android.view.WindowManager
 import android.webkit.WebResourceRequest
@@ -46,6 +47,20 @@ class CustomerDisplayController(private val activity: Activity) : DisplayManager
     fun displays(): List<Map<String, Int>> = displayManager.displays.map {
         val mode = it.mode
         mapOf("id" to it.displayId, "width" to mode.physicalWidth, "height" to mode.physicalHeight)
+    }
+
+    /**
+     * Diagonale de l'écran principal en pouces, d'après la densité physique déclarée par l'écran (0 si inconnue).
+     * Sert à la disposition compacte des petits téléphones (moins de 6 pouces) ; certains terminaux déclarent une
+     * densité fausse : l'application ne retient la valeur que si elle est plausible.
+     */
+    fun mainScreenInches(): Double {
+        val main = displayManager.getDisplay(Display.DEFAULT_DISPLAY) ?: return 0.0
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        main.getRealMetrics(metrics)
+        if (metrics.xdpi <= 0f || metrics.ydpi <= 0f) return 0.0
+        return Math.hypot(metrics.widthPixels / metrics.xdpi.toDouble(), metrics.heightPixels / metrics.ydpi.toDouble())
     }
 
     /** Renvoie null si l'affichage est lancé, sinon le code d'erreur pour la page. */

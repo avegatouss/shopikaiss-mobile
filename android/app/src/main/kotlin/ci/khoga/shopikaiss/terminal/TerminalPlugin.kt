@@ -79,6 +79,7 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
             "sdk" to Build.VERSION.SDK_INT,
             "displays" to onUiBlocking { display.displays() },
             "hasSecondaryDisplay" to onUiBlocking { display.secondaryDisplay() != null },
+            "screenInches" to onUiBlocking { display.mainScreenInches() },
             "detectedDriver" to detected,
             "detectedLabel" to PrinterManager.label(detected),
             "detectedPaper" to paper,

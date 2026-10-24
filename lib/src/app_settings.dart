@@ -15,6 +15,7 @@ class AppSettings {
     required this.adminCode,
     this.hideSoftKeyboard = true,
     this.customerDisplayUrl = '',
+    this.screenLayout = 'auto',
   });
 
   /// Adresse de la caisse, ex. `https://boutique.exemple.ci/caisse`. Vide = pas encore configurée.
@@ -45,6 +46,10 @@ class AppSettings {
   /// Typiquement le lien « page web » copié depuis Réglages › Afficheur client, pour vérifier l'affichage.
   String customerDisplayUrl;
 
+  /// Disposition des écrans de l'application : `auto` (compacte sur un téléphone de moins de 6 pouces), `compact`,
+  /// `standard`. Les terminaux et tablettes (6 à 8 pouces, 14 pouces…) restent en `standard` en automatique.
+  String screenLayout;
+
   bool get configured => shopUrl.isNotEmpty;
 
   /// Origine autorisée (`https://hôte[:port]`) : seule origine qui reçoit le pont natif.
@@ -72,6 +77,7 @@ class AppSettings {
       adminCode: p.getString('adminCode') ?? '',
       hideSoftKeyboard: !(p.getBool('softKeyboardAllowed') ?? false),
       customerDisplayUrl: p.getString('customerDisplayUrl') ?? '',
+      screenLayout: p.getString('screenLayout') ?? 'auto',
     );
   }
 
@@ -87,6 +93,7 @@ class AppSettings {
     await p.setString('adminCode', adminCode);
     await p.setBool('softKeyboardAllowed', !hideSoftKeyboard);
     await p.setString('customerDisplayUrl', customerDisplayUrl);
+    await p.setString('screenLayout', screenLayout);
   }
 }
 

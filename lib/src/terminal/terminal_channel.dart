@@ -31,6 +31,9 @@ class TerminalInfo {
   String get detectedDriver => (raw['detectedDriver'] ?? 'none') as String;
   String get detectedLabel => (raw['detectedLabel'] ?? 'Aucune imprimante intégrée détectée') as String;
 
+  /// Diagonale de l'écran principal en pouces mesurée par Android, 0 si inconnue.
+  double get screenInches => (raw['screenInches'] as num?)?.toDouble() ?? 0;
+
   /// Largeur de papier connue du pilote (58/80), 0 si inconnue.
   int get detectedPaper => (raw['detectedPaper'] ?? 0) as int;
 
