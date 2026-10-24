@@ -140,7 +140,8 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
 
     private fun requestBluetoothPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            activity.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), REQUEST_BLUETOOTH)
+            // Les deux d'un coup (même autorisation « Appareils à proximité ») : CONNECT pour imprimer, SCAN pour cancelDiscovery.
+            activity.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN), REQUEST_BLUETOOTH)
         }
     }
 

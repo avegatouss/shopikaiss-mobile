@@ -65,7 +65,7 @@ class PrinterManager(
      * Détection de l'imprimante intégrée, du plus sûr au moins sûr :
      * 1. service d'impression SUNMI installé ;
      * 2. appareil USB de classe imprimante (iMin, terminaux Rockchip à imprimante USB interne…) ;
-     * 3. imprimante virtuelle Bluetooth « InnerPrinter » appairée.
+     * 3. imprimante Bluetooth appairée : « InnerPrinter » virtuelle, sinon imprimante portable (PT-210, MPT-II…).
      * Le port série n'est jamais choisi d'office : écrire sur le mauvais `/dev/ttyS*` peut piloter
      * un autre périphérique de la carte. Il se règle à la main.
      */
@@ -74,7 +74,7 @@ class PrinterManager(
         return when {
             SunmiPrinterDriver.isAvailable(ctx) -> PrinterDriver.SUNMI
             hasUsbPrinter(ctx) -> PrinterDriver.USB
-            BluetoothPrinterDriver.hasInnerPrinter(ctx) -> PrinterDriver.BLUETOOTH
+            BluetoothPrinterDriver.hasPairedPrinter(ctx) -> PrinterDriver.BLUETOOTH
             else -> PrinterDriver.NONE
         }
     }
@@ -83,7 +83,7 @@ class PrinterManager(
         fun label(id: String): String = when (id) {
             PrinterDriver.SUNMI -> "Imprimante intégrée SUNMI"
             PrinterDriver.USB -> "Imprimante USB interne"
-            PrinterDriver.BLUETOOTH -> "Imprimante Bluetooth « InnerPrinter »"
+            PrinterDriver.BLUETOOTH -> "Imprimante Bluetooth appairée"
             PrinterDriver.SERIAL -> "Port série"
             else -> "Aucune imprimante intégrée détectée"
         }

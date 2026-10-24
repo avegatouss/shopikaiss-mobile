@@ -59,6 +59,7 @@ const String _template = r'''
     bluetooth_absent: 'Ce terminal n’a pas de Bluetooth : choisissez un autre pilote dans les réglages de l’application.',
     bluetooth_disabled: 'Bluetooth désactivé : activez-le sur le terminal puis réimprimez.',
     bluetooth_printer_not_found: 'Imprimante Bluetooth non appairée (InnerPrinter introuvable) : appairez-la ou changez de pilote.',
+    bluetooth_connect_failed: 'Imprimante Bluetooth injoignable : allumez-la, rapprochez-la du terminal puis réimprimez.',
     no_secondary_display: 'Aucun second écran détecté : vérifiez le câble de l’afficheur client.',
     display_invalid: 'Second écran inutilisable : rebranchez l’afficheur client.',
     origin_not_allowed: 'Adresse de la caisse non autorisée par l’application ShopiKaiss (boutique à reconfigurer).',
