@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'src/diagnostics.dart';
 import 'src/settings/settings_page.dart';
 import 'src/terminal/terminal_session.dart';
 import 'src/web/caisse_page.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  ErrorJournal.install();
   final session = await TerminalSession.start();
   runApp(ShopiKaissApp(session: session));
 }

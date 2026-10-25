@@ -292,7 +292,12 @@ class _CaissePageState extends State<CaissePage> {
           result = await channel.hideCustomerDisplay();
         case 'printHtml':
           final job = HtmlPrintJob.fromMap(Map<String, dynamic>.from(args.isNotEmpty ? args[0] as Map : const {}));
-          result = await _htmlPrinter.print(job, hasPrinter: _session.hasPrinter, rollWidth: _session.rollWidth);
+          result = await _htmlPrinter.print(
+            job,
+            hasPrinter: _session.hasPrinter,
+            rollWidth: _session.rollWidth,
+            printPage: () async => await _controller?.printCurrentPage() != null,
+          );
         default:
           result = NativeResult.failure('unknown_method');
       }

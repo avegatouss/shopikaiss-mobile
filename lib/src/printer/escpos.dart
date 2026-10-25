@@ -112,5 +112,12 @@ class MonoBitmap {
     this.height += keep;
   }
 
+  /// Ajoute des lignes déjà au format de [bits] (page convertie dans un autre fil).
+  void append(Uint8List bits, int rows) {
+    if (rows <= 0) return;
+    _rows.add(bits);
+    height += rows;
+  }
+
   Uint8List get bits => _rows.toBytes();
 }

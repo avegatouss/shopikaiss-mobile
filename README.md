@@ -48,6 +48,16 @@ main (58 ou 80 mm).
 | Tiroir, état, bip | `openDrawer`, `getPrinterStatus`, `beep` du contrat |
 | Afficheur client (`native-presentation`) | `Presentation` Android sur le second écran |
 
+### Tickets HTML (X, Z…) : mémoire bornée
+
+Les documents imprimés par `window.print()` au format ticket (X et Z de la caisse) sont rendus en image puis envoyés en
+ESC/POS. Jusqu'à la 1.1.2, la page faisait toujours 1,20 m de haut à deux fois la résolution de la tête : environ 80 Mo
+d'image, et Android fermait l'application faute de mémoire. Depuis la 1.1.3, la page prend la hauteur réelle mesurée par
+la caisse et chaque page rastérisée reste sous 6 millions de pixels (`ticketRasterPlan`) ; la conversion noir et blanc
+se fait hors du fil de l'écran. Les documents A4 demandés par la page elle-même (Z journalier, rapports) passent par le
+service d'impression natif d'Android sur la vue affichée. Réglages › Diagnostic montre la dernière panne native et les
+erreurs récentes (à copier pour l'assistance).
+
 ## Architecture
 
 ```

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app_settings.dart';
+import '../diagnostics.dart';
 import '../offline/offline_settings_section.dart';
 import '../ui/screen_profile.dart';
 import '../printer/escpos.dart';
@@ -256,6 +257,7 @@ class _SettingsPageState extends State<SettingsPage> {
               }),
             ]),
             OfflineSettingsSection(session: _session),
+            DiagnosticsSection(session: _session),
             _Section(title: 'Sécurité', children: [
               TextField(
                 controller: _code,

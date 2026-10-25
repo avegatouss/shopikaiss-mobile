@@ -63,6 +63,11 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
                 result.success(BluetoothPrinterDriver.bonded(activity))
             }
             "usbDevices" -> result.success(PrinterManager.usbDevices(activity))
+            "lastCrash" -> result.success(CrashLog.read(activity))
+            "clearCrash" -> {
+                CrashLog.clear(activity)
+                result.success(OK)
+            }
             "serialPorts" -> background(result) { PrinterManager.serialPorts() }
             else -> result.notImplemented()
         }

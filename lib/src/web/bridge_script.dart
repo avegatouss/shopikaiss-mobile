@@ -190,12 +190,21 @@ const String _template = r'''
     var doc = win.document;
     try { win.dispatchEvent(new Event('beforeprint')); } catch (e) {}
     var paper = paperOf(doc);
+    /* Hauteur réelle du ticket (toutes copies) : l'application dimensionne son rendu sur elle, au lieu d'une page
+       d'1,20 m qui faisait jusqu'à 80 Mo d'image et fermait l'application (X et Z de la caisse, 2026-10-25). */
+    var heightMm = 0;
+    if (paper) {
+      var sheets = doc.querySelectorAll('[data-paper-width], .sk-paper-58, .sk-paper-80');
+      for (var i = 0; i < sheets.length; i++) { heightMm += sheets[i].getBoundingClientRect().height * 25.4 / 96; }
+    }
     var job = {
       html: '<!doctype html>' + doc.documentElement.outerHTML,
       baseUrl: doc.baseURI && doc.baseURI.indexOf('http') === 0 ? doc.baseURI : window.location.href,
       title: doc.title || 'ShopiKaiss',
       paperWidth: paper ? paper.width : 0,
-      paperMargin: paper ? paper.margin : 0
+      paperMargin: paper ? paper.margin : 0,
+      contentHeightMm: Math.ceil(heightMm),
+      mainFrame: win === window.top
     };
     setTimeout(function () { try { win.dispatchEvent(new Event('afterprint')); } catch (e) {} }, 0);
     call('printHtml', [job]).catch(function (error) { toast('Impression impossible : ' + error.message); });

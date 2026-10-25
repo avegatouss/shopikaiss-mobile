@@ -124,6 +124,18 @@ class TerminalChannel {
   /// Appareils USB branchés : `[{vendorId, productId, name, printer}]`.
   Future<List<Map<String, dynamic>>> usbDevices() => _list('usbDevices');
 
+  /// Dernière panne native (texte écrit par CrashLog avant l'arrêt de l'application), ou null.
+  Future<String?> lastCrash() async {
+    if (!supported) return null;
+    try {
+      return await _channel.invokeMethod<String>('lastCrash');
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  Future<void> clearCrash() => _call('clearCrash');
+
   /// Nœuds `/dev/tty*` candidats : `[{path, writable}]`.
   Future<List<Map<String, dynamic>>> serialPorts() => _list('serialPorts');
 
