@@ -58,7 +58,7 @@ se fait hors du fil de l'écran. Les documents A4 demandés par la page elle-mê
 service d'impression natif d'Android sur la vue affichée. Réglages › Diagnostic montre la dernière panne native et les
 erreurs récentes (à copier pour l'assistance).
 
-### Version 1.2.0 : rapidité, impression directe, afficheur
+### Version 1.1.4 : rapidité, impression directe, afficheur
 
 - **Rendu rapide** (Réglages › Affichage, actif par défaut) : la vue web est composée par texture au lieu de la
   composition hybride d'Android, qui faisait passer chaque image de la page par le fil principal (2 à 5 s par toucher dans
