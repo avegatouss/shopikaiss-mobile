@@ -28,6 +28,16 @@ void main() {
       expect(ticketRasterPlan(paperWidth: 58, dots: 384, contentHeightMm: 0).pageHeightMm, 300);
     });
 
+    test('taille de page du rendu imposée au document : le ticket n’est plus réduit en miniature', () {
+      const html = '<html><head><style>@page{size:80mm 297mm;margin:2mm}</style></head><body><article data-paper-width="80">X</article></body></html>';
+      final out = withPageSize(html, 80, 166, 2);
+      expect(out, contains('@page{size:80mm 166.0mm !important;margin:2.0mm !important}'));
+      // Règle ajoutée après celle du ticket (297 mm), juste avant </body> : c'est elle qui s'applique.
+      expect(out.indexOf('data-sk-page'), greaterThan(out.indexOf('297mm')));
+      expect(out.indexOf('data-sk-page'), lessThan(out.indexOf('</body>')));
+      expect(withPageSize('<p>sans corps</p>', 58, 100, 0), endsWith('</style>'));
+    });
+
     test('job : hauteur, marge et cadre principal lus depuis la page', () {
       final job = HtmlPrintJob.fromMap({'html': '<p>Z</p>', 'paperWidth': 80, 'paperMargin': 2, 'contentHeightMm': 152, 'mainFrame': false});
       expect(job.isTicket, isTrue);

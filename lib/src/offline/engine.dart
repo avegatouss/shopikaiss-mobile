@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:bcrypt/bcrypt.dart';
 import 'package:flutter/foundation.dart';
@@ -119,7 +120,8 @@ class OfflineEngine extends ChangeNotifier {
       final raw = await store.read(StoreKeys.snapshot);
       if (raw != null) {
         try {
-          snapshot = Snapshot(Map<String, dynamic>.from(jsonDecode(raw) as Map));
+          final decoded = raw.length > 65536 ? await Isolate.run(() => jsonDecode(raw)) : jsonDecode(raw);
+          snapshot = Snapshot(Map<String, dynamic>.from(decoded as Map));
         } catch (_) {
           snapshot = null;
         }
@@ -213,7 +215,8 @@ class OfflineEngine extends ChangeNotifier {
       localSessionOpen = false;
       await store.write(StoreKeys.localSession, null);
     }
-    await store.write(StoreKeys.snapshot, jsonEncode(response.body));
+    final body = response.body;
+    await store.write(StoreKeys.snapshot, body.length > 200 ? await Isolate.run(() => jsonEncode(body)) : jsonEncode(body));
     await store.write(StoreKeys.snapshotAt, snapshotAt!.toUtc().toIso8601String());
     await _contact();
     notifyListeners();

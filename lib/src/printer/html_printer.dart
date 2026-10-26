@@ -75,7 +75,7 @@ class HtmlPrinter {
     // Page à la hauteur réelle du ticket (plusieurs pages pour un très long document) ; le blanc final est retiré au rendu.
     final format = PdfPageFormat(job.paperWidth * PdfPageFormat.mm, plan.pageHeightMm * PdfPageFormat.mm, marginAll: 0);
     // ignore: deprecated_member_use
-    final pdf = await Printing.convertHtml(format: format, html: job.html, baseUrl: job.baseUrl);
+    final pdf = await Printing.convertHtml(format: format, html: withPageSize(job.html, job.paperWidth, plan.pageHeightMm, job.paperMargin), baseUrl: job.baseUrl);
     final bitmap = MonoBitmap(dots);
     await for (final page in Printing.raster(pdf, dpi: plan.dpi)) {
       // Conversion en noir et blanc hors du fil de l'écran : plus de gel de la caisse sur un long document.
@@ -120,4 +120,14 @@ TicketRasterPlan ticketRasterPlan({required int paperWidth, required int dots, r
     heightMm = HtmlPrinter.maxPagePixels / (dots * scale) / (base * scale) * 25.4;
   }
   return TicketRasterPlan(math.max(40, heightMm), base * scale);
+}
+
+/// Impose au document la taille de page du rendu. Sans cela, la règle `@page` du ticket (souvent 297 mm de haut) était
+/// plus haute que la page demandée : le moteur réduisait tout le ticket pour l'y faire tenir, d'où un X ou un Z imprimé
+/// en miniature (version 1.1.3). La règle ajoutée en fin de document l'emporte sur celles de la page.
+String withPageSize(String html, int paperWidth, double pageHeightMm, double marginMm) {
+  final rule = '<style data-sk-page>@page{size:${paperWidth}mm ${pageHeightMm.toStringAsFixed(1)}mm !important;'
+      'margin:${marginMm.toStringAsFixed(1)}mm !important}</style>';
+  final close = html.lastIndexOf(RegExp('</body>', caseSensitive: false));
+  return close < 0 ? '$html$rule' : html.replaceRange(close, close, rule);
 }

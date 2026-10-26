@@ -29,8 +29,10 @@ class TerminalSession extends ChangeNotifier {
   /// Dernier lien d'afficheur client envoyé par la caisse (copiable depuis les réglages).
   String? lastDisplayUrl;
 
-  /// Lien à ouvrir sur le second écran : celui imposé dans les réglages, sinon celui de la caisse.
-  String displayUrlFor(String fromPage) => settings.customerDisplayUrl.isNotEmpty ? settings.customerDisplayUrl : fromPage;
+  /// Lien à ouvrir sur le second écran : celui que la caisse vient d'envoyer (jeton frais), sinon celui imposé dans les
+  /// réglages. Le lien imposé porte un jeton qui expire (12 h par défaut côté boutique) : prioritaire, il affichait 404 le
+  /// lendemain (DKD, 2026-10-26).
+  String displayUrlFor(String fromPage) => fromPage.isNotEmpty ? fromPage : settings.customerDisplayUrl;
 
   final TerminalChannel channel = TerminalChannel.instance;
 

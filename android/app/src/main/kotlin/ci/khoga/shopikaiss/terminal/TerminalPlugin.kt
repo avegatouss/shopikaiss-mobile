@@ -31,7 +31,9 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
     private val main = Handler(Looper.getMainLooper())
     private val io = Executors.newSingleThreadExecutor { Thread(it, "shopikaiss-printer") }
     private val printers = PrinterManager(activity) { main.post { requestBluetoothPermission() } }
-    private val display = CustomerDisplayController(activity).also { it.start() }
+    private val display = CustomerDisplayController(activity) { status ->
+        main.post { channel.invokeMethod("customerDisplayError", mapOf("status" to status)) }
+    }.also { it.start() }
     private val keyboard = KeyboardBlocker(activity).also { it.start() }
     private var toneGenerator: ToneGenerator? = null
 
@@ -53,6 +55,10 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
             "setSoftKeyboardBlocked" -> {
                 keyboard.blocked = call.argument<Boolean>("blocked") == true
                 result.success(OK)
+            }
+            "reloadCustomerDisplay" -> {
+                val error = display.reload()
+                result.success(if (error == null) OK else failure(error))
             }
             "hideCustomerDisplay" -> {
                 display.hide()

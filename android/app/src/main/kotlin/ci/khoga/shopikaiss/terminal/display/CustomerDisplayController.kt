@@ -14,6 +14,7 @@ import android.util.DisplayMetrics
 import android.view.Display
 import android.view.WindowManager
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import ci.khoga.shopikaiss.terminal.LocalLog
@@ -26,7 +27,11 @@ import ci.khoga.shopikaiss.terminal.LocalLog
  *
  * Toutes les méthodes doivent être appelées sur le fil UI.
  */
-class CustomerDisplayController(private val activity: Activity) : DisplayManager.DisplayListener {
+class CustomerDisplayController(
+    private val activity: Activity,
+    /** Erreur HTTP de la page affichée (404 = lien expiré ou révoqué), signalée à l'application sur le fil principal. */
+    private val onPageError: (Int) -> Unit = {},
+) : DisplayManager.DisplayListener {
 
     private val displayManager = activity.getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
     private val handler = Handler(Looper.getMainLooper())
@@ -76,7 +81,7 @@ class CustomerDisplayController(private val activity: Activity) : DisplayManager
         }
         dismiss()
         return try {
-            CustomerPresentation(activity, display, allowedOrigin!!).also {
+            CustomerPresentation(activity, display, allowedOrigin!!, onPageError).also {
                 it.show()
                 it.load(url)
                 presentation = it
@@ -92,6 +97,21 @@ class CustomerDisplayController(private val activity: Activity) : DisplayManager
     fun hide() {
         requestedUrl = null
         dismiss()
+    }
+
+    /**
+     * Rafraîchit l'afficheur (bouton « Afficheur » de la caisse) : recharge la page affichée à son URL courante (jeton
+     * renouvelé par la page), sinon rouvre la dernière URL demandée. Renvoie le code d'erreur, ou null.
+     */
+    fun reload(): String? {
+        val current = presentation
+        if (current != null && current.isShowing) {
+            current.reload()
+            return null
+        }
+        val url = requestedUrl ?: return "no_display_url"
+        val origin = allowedOrigin ?: return "no_display_url"
+        return show(url, origin)
     }
 
     private fun dismiss() {
@@ -123,6 +143,7 @@ class CustomerDisplayController(private val activity: Activity) : DisplayManager
         context: Context,
         display: Display,
         private val origin: String,
+        private val onPageError: (Int) -> Unit,
     ) : Presentation(context, display) {
         private var webView: WebView? = null
 
@@ -140,13 +161,22 @@ class CustomerDisplayController(private val activity: Activity) : DisplayManager
             wv.webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                     originOf(request.url.toString()) != origin
+
+                // Page de l'afficheur refusée (404 : jeton du lien expiré ou lien révoqué) : signalée à l'application.
+                override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
+                    if (request.isForMainFrame && response.statusCode >= 400) onPageError(response.statusCode)
+                }
             }
             setContentView(wv)
             webView = wv
         }
 
         fun load(url: String) {
-            if (webView?.url != url) webView?.loadUrl(url)
+            if (webView?.url != url) webView?.loadUrl(url) else webView?.reload()
+        }
+
+        fun reload() {
+            webView?.reload()
         }
 
         /** URL affichée, y compris après un `history.replaceState` de la page. */

@@ -16,6 +16,8 @@ class AppSettings {
     this.hideSoftKeyboard = true,
     this.customerDisplayUrl = '',
     this.screenLayout = 'auto',
+    this.appPrinterFirst = true,
+    this.fastRendering = true,
   });
 
   /// Adresse de la caisse, ex. `https://boutique.exemple.ci/caisse`. Vide = pas encore configurée.
@@ -50,6 +52,16 @@ class AppSettings {
   /// `standard`. Les terminaux et tablettes (6 à 8 pouces, 14 pouces…) restent en `standard` en automatique.
   String screenLayout;
 
+  /// Imprimante de l'application prioritaire : quand le terminal a une imprimante, la caisse imprime ses tickets en
+  /// ESC/POS par l'application même si le profil du terminal (serveur) indique l'impression du navigateur ou un
+  /// transport web (Bluetooth/USB du navigateur), qui ne fonctionnent pas dans l'application. Le réseau (port 9100) est
+  /// laissé tel quel.
+  bool appPrinterFirst;
+
+  /// Rendu rapide de la caisse : vue web composée par texture (au lieu de la composition hybride d'Android, coûteuse à
+  /// chaque image). À désactiver seulement si l'affichage ou la saisie posent problème sur un terminal.
+  bool fastRendering;
+
   bool get configured => shopUrl.isNotEmpty;
 
   /// Origine autorisée (`https://hôte[:port]`) : seule origine qui reçoit le pont natif.
@@ -78,6 +90,8 @@ class AppSettings {
       hideSoftKeyboard: !(p.getBool('softKeyboardAllowed') ?? false),
       customerDisplayUrl: p.getString('customerDisplayUrl') ?? '',
       screenLayout: p.getString('screenLayout') ?? 'auto',
+      appPrinterFirst: p.getBool('appPrinterFirst') ?? true,
+      fastRendering: p.getBool('fastRendering') ?? true,
     );
   }
 
@@ -94,6 +108,8 @@ class AppSettings {
     await p.setBool('softKeyboardAllowed', !hideSoftKeyboard);
     await p.setString('customerDisplayUrl', customerDisplayUrl);
     await p.setString('screenLayout', screenLayout);
+    await p.setBool('appPrinterFirst', appPrinterFirst);
+    await p.setBool('fastRendering', fastRendering);
   }
 }
 

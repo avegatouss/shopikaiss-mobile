@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:http/http.dart' as http;
 
@@ -47,7 +48,9 @@ class HttpRegisterTransport implements RegisterTransport {
       Map<String, dynamic> body = const {};
       if (response.body.isNotEmpty) {
         try {
-          final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+          // Gros corps (référentiel : tout le catalogue) décodé hors du fil de l'écran : la caisse ne gèle pas.
+          final bytes = response.bodyBytes;
+          final decoded = bytes.length > 65536 ? await Isolate.run(() => jsonDecode(utf8.decode(bytes))) : jsonDecode(utf8.decode(bytes));
           if (decoded is Map) body = Map<String, dynamic>.from(decoded);
         } on FormatException {
           body = {'message': 'Réponse illisible du serveur (${response.statusCode}).'};

@@ -26,8 +26,18 @@ import 'dart:convert';
 /// [hideSoftKeyboard] : `inputmode="none"` posé sur les champs (et les champs ajoutés ensuite) pour qu'Android n'ouvre
 /// pas son clavier virtuel ; un clavier externe ou une douchette saisissent toujours. `window.__skClavier(bool)` bascule
 /// sans recharger la page (bouton ⌨ de l'application).
-String buildBridgeScript({required Map<String, dynamic> deviceInfo, required String secret, bool hideSoftKeyboard = false}) {
-  final config = jsonEncode({'deviceInfo': deviceInfo, 'secret': secret, 'hideSoftKeyboard': hideSoftKeyboard});
+///
+/// [appPrinterFirst] : quand l'application a une imprimante, le profil du terminal lu par la caisse
+/// (`/caisse/profil-terminal`, réponse et cache `localStorage`) passe au mode `native-bridge` s'il indiquait
+/// l'impression du navigateur ou un transport web inopérant dans l'application ; les tickets partent alors en ESC/POS
+/// par l'imprimante intégrée, et non en image HTML.
+String buildBridgeScript({
+  required Map<String, dynamic> deviceInfo,
+  required String secret,
+  bool hideSoftKeyboard = false,
+  bool appPrinterFirst = true,
+}) {
+  final config = jsonEncode({'deviceInfo': deviceInfo, 'secret': secret, 'hideSoftKeyboard': hideSoftKeyboard, 'appPrinterFirst': appPrinterFirst});
   return _template.replaceFirst('__SHOPIKAISS_CONFIG__', config);
 }
 
@@ -120,6 +130,40 @@ const String _template = r'''
     Object.defineProperty(window, 'ShopiKaissNative', { value: Object.freeze(api), writable: false, configurable: false });
   } catch (e) { window.ShopiKaissNative = api; }
 
+  /* ---------------------------------------------------------------- imprimante de l'application prioritaire */
+
+  var imprimanteApp = cfg.appPrinterFirst && cfg.deviceInfo && cfg.deviceInfo.printer && cfg.deviceInfo.printer.available;
+  /* Modes que l'application remplace : impression du navigateur et transports web, qui ne marchent pas ici. */
+  var REMPLACES = ['browser-print', 'web-bluetooth', 'web-usb'];
+  function profilApp(profil) {
+    if (!profil || !profil.printer || REMPLACES.indexOf(profil.printer.mode) < 0) { return profil; }
+    var largeur = Number(cfg.deviceInfo.printer.paperWidth);
+    largeur = largeur === 80 || largeur === 58 ? largeur : (Number(profil.printer.paper_width) || 58);
+    profil.printer.mode = 'native-bridge';
+    profil.printer.paper_width = largeur;
+    profil.printer.columns = largeur === 80 ? 48 : 32;
+    profil.printer.app_priority = true;
+    return profil;
+  }
+  if (imprimanteApp) {
+    try {
+      var cache = window.localStorage.getItem('pos.terminal.profile');
+      if (cache) { window.localStorage.setItem('pos.terminal.profile', JSON.stringify(profilApp(JSON.parse(cache)))); }
+    } catch (e) { /* stockage indisponible */ }
+    var fetchOrigine = window.fetch;
+    window.fetch = function (entree) {
+      var url = typeof entree === 'string' ? entree : (entree && entree.url) || '';
+      var reponse = fetchOrigine.apply(this, arguments);
+      if (String(url).indexOf('/caisse/profil-terminal') < 0) { return reponse; }
+      return reponse.then(function (r) {
+        if (!r.ok) { return r; }
+        return r.clone().json().then(function (profil) {
+          return new Response(JSON.stringify(profilApp(profil)), { status: r.status, statusText: r.statusText, headers: r.headers });
+        }).catch(function () { return r; });
+      });
+    };
+  }
+
   /* ---------------------------------------------------------------- clavier de l'écran */
 
   var EDITABLE = 'input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]):not([type=range]):not([type=color]), textarea, [contenteditable=""], [contenteditable=true]';
@@ -155,7 +199,7 @@ const String _template = r'''
         if (noeud.nodeType === 1) { appliquerClavier(noeud); }
       }
     }
-  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['inputmode', 'data-sk-inputmode', 'type', 'contenteditable'] });
+  }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['inputmode'] });
   document.addEventListener('DOMContentLoaded', function () { appliquerClavier(document); });
   // Filet : un champ pris au focus sans `inputmode="none"` est masqué puis repris, avant que le clavier ne s'ouvre.
   document.addEventListener('focusin', function (e) {

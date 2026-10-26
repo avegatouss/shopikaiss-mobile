@@ -39,6 +39,8 @@ class _SettingsPageState extends State<SettingsPage> {
   late String _usbDevice = _settings.usbDevice;
   late bool _hideKeyboard = _settings.hideSoftKeyboard;
   late String _screenLayout = _settings.screenLayout;
+  late bool _appPrinterFirst = _settings.appPrinterFirst;
+  late bool _fastRendering = _settings.fastRendering;
 
   List<Map<String, dynamic>> _btDevices = const [];
   List<Map<String, dynamic>> _serialPorts = const [];
@@ -170,6 +172,14 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
               ],
               const SizedBox(height: 16),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _appPrinterFirst,
+                onChanged: (v) => setState(() => _appPrinterFirst = v),
+                title: const Text('Imprimer les tickets par l’imprimante de l’application'),
+                subtitle: const Text('Activé par défaut : même si le terminal est réglé sur « impression du navigateur » dans ShopiKaiss, '
+                    'les tickets partent directement en ESC/POS sur l’imprimante du terminal (plus net et plus rapide qu’une image).'),
+              ),
               Text('Largeur du rouleau (tickets HTML)', style: theme.textTheme.labelLarge),
               const SizedBox(height: 8),
               SegmentedButton<int>(
@@ -237,6 +247,14 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ]),
             _Section(title: 'Affichage', children: [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _fastRendering,
+                onChanged: (v) => setState(() => _fastRendering = v),
+                title: const Text('Rendu rapide de la caisse'),
+                subtitle: const Text('Activé par défaut. À désactiver seulement si l’écran de caisse s’affiche mal ou si la saisie ne répond pas '
+                    'sur ce terminal. Pris en compte au prochain démarrage de l’application.'),
+              ),
               DropdownButtonFormField<String>(
                 initialValue: screenLayoutLabels.containsKey(_screenLayout) ? _screenLayout : 'auto',
                 decoration: const InputDecoration(labelText: 'Disposition de l’écran', prefixIcon: Icon(Icons.smartphone)),
@@ -311,6 +329,8 @@ class _SettingsPageState extends State<SettingsPage> {
       ..usbDevice = _usbDevice
       ..hideSoftKeyboard = _hideKeyboard
       ..screenLayout = _screenLayout
+      ..appPrinterFirst = _appPrinterFirst
+      ..fastRendering = _fastRendering
       ..customerDisplayUrl = displayUrl
       ..adminCode = _code.text.trim();
     if (persist) {

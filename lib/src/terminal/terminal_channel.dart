@@ -115,6 +115,18 @@ class TerminalChannel {
 
   Future<NativeResult> hideCustomerDisplay() => _call('hideCustomerDisplay');
 
+  /// Recharge l'afficheur client (URL courante, jeton renouvelé), sinon rouvre la dernière URL demandée.
+  Future<NativeResult> reloadCustomerDisplay() => _call('reloadCustomerDisplay');
+
+  /// Erreur HTTP de la page de l'afficheur client (404 : lien expiré ou révoqué), signalée par le natif.
+  void onCustomerDisplayError(void Function(int status) handler) {
+    if (!supported) return;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'customerDisplayError') handler(((call.arguments as Map?)?['status'] as num?)?.toInt() ?? 0);
+      return null;
+    });
+  }
+
   /// Blocage Android du clavier de l'écran : refermé dès qu'il s'ouvre (filet de `inputmode="none"`).
   Future<NativeResult> setSoftKeyboardBlocked(bool blocked) => _call('setSoftKeyboardBlocked', {'blocked': blocked});
 

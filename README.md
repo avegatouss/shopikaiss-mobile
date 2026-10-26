@@ -58,6 +58,22 @@ se fait hors du fil de l'écran. Les documents A4 demandés par la page elle-mê
 service d'impression natif d'Android sur la vue affichée. Réglages › Diagnostic montre la dernière panne native et les
 erreurs récentes (à copier pour l'assistance).
 
+### Version 1.2.0 : rapidité, impression directe, afficheur
+
+- **Rendu rapide** (Réglages › Affichage, actif par défaut) : la vue web est composée par texture au lieu de la
+  composition hybride d'Android, qui faisait passer chaque image de la page par le fil principal (2 à 5 s par toucher dans
+  la fenêtre de paiement). La vue web n'est plus reconstruite par l'écran Flutter ; le catalogue hors ligne est décodé hors
+  du fil de l'écran.
+- **Imprimante de l'application prioritaire** (Réglages › Imprimante, actif par défaut) : si le profil du terminal
+  (ShopiKaiss › Terminaux) indique l'impression du navigateur ou un transport web, l'application le ramène à
+  `native-bridge` : les tickets partent en ESC/POS sur l'imprimante intégrée, plus en image HTML. Le réseau (9100) est
+  respecté.
+- **X et Z en miniature** (1.1.3) : la règle `@page` du ticket (297 mm) dépassait la page de rendu et le moteur réduisait
+  tout le ticket. La taille de page du rendu est désormais imposée au document (`withPageSize`).
+- **Afficheur client** : le lien envoyé par la caisse (jeton frais) prime sur le lien imposé dans les réglages, dont le
+  jeton expire (12 h par défaut) — d'où les 404 du lendemain ; une erreur de la page de l'afficheur est détectée et le lien
+  frais rouvert ; bouton « Afficheur » en bas à gauche de la caisse pour le rafraîchir.
+
 ## Architecture
 
 ```

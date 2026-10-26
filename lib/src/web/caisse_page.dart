@@ -37,7 +37,8 @@ class _CaissePageState extends State<CaissePage> {
 
   InAppWebViewController? _controller;
   late final HtmlPrinter _htmlPrinter = HtmlPrinter(widget.session.channel);
-  double _progress = 0;
+  /// Progression du chargement, hors de l'état de l'écran : la barre seule se redessine.
+  final ValueNotifier<double> _progress = ValueNotifier<double>(0);
   String? _error;
   String? _forcedDisplayShown;
   final List<DateTime> _cornerTaps = [];
@@ -57,6 +58,7 @@ class _CaissePageState extends State<CaissePage> {
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _applyKeyboardBlock();
     _startWatch();
+    _session.channel.onCustomerDisplayError(_onDisplayError);
   }
 
   @override
@@ -140,6 +142,71 @@ class _CaissePageState extends State<CaissePage> {
   /// Blocage Android du clavier de l'écran, seulement pendant la caisse : les réglages et le code d'accès en ont besoin.
   Future<void> _applyKeyboardBlock() => _session.channel.setSoftKeyboardBlocked(_settings.hideSoftKeyboard);
 
+  /// Vue web de la caisse, créée une fois pour toutes (les reconstructions de l'écran ne la touchent pas).
+  late final Widget _webView = InAppWebView(
+      initialUrlRequest: URLRequest(url: WebUri(_settings.shopUrl)),
+      initialUserScripts: UnmodifiableListView([_userScript()]),
+      initialSettings: InAppWebViewSettings(
+        // Inspectable (chrome://inspect) hors release : recette sur terminal avec le banc de test du pont.
+        isInspectable: !kReleaseMode,
+        javaScriptEnabled: true,
+        domStorageEnabled: true,
+        databaseEnabled: true,
+        mediaPlaybackRequiresUserGesture: false,
+        allowsInlineMediaPlayback: true,
+        useShouldOverrideUrlLoading: true,
+        useOnDownloadStart: true,
+        supportZoom: false,
+        builtInZoomControls: false,
+        displayZoomControls: false,
+        thirdPartyCookiesEnabled: true,
+        // Rendu rapide (réglage, actif par défaut) : composition par texture au lieu de la composition hybride
+        // d'Android, qui faisait passer chaque image de la page par le fil principal (2 à 5 s par toucher dans
+        // la fenêtre de paiement sur certains terminaux). Pré-rendu hors écran : défilement et menus plus vifs.
+        useHybridComposition: !_settings.fastRendering,
+        offscreenPreRaster: true,
+        cacheMode: CacheMode.LOAD_DEFAULT,
+        applicationNameForUserAgent: 'ShopiKaissTerminal/${_session.appVersion}',
+      ),
+      onWebViewCreated: (controller) async {
+        _controller = controller;
+        await _applyDeviceCookie();
+        controller.addJavaScriptHandler(handlerName: bridgeHandlerName, callback: _onBridgeCall);
+      },
+      shouldOverrideUrlLoading: (controller, action) async {
+        final url = action.request.url;
+        if (url == null || originOf(url.toString()) == _settings.origin) return NavigationActionPolicy.ALLOW;
+        if (url.scheme == 'about' || url.scheme == 'data' || url.scheme == 'blob') return NavigationActionPolicy.ALLOW;
+        // Hors de la boutique (paiement en ligne, aide, WhatsApp…) : navigateur ou application du système.
+        await launchUrl(url, mode: LaunchMode.externalApplication);
+        return NavigationActionPolicy.CANCEL;
+      },
+      onPermissionRequest: (controller, request) async {
+        final allowed = originOf(request.origin.toString()) == _settings.origin;
+        if (allowed && request.resources.contains(PermissionResourceType.CAMERA)) {
+          await Permission.camera.request();
+        }
+        return PermissionResponse(
+          resources: request.resources,
+          action: allowed ? PermissionResponseAction.GRANT : PermissionResponseAction.DENY,
+        );
+      },
+      onDownloadStartRequest: (controller, request) async {
+        await launchUrl(request.url, mode: LaunchMode.externalApplication);
+      },
+      onProgressChanged: (controller, progress) => _progress.value = progress / 100,
+      onLoadStop: (controller, url) {
+        setState(() => _error = null);
+        _showForcedDisplay(url?.toString());
+      },
+      onReceivedError: (controller, request, error) {
+        if (request.isForMainFrame ?? true) {
+          setState(() => _error = error.description);
+          unawaited(_checkShop());
+        }
+      },
+    );
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -152,64 +219,11 @@ class _CaissePageState extends State<CaissePage> {
         body: SafeArea(
           child: Stack(
             children: [
-              InAppWebView(
-                initialUrlRequest: URLRequest(url: WebUri(_settings.shopUrl)),
-                initialUserScripts: UnmodifiableListView([_userScript()]),
-                initialSettings: InAppWebViewSettings(
-                  // Inspectable (chrome://inspect) hors release : recette sur terminal avec le banc de test du pont.
-                  isInspectable: !kReleaseMode,
-                  javaScriptEnabled: true,
-                  domStorageEnabled: true,
-                  databaseEnabled: true,
-                  mediaPlaybackRequiresUserGesture: false,
-                  allowsInlineMediaPlayback: true,
-                  useShouldOverrideUrlLoading: true,
-                  useOnDownloadStart: true,
-                  supportZoom: false,
-                  builtInZoomControls: false,
-                  displayZoomControls: false,
-                  thirdPartyCookiesEnabled: true,
-                  applicationNameForUserAgent: 'ShopiKaissTerminal/${_session.appVersion}',
-                ),
-                onWebViewCreated: (controller) async {
-                  _controller = controller;
-                  await _applyDeviceCookie();
-                  controller.addJavaScriptHandler(handlerName: bridgeHandlerName, callback: _onBridgeCall);
-                },
-                shouldOverrideUrlLoading: (controller, action) async {
-                  final url = action.request.url;
-                  if (url == null || originOf(url.toString()) == _settings.origin) return NavigationActionPolicy.ALLOW;
-                  if (url.scheme == 'about' || url.scheme == 'data' || url.scheme == 'blob') return NavigationActionPolicy.ALLOW;
-                  // Hors de la boutique (paiement en ligne, aide, WhatsApp…) : navigateur ou application du système.
-                  await launchUrl(url, mode: LaunchMode.externalApplication);
-                  return NavigationActionPolicy.CANCEL;
-                },
-                onPermissionRequest: (controller, request) async {
-                  final allowed = originOf(request.origin.toString()) == _settings.origin;
-                  if (allowed && request.resources.contains(PermissionResourceType.CAMERA)) {
-                    await Permission.camera.request();
-                  }
-                  return PermissionResponse(
-                    resources: request.resources,
-                    action: allowed ? PermissionResponseAction.GRANT : PermissionResponseAction.DENY,
-                  );
-                },
-                onDownloadStartRequest: (controller, request) async {
-                  await launchUrl(request.url, mode: LaunchMode.externalApplication);
-                },
-                onProgressChanged: (controller, progress) => setState(() => _progress = progress / 100),
-                onLoadStop: (controller, url) {
-                  setState(() => _error = null);
-                  _showForcedDisplay(url?.toString());
-                },
-                onReceivedError: (controller, request, error) {
-                  if (request.isForMainFrame ?? true) {
-                    setState(() => _error = error.description);
-                    unawaited(_checkShop());
-                  }
-                },
+              _webView,
+              ValueListenableBuilder<double>(
+                valueListenable: _progress,
+                builder: (context, value, _) => value < 1 ? LinearProgressIndicator(value: value, minHeight: 3) : const SizedBox.shrink(),
               ),
-              if (_progress < 1) LinearProgressIndicator(value: _progress, minHeight: 3),
               if (_error != null)
                 _ErrorPanel(
                   message: _error!,
@@ -226,6 +240,27 @@ class _CaissePageState extends State<CaissePage> {
                 height: 56,
                 child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _onCornerTap),
               ),
+              // Afficheur client : rafraîchi d'un toucher (page en 404, affichage figé).
+              if (_session.info.hasSecondaryDisplay)
+                Positioned(
+                  left: 56,
+                  bottom: 8,
+                  child: Opacity(
+                    opacity: 0.75,
+                    child: Material(
+                      color: Colors.white,
+                      shape: const CircleBorder(side: BorderSide(color: Color(0xFF0F3E2E))),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: _refreshDisplay,
+                        child: const Tooltip(
+                          message: 'Rafraîchir l’afficheur client',
+                          child: SizedBox.square(dimension: 40, child: Icon(Icons.connected_tv, size: 22, color: Color(0xFF0F3E2E))),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               // Clavier de l'écran : masqué pour un clavier externe ou une douchette, rétabli d'un toucher.
               Positioned(
                 left: 8,
@@ -318,6 +353,7 @@ class _CaissePageState extends State<CaissePage> {
           },
           secret: _bridgeSecret,
           hideSoftKeyboard: _settings.hideSoftKeyboard,
+          appPrinterFirst: _settings.appPrinterFirst,
         ),
         injectionTime: UserScriptInjectionTime.AT_DOCUMENT_START,
         forMainFrameOnly: true,
@@ -329,8 +365,47 @@ class _CaissePageState extends State<CaissePage> {
   Future<void> _showForcedDisplay(String? page) async {
     final forced = _settings.customerDisplayUrl;
     if (forced.isEmpty || forced == _forcedDisplayShown || originOf(page) != _settings.origin || !_session.info.hasSecondaryDisplay) return;
+    // La caisse a déjà envoyé un lien frais : il prime sur le lien imposé, dont le jeton peut avoir expiré.
+    if ((_session.lastDisplayUrl ?? '').isNotEmpty) return;
     _forcedDisplayShown = forced;
     await _session.channel.showCustomerDisplay(forced, _settings.origin);
+  }
+
+  /// Bouton « Afficheur » : recharge la page du second écran (jeton renouvelé), sinon rouvre le dernier lien de la caisse.
+  Future<void> _refreshDisplay() async {
+    final channel = _session.channel;
+    var result = await channel.reloadCustomerDisplay();
+    final fresh = _session.lastDisplayUrl;
+    if (!result.ok && fresh != null && fresh.isNotEmpty) {
+      result = await channel.showCustomerDisplay(fresh, _settings.origin);
+    }
+    _toast(result.ok
+        ? 'Afficheur client rafraîchi.'
+        : result.error == 'no_display_url'
+            ? 'Aucun lien d’afficheur : ouvrez la caisse, elle l’envoie au second écran.'
+            : 'Afficheur client indisponible (${result.error}).');
+  }
+
+  /// Page de l'afficheur en erreur (404 : jeton expiré ou lien révoqué) : le lien frais de la caisse est rouvert une fois,
+  /// sinon le caissier est prévenu.
+  String? _retriedDisplayUrl;
+  Future<void> _onDisplayError(int status) async {
+    final fresh = _session.lastDisplayUrl;
+    if (fresh != null && fresh.isNotEmpty && fresh != _retriedDisplayUrl) {
+      _retriedDisplayUrl = fresh;
+      await _session.channel.showCustomerDisplay(fresh, _settings.origin);
+      return;
+    }
+    _toast(_settings.customerDisplayUrl.isNotEmpty && fresh == null
+        ? 'Afficheur client : le lien imposé dans les réglages a expiré ($status). Videz-le ou collez un nouveau lien.'
+        : 'Afficheur client en erreur ($status) : touchez le bouton « Afficheur » en bas à gauche.');
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message), duration: const Duration(seconds: 4)));
   }
 
   Future<void> _toggleSoftKeyboard() async {
