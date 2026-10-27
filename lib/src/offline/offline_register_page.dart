@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../diagnostics.dart';
 import '../terminal/terminal_session.dart';
 import 'engine.dart';
 import 'models.dart';
@@ -170,12 +171,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 icon: const Icon(Icons.person),
                 label: Text(_operator!.name),
               ),
-            IconButton(
-              tooltip: 'Opérations hors ligne',
-              color: Colors.white,
-              onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PendingOperationsPage(engine: _engine))),
-              icon: const Icon(Icons.receipt_long),
-            ),
+            IconButton(tooltip: 'Opérations hors ligne', color: Colors.white, onPressed: _openJournal, icon: const Icon(Icons.receipt_long)),
             FilledButton.tonalIcon(
               onPressed: _engine.syncing ? null : () => _tryOnline(),
               icon: _engine.syncing
@@ -223,7 +219,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               iconColor: Colors.white,
               onSelected: (choice) {
                 if (choice == 'journal') {
-                  Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => PendingOperationsPage(engine: _engine)));
+                  _openJournal();
                 } else if (choice == 'caissier') {
                   setState(() => _operator = null);
                 }
@@ -632,6 +628,23 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     } on OfflineRefusal catch (e) {
       _toast(e.message);
       return;
+    } catch (e, stack) {
+      // Mémoire du terminal pleine, base locale illisible… : la vente n'existe pas, rien n'est imprimé, le panier reste.
+      await ErrorJournal.record('Vente hors ligne non enregistrée : $e', stack);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: const Icon(Icons.error, color: Colors.red, size: 48),
+          title: const Text('Vente NON enregistrée'),
+          content: const Text(
+            'Le terminal n’a pas pu enregistrer cette vente : ne remettez pas la marchandise et ne rendez pas la monnaie '
+            'avant d’avoir réessayé. Le panier est conservé. Si le problème persiste, libérez de la place sur le terminal ou reconnectez-le.',
+          ),
+          actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
+        ),
+      );
+      return;
     }
     final lines = List.of(_cart);
     setState(_cart.clear);
@@ -657,12 +670,30 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _searchFocus.requestFocus();
   }
 
+  void _openJournal() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => PendingOperationsPage(engine: _engine, onReprint: _reprint),
+      ),
+    );
+  }
+
+  /// Duplicata d'un ticket hors ligne depuis le journal : prix et quantités tels qu'encaissés.
+  Future<void> _reprint(OfflineOperation operation) async {
+    final snapshot = _snapshot;
+    if (snapshot == null || !operation.isSale) return;
+    final (lines, payments) = _engine.ticketParts(operation);
+    final operatorName = snapshot.operatorById(operation.operatorId)?.name ?? '';
+    await _print(snapshot, operation, lines, payments, duplicate: true, operatorName: operatorName);
+  }
+
   Future<void> _print(
     Snapshot snapshot,
     OfflineOperation operation,
     List<CartLine> lines,
     List<CartPayment> payments, {
     bool duplicate = false,
+    String? operatorName,
   }) async {
     final session = widget.session;
     final width = session.rollWidth > 0 ? session.rollWidth : 58;
@@ -671,7 +702,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       operation: operation,
       lines: lines,
       payments: payments,
-      operatorName: _operator?.name ?? '',
+      operatorName: operatorName ?? _operator?.name ?? '',
       paperWidth: width,
       duplicate: duplicate,
     );
@@ -737,8 +768,6 @@ class _OperatorLoginState extends State<_OperatorLogin> {
   String _pin = '';
   String? _error;
   bool _checking = false;
-  int _failures = 0;
-  DateTime? _lockedUntil;
 
   @override
   Widget build(BuildContext context) {
@@ -822,21 +851,23 @@ class _OperatorLoginState extends State<_OperatorLogin> {
       if (_pin.length < 6) setState(() => _pin += key);
       return;
     }
-    final locked = _lockedUntil;
-    if (locked != null && DateTime.now().isBefore(locked)) {
-      return setState(() => _error = 'Trop d’essais : patientez ${locked.difference(DateTime.now()).inSeconds + 1} s.');
+    // Blocage après 3 échecs, gardé par le moteur sur le terminal (un redémarrage ne l'efface pas).
+    final locked = await widget.engine.pinLockedFor(_selected!);
+    if (!mounted) return;
+    if (locked != null) {
+      return setState(() => (_pin = '', _error = 'Trop d’essais : patientez ${locked.inSeconds + 1} s.'));
     }
     setState(() => (_checking = true, _error = null));
     final ok = await widget.engine.checkPin(_selected!, _pin);
     if (!mounted) return;
     if (ok) {
-      _failures = 0;
       widget.onLogged(_selected!);
     } else {
-      _failures++;
-      // Même progression que le serveur (PinService) : 3 essais, puis 30 s doublées à chaque nouvel échec.
-      if (_failures >= 3) _lockedUntil = DateTime.now().add(Duration(seconds: (30 * (1 << (_failures - 3))).clamp(30, 900)));
-      setState(() => (_checking = false, _pin = '', _error = 'PIN incorrect.'));
+      final wait = await widget.engine.pinLockedFor(_selected!);
+      if (!mounted) return;
+      setState(
+        () => (_checking = false, _pin = '', _error = wait == null ? 'PIN incorrect.' : 'PIN incorrect. Nouvel essai dans ${wait.inSeconds + 1} s.'),
+      );
     }
   }
 }

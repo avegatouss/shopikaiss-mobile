@@ -17,6 +17,7 @@ class FakeTransport implements RegisterTransport {
   Map<String, dynamic> snapshotBody = sampleSnapshot();
   final List<List<Map<String, dynamic>>> batches = [];
   String Function(Map<String, dynamic> operation) verdict = (_) => 'integree';
+  final Set<String> poisoned = {};
 
   ApiResponse _maybe(ApiResponse Function() ok) => !online ? const ApiResponse(0, {'message': 'hors ligne'}) : ok();
 
@@ -43,6 +44,8 @@ class FakeTransport implements RegisterTransport {
   @override
   Future<ApiResponse> synchronize(String apiBase, String token, List<Map<String, dynamic>> operations) async => _maybe(() {
     batches.add(operations);
+    // Opération « empoisonnée » : le serveur plante (500) sur tout lot qui la contient.
+    if (operations.any((o) => poisoned.contains(o['uuid']))) return const ApiResponse(500, {'message': 'Erreur du serveur'});
     return ApiResponse(200, {
       'resultats': [
         for (final o in operations)
@@ -332,6 +335,89 @@ void main() {
       expect(s.search('HUILE').single.id, 10);
       expect(s.byCode('6190000000028')!.$2, 3);
       expect(s.products[1].signedStock, BigInt.from(-2000000));
+    });
+
+    test('une opération qui fait planter le serveur est isolée : les autres partent, elle reste pour un nouvel essai', () async {
+      await paired();
+      final first = await engine.recordSale([soap(quantity: 1)], [CartPayment(method: cash(), amount: 1000)], cashier());
+      final poison = await engine.recordSale([soap(quantity: 1)], [CartPayment(method: cash(), amount: 1000)], cashier());
+      final last = await engine.recordSale([soap(quantity: 1)], [CartPayment(method: cash(), amount: 1000)], cashier());
+      transport.poisoned.add(poison.uuid);
+
+      final report = await engine.sync();
+      expect(report.integrated, 2);
+      expect(report.deferred, 1);
+      expect(report.message, contains('nouvel essai'));
+      final history = {for (final o in await engine.history()) o.uuid: o};
+      expect(history[first.uuid]!.status, OperationStatus.sent);
+      expect(history[last.uuid]!.status, OperationStatus.sent);
+      expect(history[poison.uuid]!.status, OperationStatus.pending);
+      expect(history[poison.uuid]!.message, contains('(500)'));
+      expect(engine.pendingCount, 1);
+
+      transport.poisoned.clear();
+      expect((await engine.sync()).integrated, 1, reason: 'Gardée, elle repart à la synchronisation suivante.');
+      expect(engine.pendingCount, 0);
+    });
+
+    test('coupure pendant l’isolement : arrêt immédiat, rien n’est marqué', () async {
+      await paired();
+      final sale = await engine.recordSale([soap(quantity: 1)], [CartPayment(method: cash(), amount: 1000)], cashier());
+      transport.online = false;
+      final report = await engine.sync();
+      expect(report.reachable, isFalse);
+      expect((await engine.history()).single.status, OperationStatus.pending);
+      expect(sale.message, isNull);
+    });
+
+    test('PIN : trois échecs bloquent, même après redémarrage de l’application ; un succès remet à zéro', () async {
+      await paired();
+      for (var i = 0; i < 3; i++) {
+        expect(await engine.checkPin(cashier(), '9999'), isFalse);
+      }
+      expect(await engine.pinLockedFor(cashier()), isNotNull);
+      expect(await engine.checkPin(cashier(), '1234'), isFalse, reason: 'Bon PIN refusé pendant le blocage.');
+
+      // Redémarrage : nouveau moteur sur la même mémoire du terminal.
+      final restarted = OfflineEngine(store: store, transport: transport, clock: () => clock);
+      await restarted.load('https://boutique.exemple.ci');
+      expect(await restarted.pinLockedFor(restarted.snapshot!.operators.first), isNotNull);
+
+      clock = clock.add(const Duration(seconds: 31));
+      expect(await restarted.checkPin(restarted.snapshot!.operators.first, '1234'), isTrue);
+      expect(await restarted.pinLockedFor(restarted.snapshot!.operators.first), isNull);
+      expect(store.values['${StoreKeys.pinFailures}7'], isNull);
+    });
+
+    test('réimpression : prix et quantités tels qu’encaissés, article disparu du catalogue nommé par son numéro', () async {
+      await paired();
+      final sale = await engine.recordSale(
+        [soap(quantity: 2, discount: 100)],
+        [CartPayment(method: cash(), amount: 1900, received: 2000)],
+        cashier(),
+      );
+      final changed = sampleSnapshot();
+      (changed['produits'] as List).removeAt(0);
+      transport.snapshotBody = changed;
+      await engine.refreshSnapshot();
+
+      final (lines, payments) = engine.ticketParts(sale);
+      expect(lines.single.label, 'Article n° 10');
+      expect(lines.single.unitPrice, 1000);
+      expect(lines.single.quantity, BigInt.from(2000000));
+      expect(lines.single.total, 1900);
+      expect(payments.single.change, 100);
+      final ticket = offlineTicketLines(
+        snapshot: engine.snapshot!,
+        operation: sale,
+        lines: lines,
+        payments: payments,
+        operatorName: 'Awa',
+        paperWidth: 58,
+        duplicate: true,
+      );
+      expect(ticket.join('\n'), contains('DUPLICATA'));
+      expect(ticket.join('\n'), contains(sale.number));
     });
   });
 }

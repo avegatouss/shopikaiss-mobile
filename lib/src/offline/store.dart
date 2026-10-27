@@ -34,6 +34,9 @@ class StoreKeys {
   static const lastSequence = 'derniere_sequence';
   static const offlineSince = 'hors_ligne_depuis';
   static const localSession = 'session_locale';
+
+  /// Préfixe des échecs de PIN hors ligne d'un caissier (`pin_echecs_<id>` = `nombre|fin du blocage`).
+  static const pinFailures = 'pin_echecs_';
 }
 
 Map<String, Object?> _row(OfflineOperation o) => {

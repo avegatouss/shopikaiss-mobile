@@ -7,9 +7,12 @@ import 'money.dart';
 /// Journal des opérations hors ligne du terminal : en attente d'envoi, transmises (intégrées ou à arbitrer par la
 /// boutique), refusées. Les opérations transmises restent visibles 30 jours.
 class PendingOperationsPage extends StatefulWidget {
-  const PendingOperationsPage({super.key, required this.engine});
+  const PendingOperationsPage({super.key, required this.engine, this.onReprint});
 
   final OfflineEngine engine;
+
+  /// Réimpression d'un ticket de vente (caisse hors ligne) ; absent depuis les réglages.
+  final Future<void> Function(OfflineOperation operation)? onReprint;
 
   @override
   State<PendingOperationsPage> createState() => _PendingOperationsPageState();
@@ -68,7 +71,16 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
                 leading: Icon(icon, color: color),
                 title: Text(o.isSale ? 'Vente ${o.number}' : 'Ouverture de session (fond ${formatFcfa((o.content['fond'] as num?)?.toInt() ?? 0)})'),
                 subtitle: Text('${two(d.day)}/${two(d.month)} ${two(d.hour)}:${two(d.minute)} · $label'),
-                trailing: o.isSale ? Text(formatFcfa(o.total), style: const TextStyle(fontWeight: FontWeight.w600)) : null,
+                trailing: !o.isSale
+                    ? null
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(formatFcfa(o.total), style: const TextStyle(fontWeight: FontWeight.w600)),
+                          if (widget.onReprint != null)
+                            IconButton(tooltip: 'Réimprimer le ticket', icon: const Icon(Icons.print), onPressed: () => widget.onReprint!(o)),
+                        ],
+                      ),
               );
             },
           );

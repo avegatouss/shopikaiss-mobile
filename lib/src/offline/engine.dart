@@ -25,7 +25,7 @@ bool _checkPin(List<String> args) {
 
 /// Bilan d'un envoi de la file au serveur.
 class SyncReport {
-  const SyncReport({this.sent = 0, this.integrated = 0, this.pending = 0, this.refused = 0, this.reachable = true, this.message});
+  const SyncReport({this.sent = 0, this.integrated = 0, this.pending = 0, this.refused = 0, this.deferred = 0, this.reachable = true, this.message});
 
   final int sent;
   final int integrated;
@@ -33,6 +33,9 @@ class SyncReport {
   /// Reçues mais à arbitrer côté boutique (conservées sur le serveur).
   final int pending;
   final int refused;
+
+  /// Gardées sur le terminal : le serveur les a refusées pour l'instant (erreur 5xx), nouvel essai plus tard.
+  final int deferred;
   final bool reachable;
   final String? message;
 }
@@ -232,52 +235,56 @@ class OfflineEngine extends ChangeNotifier {
   }
 
   /// Envoie la file (dans l'ordre de la séquence, par lots de 50).
+  ///
+  /// Une erreur du serveur (5xx) sur un lot ne bloque plus toute la file : le lot est renvoyé opération par opération, et
+  /// celle que le serveur refuse encore reste en attente (motif noté, nouvel essai à la prochaine synchronisation) pendant
+  /// que les suivantes partent. Coupure réseau ou appareil révoqué : arrêt immédiat, rien n'est perdu.
   Future<SyncReport> sync() async {
     final base = apiBase;
     final token = _token;
     if (base == null || token == null || _syncing) return const SyncReport(reachable: false);
     _syncing = true;
     notifyListeners();
-    var sent = 0, integrated = 0, pending = 0, refused = 0;
+    final tally = _Tally();
+    final held = <String>{};
     try {
       while (true) {
-        final batch = await store.operations(status: OperationStatus.pending, limit: 50);
+        final batch = (await store.operations(status: OperationStatus.pending)).where((o) => !held.contains(o.uuid)).take(50).toList();
         if (batch.isEmpty) break;
         final response = await transport.synchronize(base, token, [for (final o in batch) o.toPayload()]);
         _handleAuth(response);
-        if (!response.ok) {
-          return SyncReport(
-            sent: sent,
-            integrated: integrated,
-            pending: pending,
-            refused: refused,
-            reachable: !response.unreachable,
-            message: response.message,
-          );
+        if (response.ok) {
+          await _contact();
+          if (!await _apply(batch, response, tally)) break;
+          continue;
         }
-        await _contact();
-        final results = {for (final r in (response.body['resultats'] as List? ?? const [])) (r as Map)['uuid']: Map<String, dynamic>.from(r)};
-        var progressed = false;
+        if (!_serverError(response)) {
+          return tally.report(reachable: !response.unreachable, message: response.message);
+        }
+        // Erreur du serveur : une opération à la fois, pour isoler celle qui la provoque.
         for (final operation in batch) {
-          final result = results[operation.uuid];
-          if (result == null) continue;
-          progressed = true;
-          sent++;
-          final status = result['statut'] as String?;
-          operation
-            ..serverStatus = status
-            ..serverNumber = result['numero'] as String?
-            ..message = result['message'] as String?
-            ..status = status == 'refusee' ? OperationStatus.refused : OperationStatus.sent;
-          if (status == 'integree') integrated++;
-          if (status == 'a_arbitrer') pending++;
-          if (status == 'refusee') refused++;
+          final single = await transport.synchronize(base, token, [operation.toPayload()]);
+          _handleAuth(single);
+          if (single.ok) {
+            await _contact();
+            if (!await _apply([operation], single, tally)) held.add(operation.uuid);
+            continue;
+          }
+          if (!_serverError(single)) {
+            return tally.report(reachable: !single.unreachable, message: single.message);
+          }
+          held.add(operation.uuid);
+          tally.deferred++;
+          operation.message = 'Refusée pour l’instant par le serveur (${single.status}) : nouvel essai à la prochaine synchronisation.';
           await store.update(operation);
         }
-        if (!progressed) break;
       }
       await store.purgeSent(const Duration(days: 30));
-      return SyncReport(sent: sent, integrated: integrated, pending: pending, refused: refused);
+      return tally.report(
+        message: tally.deferred > 0
+            ? '${tally.deferred} opération(s) refusée(s) pour l’instant par le serveur, gardée(s) pour un nouvel essai.'
+            : null,
+      );
     } finally {
       _syncing = false;
       await _count();
@@ -287,6 +294,34 @@ class OfflineEngine extends ChangeNotifier {
       }
       notifyListeners();
     }
+  }
+
+  static bool _serverError(ApiResponse response) => !response.unreachable && response.status >= 500;
+
+  /// Applique les résultats d'un envoi. Faux si le serveur n'a répondu pour aucune opération du lot.
+  Future<bool> _apply(List<OfflineOperation> batch, ApiResponse response, _Tally tally) async {
+    final results = <String, Map<String, dynamic>>{};
+    for (final r in (response.body['resultats'] as List? ?? const [])) {
+      if (r is Map && r['uuid'] is String) results[r['uuid'] as String] = Map<String, dynamic>.from(r);
+    }
+    var progressed = false;
+    for (final operation in batch) {
+      final result = results[operation.uuid];
+      if (result == null) continue;
+      progressed = true;
+      tally.sent++;
+      final status = result['statut'] as String?;
+      operation
+        ..serverStatus = status
+        ..serverNumber = result['numero'] as String?
+        ..message = result['message'] as String?
+        ..status = status == 'refusee' ? OperationStatus.refused : OperationStatus.sent;
+      if (status == 'integree') tally.integrated++;
+      if (status == 'a_arbitrer') tally.pending++;
+      if (status == 'refusee') tally.refused++;
+      await store.update(operation);
+    }
+    return progressed;
   }
 
   // ---------------------------------------------------------------- Règles de la vente hors ligne
@@ -331,10 +366,61 @@ class OfflineEngine extends ChangeNotifier {
     return left.isNegative ? Duration.zero : left;
   }
 
+  /// Vérifie un PIN hors ligne. Les échecs sont gardés sur le terminal (redémarrer l'application ne les efface pas) :
+  /// même progression que le serveur (PinService) — 3 essais, puis 30 s doublées à chaque nouvel échec, 15 min au plus.
   Future<bool> checkPin(Operator operator, String pin) async {
+    if (await pinLockedFor(operator) != null) return false;
     final hash = operator.pinHash;
-    if (hash == null || hash.isEmpty || !RegExp(r'^\d{4,6}$').hasMatch(pin)) return false;
-    return _verifyPin(pin, hash);
+    final ok = hash != null && hash.isNotEmpty && RegExp(r'^\d{4,6}$').hasMatch(pin) && await _verifyPin(pin, hash);
+    final key = '${StoreKeys.pinFailures}${operator.id}';
+    if (ok) {
+      await store.write(key, null);
+      return true;
+    }
+    final failures = (int.tryParse((await store.read(key))?.split('|').first ?? '') ?? 0) + 1;
+    final lockedUntil = failures >= 3 ? now.add(Duration(seconds: (30 * (1 << (failures - 3).clamp(0, 5))).clamp(30, 900))) : null;
+    await store.write(key, '$failures|${lockedUntil?.toUtc().toIso8601String() ?? ''}');
+    return false;
+  }
+
+  /// Attente restante avant un nouvel essai de PIN pour ce caissier, ou null.
+  Future<Duration?> pinLockedFor(Operator operator) async {
+    final raw = await store.read('${StoreKeys.pinFailures}${operator.id}');
+    final until = DateTime.tryParse(raw?.split('|').elementAtOrNull(1) ?? '');
+    if (until == null || !now.isBefore(until)) return null;
+    return until.difference(now);
+  }
+
+  /// Lignes et paiements d'une vente hors ligne enregistrée, pour réimprimer son ticket : prix et quantités tels
+  /// qu'encaissés (jamais ceux du catalogue actuel), nom de l'article lu dans le catalogue du terminal.
+  (List<CartLine>, List<CartPayment>) ticketParts(OfflineOperation operation) {
+    final s = snapshot;
+    final lines = <CartLine>[];
+    for (final raw in (operation.content['lignes'] as List? ?? const [])) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      final id = (m['produit_id'] as num).toInt();
+      final product =
+          s?.products.where((p) => p.id == id).firstOrNull ??
+          Product({'id': id, 'nom': 'Article n° $id', 'prix': (m['prix_unitaire'] as num?)?.toInt() ?? 0});
+      lines.add(
+        CartLine(
+          product: product,
+          packaging: product.packaging((m['conditionnement_id'] as num?)?.toInt()),
+          quantity: parseMicros('${m['quantite']}') ?? BigInt.zero,
+          discount: (m['remise'] as num?)?.toInt() ?? 0,
+          fixedPrice: (m['prix_unitaire'] as num?)?.toInt(),
+        ),
+      );
+    }
+    final payments = <CartPayment>[];
+    for (final raw in (operation.content['paiements'] as List? ?? const [])) {
+      final m = Map<String, dynamic>.from(raw as Map);
+      final code = '${m['moyen']}';
+      final method =
+          s?.methods.where((x) => x.code == code).firstOrNull ?? PaymentMethodInfo({'code': code, 'nom': code, 'especes': code == 'especes'});
+      payments.add(CartPayment(method: method, amount: (m['montant'] as num).toInt(), received: (m['recu'] as num?)?.toInt()));
+    }
+    return (lines, payments);
   }
 
   /// Ouverture de session hors ligne (fond compté sur le terminal), rejouée par le serveur.
@@ -460,4 +546,12 @@ class OfflineEngine extends ChangeNotifier {
       store.write(StoreKeys.token, null);
     }
   }
+}
+
+/// Compteurs d'une synchronisation.
+class _Tally {
+  int sent = 0, integrated = 0, pending = 0, refused = 0, deferred = 0;
+
+  SyncReport report({bool reachable = true, String? message}) =>
+      SyncReport(sent: sent, integrated: integrated, pending: pending, refused: refused, deferred: deferred, reachable: reachable, message: message);
 }

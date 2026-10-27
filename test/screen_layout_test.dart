@@ -4,9 +4,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:shopikaiss_terminal/src/app_settings.dart';
 import 'package:shopikaiss_terminal/src/offline/api.dart';
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
+import 'package:shopikaiss_terminal/src/offline/models.dart';
 import 'package:shopikaiss_terminal/src/offline/offline_register_page.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/terminal/terminal_channel.dart';
@@ -55,8 +57,14 @@ Map<String, dynamic> _snapshot() => {
   'genere_le': DateTime.now().toUtc().toIso8601String(),
 };
 
-Future<TerminalSession> _session({required double inches, String layout = 'auto'}) async {
-  final store = MemoryOfflineStore()
+/// Mémoire du terminal qui refuse toute écriture de vente (mémoire pleine, base illisible).
+class _FullStore extends MemoryOfflineStore {
+  @override
+  Future<void> append(OfflineOperation operation) async => throw StateError('disque plein');
+}
+
+Future<TerminalSession> _session({required double inches, String layout = 'auto', MemoryOfflineStore? memory}) async {
+  final store = (memory ?? MemoryOfflineStore())
     ..values.addAll({
       StoreKeys.apiBase: 'https://boutique.exemple.ci/api/caisse/v1',
       StoreKeys.token: 'abcdefabcdef.secret',
@@ -172,5 +180,22 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    testWidgets('vente non enregistrée (mémoire du terminal) : dit clairement, panier conservé, aucun ticket', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final session = await _session(inches: 5.0, memory: _FullStore());
+      await _pump(tester, const Size(360, 640), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      expect(find.text('Vente NON enregistrée'), findsOneWidget);
+      await tester.tap(find.text('Compris'));
+      await tester.pumpAndSettle();
+      expect(find.text('1 000 F'), findsWidgets, reason: 'Le panier est conservé.');
+      expect(tester.takeException(), isNull);
+    });
   });
 }

@@ -29,7 +29,8 @@ void main() {
     });
 
     test('taille de page du rendu imposée au document : le ticket n’est plus réduit en miniature', () {
-      const html = '<html><head><style>@page{size:80mm 297mm;margin:2mm}</style></head><body><article data-paper-width="80">X</article></body></html>';
+      const html =
+          '<html><head><style>@page{size:80mm 297mm;margin:2mm}</style></head><body><article data-paper-width="80">X</article></body></html>';
       final out = withPageSize(html, 80, 166, 2);
       expect(out, contains('@page{size:80mm 166.0mm !important;margin:2.0mm !important}'));
       // Règle ajoutée après celle du ticket (297 mm), juste avant </body> : c'est elle qui s'applique.

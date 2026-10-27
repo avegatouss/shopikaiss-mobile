@@ -206,14 +206,18 @@ class Product {
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.
 class CartLine {
-  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0}) : quantity = quantity ?? BigInt.from(1000000);
+  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice})
+    : quantity = quantity ?? BigInt.from(1000000);
 
   final Product product;
   final Packaging? packaging;
   BigInt quantity;
   int discount;
 
-  int get unitPrice => packaging?.price ?? product.price;
+  /// Prix déjà encaissé (réimpression d'une vente enregistrée) ; null = prix du catalogue.
+  final int? fixedPrice;
+
+  int get unitPrice => fixedPrice ?? packaging?.price ?? product.price;
   String get label => packaging == null ? product.name : '${product.name} (${packaging!.name})';
   int get base => lineBase(unitPrice, quantity);
   int get total => lineTotal(unitPrice, quantity, discount);

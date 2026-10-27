@@ -40,6 +40,18 @@ automatique ; une mesure invraisemblable (hors 3 à 30 pouces, densité mal déc
 au profit de la largeur logique (compacte sous 360 points). Réglable : Réglages › Affichage › Disposition de l'écran
 (Automatique, Compacte, Standard), avec la taille détectée affichée. La caisse web, elle, suit la mise en page du site.
 
+## Robustesse (version 1.1.5)
+
+- **Vente non enregistrée** (mémoire du terminal pleine, base locale illisible) : message « Vente NON enregistrée »,
+  aucun ticket, panier conservé ; l'erreur est notée dans Réglages › Diagnostic.
+- **Une opération qui fait planter le serveur** (erreur 5xx) ne bloque plus la file : le lot est renvoyé opération par
+  opération, les autres partent, celle-ci reste sur le terminal avec son motif et repart à la synchronisation suivante.
+  Coupure ou appareil révoqué : arrêt immédiat, rien n'est marqué.
+- **PIN hors ligne** : trois échecs bloquent 30 s (doublées ensuite, 15 min au plus), comme sur le serveur ; le blocage
+  est gardé sur le terminal, un redémarrage de l'application ne l'efface pas.
+- **Réimpression** : journal des opérations (bouton « reçu » du bandeau) › icône imprimante sur une vente : duplicata au
+  prix et aux quantités encaissés, même si le catalogue a changé depuis.
+
 ## Mise en service
 
 1. Installer l'APK, saisir l'adresse de la boutique (inchangé).
@@ -68,7 +80,7 @@ lib/src/offline/
 ```bash
 export JAVA_HOME="/c/Program Files/Android/openjdk/jdk-21.0.8" PATH="/c/dev/flutter/bin:$PATH"
 flutter analyze
-flutter test                       # 29 tests, dont 306 paniers et le rendu de la caisse hors ligne à 4, 5, 6,5, 8 et 14 pouces calculés par le serveur
+flutter test                       # 39 tests, dont 306 paniers et le rendu de la caisse hors ligne à 4, 5, 6,5, 8 et 14 pouces calculés par le serveur
 flutter build apk --release
 ```
 
