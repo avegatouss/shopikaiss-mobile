@@ -169,6 +169,12 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
           children: [
+            // Emblème ShopiKaiss (or sur noir, non transparent) : pastille noire, quelle que soit la couleur du bandeau.
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: Image.asset('assets/marque/embleme.png', width: 32, height: 32, filterQuality: FilterQuality.medium, semanticLabel: 'ShopiKaiss'),
+            ),
+            const SizedBox(width: 8),
             Icon(_bannerIcon, color: Colors.white),
             const SizedBox(width: 8),
             Expanded(

@@ -50,14 +50,20 @@ class Snapshot {
   /// Produit (et conditionnement) d'un code-barres scanné.
   (Product, int?)? byCode(String code) => _byCode[code.trim()];
 
-  /// Recherche par nom, référence ou code (insensible aux accents et à la casse).
-  List<Product> search(String query, {int limit = 60}) {
+  /// Recherche par nom, référence ou code (insensible aux accents et à la casse), restreinte à [category] si donnée.
+  List<Product> search(String query, {int limit = 60, String? category}) {
     final q = fold(query.trim());
-    if (q.isEmpty) return products.take(limit).toList();
     return products
-        .where((p) => fold(p.name).contains(q) || fold(p.reference ?? '').contains(q) || p.codes.any((c) => c.code.contains(query.trim())))
+        .where((p) => category == null || p.category == category)
+        .where((p) => q.isEmpty || fold(p.name).contains(q) || fold(p.reference ?? '').contains(q) || p.codes.any((c) => c.code.contains(query.trim())))
         .take(limit)
         .toList();
+  }
+
+  /// Catégories du catalogue, dans l'ordre alphabétique (sans accents ni casse).
+  List<String> get categories {
+    final names = {for (final p in products) if (p.category != null && p.category!.isNotEmpty) p.category!}.toList();
+    return names..sort((a, b) => fold(a).compareTo(fold(b)));
   }
 
   Operator? operatorById(int? id) {
@@ -241,13 +247,16 @@ class CartLine {
 }
 
 class CartPayment {
-  CartPayment({required this.method, required this.amount, this.received});
+  CartPayment({required this.method, required this.amount, this.received, this.reference});
 
   final PaymentMethodInfo method;
   final int amount;
 
   /// Espèces seulement : montant remis par le client (monnaie = reçu − montant).
   final int? received;
+
+  /// Moyen déclaré (hors espèces) : référence saisie par le caissier, recopiée telle quelle dans la vente v2.
+  final String? reference;
 
   int get change => method.isCash && received != null && received! > amount ? received! - amount : 0;
 

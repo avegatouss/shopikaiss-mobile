@@ -11,7 +11,8 @@ class V2CartLine {
   final int discount;
 }
 
-/// Paiement unique de la révision 2.0 (`vente.especes`) ; [received] = somme remise par le client (espèces).
+/// Paiement d'une vente (au plus 10) ; [received] = somme remise par le client (espèces seulement), [reference] =
+/// référence d'un moyen déclaré (jamais une confirmation de prestataire).
 class V2Payment {
   const V2Payment({required this.method, required this.amount, this.received, this.reference});
 
@@ -55,7 +56,7 @@ class V2SaleBuilder {
     required String draftUuid,
     required String sessionUuid,
     required List<V2CartLine> cart,
-    required V2Payment payment,
+    required List<V2Payment> payments,
     V2Vat vat = const V2Vat(),
   }) {
     if (cart.isEmpty) throw const V2SaleInvalid('Panier vide.');
@@ -100,10 +101,17 @@ class V2SaleBuilder {
       lineTotals.add(base - item.discount);
     }
     final totals = saleTotals(lineTotals, vat.rate, vat.included);
-    if (payment.amount != totals.payable) {
-      throw V2SaleInvalid('Paiement ${formatFcfa(payment.amount)} différent du total ${formatFcfa(totals.payable)}.');
+    if (payments.isEmpty || payments.length > 10) throw const V2SaleInvalid('Entre 1 et 10 paiements par vente.');
+    var paid = 0;
+    for (final payment in payments) {
+      if (payment.amount <= 0) throw const V2SaleInvalid('Chaque paiement doit être positif.');
+      if (payment.received != null && payment.received! < payment.amount) throw const V2SaleInvalid('Somme reçue insuffisante.');
+      if ((payment.reference?.length ?? 0) > 100) throw const V2SaleInvalid('Référence de paiement trop longue (100 caractères au plus).');
+      paid += payment.amount;
     }
-    if (payment.received != null && payment.received! < payment.amount) throw const V2SaleInvalid('Somme reçue insuffisante.');
+    if (paid != totals.payable) {
+      throw V2SaleInvalid('Paiements ${formatFcfa(paid)} différents du total ${formatFcfa(totals.payable)}.');
+    }
     return {
       'numero_local': numberLocal,
       'brouillon_uuid': draftUuid,
@@ -115,7 +123,7 @@ class V2SaleBuilder {
       'livraison': 0,
       'totaux': {'brut': gross, 'remises': discounts, 'base_ht': totals.baseHt, 'tva': totals.vat, 'a_payer': totals.payable},
       'paiements': [
-        {'tentative_uuid': newUuid(), 'moyen': payment.method, 'montant': payment.amount, 'recu': payment.received, 'reference': payment.reference},
+        for (final p in payments) {'tentative_uuid': newUuid(), 'moyen': p.method, 'montant': p.amount, 'recu': p.received, 'reference': p.reference},
       ],
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[],

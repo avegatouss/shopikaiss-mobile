@@ -229,4 +229,136 @@ void main() {
         reason: 'un encaissement se vérifie toujours, même verrouillé');
     await adapter.close();
   });
+
+  test('adaptateur (C-REQ-005 lot 2) : catégories, remise de ligne selon droit et politique, paniers en attente, paiements', () async {
+    server
+      ..put('produit', fakeSavon, {'nom': 'Savon', 'reference': 'SAV', 'categorie': 'Hygiène', 'prix': 500, 'stock_illimite': false, 'actif': true, 'vente_locale': true})
+      ..put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 10, 'source': 'boutique', 'verrouillee': false});
+    final e = await paired();
+    var adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+
+    // Catégories : liste du catalogue et filtre.
+    var view = await adapter.execute('search', {'query': '', 'category': 'Hygiène'}, null);
+    expect(view['categories'], ['Hygiène']);
+    expect([for (final p in view['products'] as List) p['name']], ['Savon']);
+    view = await adapter.execute('search', {'query': ''}, null);
+    expect((view['products'] as List).length, 2);
+
+    // Remise : refusée sans le droit `remise`.
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    final lineId = ((await adapter.execute('view', {}, null))['lines'] as List).single['id'] as String;
+    var status = await adapter.execute('status', {}, null);
+    expect((status['capabilities'] as Map)['discount']['reason'], contains('droit'));
+    await expectLater(adapter.execute('setLineDiscount', {'line_id': lineId, 'amount': 50}, null),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'remise_refusee')));
+
+    // Avec le droit : plafond de 10 % de 1 000 F.
+    server.publish([
+      {
+        'type': 'operateur',
+        'critique': true,
+        'cle': 'operateur:7',
+        'revision': '2',
+        'action': 'upsert',
+        'donnees': {'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'remise', 'vente']},
+      },
+    ]);
+    await e.sync();
+    status = await adapter.execute('status', {}, null);
+    expect((status['capabilities'] as Map)['discount'], containsPair('allowed', true));
+    expect((status['capabilities'] as Map)['discount']['max_percent'], 10);
+    await expectLater(adapter.execute('setLineDiscount', {'line_id': lineId, 'amount': 150}, null), throwsA(isA<AdapterFailure>()));
+    view = await adapter.execute('setLineDiscount', {'line_id': lineId, 'amount': 100}, null);
+    expect((view['totals'] as Map)['payable_label'], '900 F');
+    expect((view['totals'] as Map)['discounts_label'], '100 F');
+    expect(((view['lines'] as List).single as Map)['discount'], 100);
+
+    // Quantité réduite : la remise dépasse le plafond, l'encaissement est bloqué avec son motif.
+    view = await adapter.execute('changeQuantity', {'line_id': lineId, 'quantity': '1'}, null);
+    expect(view['can_pay'], isFalse);
+    expect(view['pay_reason'], contains('au-delà du maximum'));
+    view = await adapter.execute('setLineDiscount', {'line_id': lineId, 'amount': 50}, null);
+    expect(view['can_pay'], isTrue);
+
+    // Paniers en attente : suspendre, nouveau panier, reprendre (le courant part en attente à son tour), redémarrage.
+    final first = view['draft_id'] as String;
+    view = await adapter.execute('suspendDraft', {}, null);
+    expect(view['lines'], isEmpty);
+    expect(view['suspended_count'], 1);
+    await adapter.execute('search', {'query': 'Emballage'}, null);
+    final serviceId = ((await adapter.execute('view', {}, null))['products'] as List).single['id'] as int;
+    view = await adapter.execute('addProduct', {'product_id': serviceId}, null);
+    final second = view['draft_id'] as String;
+    final drafts = await adapter.execute('drafts', {}, null);
+    expect((drafts['items'] as List).single, containsPair('draft_id', first));
+    expect((drafts['items'] as List).single['total_label'], '450 F');
+    view = await adapter.execute('resumeDraft', {'draft_id': first}, null);
+    expect(view['draft_id'], first);
+    expect(view['suspended_count'], 1);
+    expect(((view['lines'] as List).single as Map)['discount'], 50, reason: 'la remise est conservée avec le panier');
+
+    await adapter.close();
+    adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    view = await adapter.execute('view', {}, null);
+    expect(view['draft_id'], first, reason: 'au redémarrage, le panier courant est repris, pas un panier en attente');
+
+    // Paiements : édition invalide = paiements effacés et validation impossible ; deux lignes d'espèces refusées.
+    await adapter.execute('setPayment', {'method': 'especes', 'received': 1000}, null);
+    expect((await adapter.execute('view', {}, null))['payment_valid'], isTrue);
+    await expectLater(
+      adapter.execute('setPayments', {
+        'payments': [
+          {'method': 'especes', 'amount': 400},
+        ],
+      }, null),
+      throwsA(isA<AdapterFailure>()),
+    );
+    view = await adapter.execute('view', {}, null);
+    expect(view['payment_valid'], isFalse);
+    expect(view['payments'], isEmpty, reason: 'aucun retour silencieux à l\'ancien paiement valide');
+    await expectLater(
+      adapter.execute('setPayments', {
+        'payments': [
+          {'method': 'especes', 'amount': 200},
+          {'method': 'especes', 'amount': 250},
+        ],
+      }, null),
+      throwsA(isA<AdapterFailure>().having((f) => f.message, 'message', contains('Une seule ligne'))),
+    );
+    await expectLater(adapter.execute('commitSale', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-000000000002'), throwsA(isA<AdapterFailure>()));
+    view = await adapter.execute('setPayments', {
+      'payments': [
+        {'method': 'especes', 'amount': 450, 'received': 500},
+      ],
+    }, null);
+    expect((view['payment'] as Map)['change_label'], '50 F');
+    expect((view['payment'] as Map)['remaining_label'], '0 F');
+    final sale = await adapter.execute('commitSale', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-000000000002');
+    expect(sale['total'], 450);
+    final recorded = await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-000000000002');
+    expect(((recorded!.content['lignes'] as List).single as Map)['remise'], 50);
+
+    // Le panier en attente reste, et se reprend après la vente ; supprimé, il disparaît.
+    expect((await adapter.execute('drafts', {}, null))['items'], hasLength(1));
+    view = await adapter.execute('resumeDraft', {'draft_id': second}, null);
+    expect(view['suspended_count'], 0);
+    await adapter.execute('deleteDraft', {'draft_id': second}, null);
+    expect((await adapter.execute('view', {}, null))['lines'], isEmpty);
+    await expectLater(adapter.execute('resumeDraft', {'draft_id': second}, null), throwsA(isA<AdapterFailure>()));
+    await adapter.close();
+  });
+
+  test('moteur : remise refusée sans le droit, à l\'encaissement même si l\'écran l\'a laissée passer', () async {
+    server.put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 10, 'source': 'boutique', 'verrouillee': false});
+    final e = await paired();
+    final operator = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    final line = savon(e)..discount = 50;
+    await expectLater(e.recordSale([line], [cash(e, 450)], operator),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('remise'))));
+  });
 }

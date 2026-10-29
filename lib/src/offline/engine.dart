@@ -46,6 +46,10 @@ class OfflineEngine extends CaisseEngine {
   /// Adresse de l'API d'une boutique : `https://boutique.exemple.ci/api/caisse/v1`.
   static String apiBaseFor(String origin) => '$origin/api/caisse/v1';
 
+  /// Le référentiel v1 ne publie pas de droits par opérateur : la remise n'y est bornée que par la politique.
+  @override
+  bool hasRight(Operator operator, String right) => true;
+
   @override
   Future<String?> storedOrigin() async {
     final base = await store.read(StoreKeys.apiBase);

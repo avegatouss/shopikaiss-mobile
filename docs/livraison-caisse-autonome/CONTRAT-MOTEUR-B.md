@@ -59,29 +59,38 @@ class BEngineAdapter implements WindowsEngineAdapter {
 | `logout` | — | `status` ; verrouillage ou changement de caissier : le panier reste, `saleStatus` reste possible |
 | `openSession` | `float` (fond, entier en francs) | `status` ; caissier identifié requis ; refus `session_refusee` (session déjà ouverte, politique, droit) |
 | `view` | — | vue schéma 1 (ci-dessous) |
-| `search` | `query` (≤ 100) | vue filtrée (60 produits au plus) ; le filtre est gardé par la vue |
+| `search` | `query` (≤ 100), `category?` (≤ 120 ; absente ou vide = toutes) | vue filtrée (60 produits au plus) ; filtres gardés par la vue |
 | `addProduct` | `product_id`, `packaging_id?` | vue |
 | `scan` | `code` | vue ; `code_inconnu` sinon |
 | `changeQuantity` | `line_id`, `quantity` (chaîne, 6 décimales au plus, > 0) | vue |
 | `removeLine` / `clear` | `line_id` / — | vue |
+| `setLineDiscount` | `line_id`, `amount` (francs, 0 = retirer) | vue ; `remise_refusee` (caissier sans droit `remise`, politique à 0, au-delà de `remises.ligne_max_pourcent`) |
+| `suspendDraft` | — | vue (panier vide, `suspended_count`) ; `panier_vide` si rien à mettre en attente |
+| `drafts` | — | `items[]` : `draft_id`, `updated_at`, `lines_count`, `summary`, `total_label` (catalogue courant), `complete` |
+| `resumeDraft` | `draft_id` | vue ; le panier courant non vide part en attente à sa place ; paiements préparés effacés ; `panier_inconnu` |
+| `deleteDraft` | `draft_id` (en attente ou courant) | vue ; `panier_inconnu` |
 | `preparePayment` | — | `payable`, `payable_label`, `methods[]` |
-| `setPayment` | `method`, `amount?` (= à payer par défaut), `received?` (espèces) | vue + `change` |
+| `setPayment` | `method`, `amount?` (= à payer par défaut), `received?` (espèces), `reference?` | vue + `change` (raccourci de `setPayments`) |
+| `setPayments` | `payments[]` (≤ 10) : `method`, `amount`, `received?` (espèces), `reference?` (moyen déclaré, ≤ 100) | vue + `change` ; somme = à payer, une seule ligne d'espèces. **Édition invalide : paiements préparés effacés, puis refus `paiement_invalide`** |
 | `commitSale` | `operation_id` (UUID minuscule, choisi par l'écran AVANT) | `state: committed`, `operation_id`, `number`, `total`, `server_status` |
 | `saleStatus` | `operation_id` | `committed` (mêmes champs) ou `{state: not_found, definitive: true}` |
 | `history` | `limit?` (≤ 200) | `items[]` |
 | `reprint` | `operation_id` | `lines[]` du duplicata (largeur `paperWidth`) |
 | `synchronize` | — | `{scheduled: true}` immédiatement ; le réseau tourne à côté |
 
-Vue schéma 1 : `schema`, `revision` (croissante dans le processus), `ready`, `block_reason`, `can_pay`, `draft_id`,
-`store_name`, `sync_label`, `total_label`, `payment_label`, `payment_valid`, `query`, `products[]` (`id`, `name`,
-`price_label`, `stock_label`, `packagings[]`), `lines[]` (`id`, `name`, `quantity_label`, `quantity` (canonique, 6
-décimales), `unit_price_label`, `discount_label`, `total_label`, `available`), `totals` (`gross_label`, `base_ht_label`,
-`vat_label`, `vat_rate`, `vat_included`, `payable_label`) ou null, `payment` (`method`, `amount_label`,
-`received_label`, `change_label`, `remaining_label`) ou null.
+Vue schéma 1 : `schema`, `revision` (croissante dans le processus), `ready`, `block_reason`, `can_pay`, `pay_reason`
+(motif quand `can_pay` est faux : caissier, session, panier vide, article retiré, remise devenue invalide), `draft_id`,
+`suspended_count`, `store_name`, `sync_label`, `total_label`, `payment_label`, `payment_valid`, `query`, `category`,
+`categories[]`, `products[]` (`id`, `name`, `category`, `price_label`, `stock_label`, `packagings[]`), `lines[]` (`id`,
+`name`, `quantity_label`, `quantity` (canonique, 6 décimales), `unit_price_label`, `discount_label`, `discount` (francs,
+pour l'édition), `total_label`, `available`), `totals` (`gross_label`, `discounts_label`, `base_ht_label`, `vat_label`,
+`vat_rate`, `vat_included`, `payable_label`) ou null, `payment` (premier paiement : `method`, `amount_label` ; ligne
+d'espèces : `received_label`, `change_label` ; ensemble : `paid_label`, `remaining_label`) ou null, `payments[]`
+(`method`, `name`, `amount_label`, `received_label`, `reference`).
 Montants et libellés calculés par le moteur ; Windows n'en recalcule aucun.
 
-`capabilities` (C-REQ-005 §2) : `sell`, `open_session`, `pair`, `synchronize`, chacune `{allowed, reason,
-network_required}`. Indication pour l'écran seulement : le moteur refait chaque contrôle à l'exécution.
+`capabilities` (C-REQ-005 §2) : `sell`, `open_session`, `pair`, `synchronize`, `discount` (+ `max_percent`),
+`suspend`, chacune `{allowed, reason, network_required}`. Indication pour l'écran seulement : le moteur refait chaque contrôle à l'exécution.
 
 ## Protocole v2 (décision du 2026-10-29)
 
@@ -105,13 +114,24 @@ Caisse 2, vente V-20261029-0016.
   autre erreur d'un `commitSale` = résultat inconnu → `saleStatus` avec le même identifiant.
 - Une erreur d'un abonné d'écran n'interrompt jamais le moteur (`EngineNotifier`).
 
+## Paniers en attente, remises, paiements (C-REQ-005 lot 2)
+
+- **Paniers en attente** : un panier courant, les autres suspendus (`suspendu` dans la table `paniers`), conservés sur
+  le terminal, jamais partagés avec la caisse web. Au redémarrage, `start()` reprend le panier courant, jamais un
+  panier en attente. Encaisser consomme le panier dans la transaction de la vente : une seule vente par panier.
+- **Remise de ligne** : droit `remise` publié par le serveur pour l'opérateur et plafond `remises.ligne_max_pourcent`
+  (politique absente = 0 = aucune remise). Contrôlée par l'adaptateur, puis **de nouveau par le moteur à
+  l'encaissement** (droit retiré, politique abaissée, quantité réduite : `can_pay` faux avec `pay_reason`).
+- **Paiements multiples** : jusqu'à 10 lignes, une seule d'espèces (reçu et monnaie portent sur elle). Les moyens
+  proposés sont ceux du catalogue local. En v2 2.0, le serveur n'annonce que `vente.especes` : seules les espèces
+  sont proposées tant que A n'ouvre pas `vente.paiement_declare` (demande B-REQ-011).
+
 ## Limites actuelles
 
-- Paiement unique en espèces par vente (v2 2.0) ; multi-paiement, moyens électroniques déclarés : contrat A requis.
-- Remises de ligne non exposées (le moteur les sait valider) ; clôture de session : contrat A requis (pas d'opération
-  `cloture_session` en v2 2.0).
-- C-REQ-005 §3–7 restants (catégories/marque/fournisseur, brouillons multiples, client, note, tarif gros, retours,
-  bons) : lots suivants, certains après contrat A.
+- Moyens non espèces, clôture de session, client, note, tarif gros, remise globale, frais, marque/fournisseur/images,
+  retours, bons/points/crédit, survente : contrat A requis (demandes B-REQ-007 à B-REQ-015 du 29/10).
+- Les commandes du lot 2 ne sont pas encore dans l'énumération IPC `HostCommand` (périmètre C) : à ajouter par C,
+  comme `logout` et `openSession`.
 - Hôte exécutable livré (voir ci-dessous) ; l'interface Windows ne le lance pas encore (bootstrap de C).
 
 ## Hôte exécutable (livré sur le commit intégré)

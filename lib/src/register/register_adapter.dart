@@ -29,8 +29,12 @@ class AdapterFailure implements Exception {
 /// passent par la file d'écriture du moteur (une vente à la fois). Le panier en cours est conservé sur le terminal à
 /// chaque modification : un redémarrage de l'écran ou de l'hôte le retrouve (C-REQ-004).
 ///
-/// Commandes (`execute`) : status, pair, login, view, search, addProduct, scan, changeQuantity, removeLine, clear,
-/// preparePayment, setPayment, commitSale, saleStatus, history, reprint, synchronize.
+/// Commandes (`execute`) : status, pair, login, logout, openSession, view, search, addProduct, scan, changeQuantity,
+/// removeLine, setLineDiscount, clear, suspendDraft, drafts, resumeDraft, deleteDraft, preparePayment, setPayment,
+/// setPayments, commitSale, saleStatus, history, reprint, synchronize.
+///
+/// Paniers en attente : un seul panier courant ; les autres sont suspendus, conservés sur le terminal et repris par
+/// leur identifiant. Un panier encaissé est consommé par la transaction de la vente (une seule vente par panier).
 class LocalRegisterAdapter {
   LocalRegisterAdapter(this.engine, {this.paperWidth = 80, String Function()? newUuid}) : _newUuid = newUuid ?? (() => const Uuid().v4());
 
@@ -45,6 +49,7 @@ class LocalRegisterAdapter {
   Operator? _operator;
   late _Draft _draft;
   String _query = '';
+  String? _category;
   int _revision = 0;
   bool _started = false;
   bool _syncing = false;
@@ -53,8 +58,8 @@ class LocalRegisterAdapter {
   /// Restaure le panier conservé le plus récent (les autres restent conservés, rien n'est effacé).
   Future<void> start() async {
     if (_started) return;
-    final drafts = await engine.openDrafts();
-    _draft = drafts.isEmpty ? _Draft(_newUuid()) : _Draft.fromStored(drafts.first);
+    final current = (await engine.openDrafts()).where((d) => d.content['suspendu'] != true).firstOrNull;
+    _draft = current == null ? _Draft(_newUuid()) : _Draft.fromStored(current);
     engine.addListener(_engineChanged);
     _started = true;
   }
@@ -102,6 +107,12 @@ class LocalRegisterAdapter {
         return _view();
       case 'search':
         _query = _text(args, 'query', max: 100);
+        // Catégorie : absente ou vide = toutes ; conservée jusqu'à la prochaine recherche.
+        final category = args['category'];
+        if (category != null && (category is! String || category.length > 120)) {
+          throw const AdapterFailure('argument_invalide', 'Argument « category » invalide.');
+        }
+        _category = category == null || (category as String).isEmpty ? null : category;
         return _view();
       case 'addProduct':
         return _add(_int(args, 'product_id'), args['packaging_id'] is int ? args['packaging_id'] as int : null);
@@ -115,15 +126,32 @@ class LocalRegisterAdapter {
         final id = _text(args, 'line_id', max: 64);
         if (!_draft.lines.any((l) => l.id == id)) throw const AdapterFailure('ligne_inconnue', 'Ligne introuvable dans le panier.');
         return _mutate(() => _draft.lines.removeWhere((l) => l.id == id));
+      case 'setLineDiscount':
+        return _setLineDiscount(_text(args, 'line_id', max: 64), _int(args, 'amount'));
       case 'clear':
         await engine.deleteDraft(_draft.uuid);
         _draft = _Draft(_newUuid());
         _emit('panier');
         return _view();
+      case 'suspendDraft':
+        return _suspend();
+      case 'drafts':
+        return _drafts();
+      case 'resumeDraft':
+        return _resume(_text(args, 'draft_id', max: 64));
+      case 'deleteDraft':
+        return _deleteDraft(_text(args, 'draft_id', max: 64));
       case 'preparePayment':
         return _preparePayment();
       case 'setPayment':
-        return _setPayment(args);
+        // Paiement unique (raccourci de setPayments) : montant par défaut = montant à payer.
+        return _setPayments([
+          {'method': args['method'], 'amount': args['amount'], 'received': args['received'], 'reference': args['reference']},
+        ]);
+      case 'setPayments':
+        final list = args['payments'];
+        if (list is! List || list.any((p) => p is! Map)) throw const AdapterFailure('argument_invalide', 'Argument « payments » invalide.');
+        return _setPayments([for (final p in list) Map<String, dynamic>.from(p as Map)]);
       case 'commitSale':
         return _commit(_requireOperationId(operationId));
       case 'saleStatus':
@@ -183,7 +211,18 @@ class LocalRegisterAdapter {
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
+      'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
+      'suspend': cap(_draft.lines.isEmpty ? 'Le panier est vide.' : null),
     };
+  }
+
+  /// Motif qui empêche le caissier courant d'accorder une remise de ligne, ou null.
+  String? _discountRefusal() {
+    final operator = _operator;
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!engine.hasRight(operator, 'remise')) return '${operator.name} n’a pas le droit d’accorder une remise.';
+    if ((engine.snapshot?.rules.maxLineDiscountPercent ?? 0) <= 0) return 'Aucune remise autorisée hors ligne par la boutique.';
+    return null;
   }
 
   Future<Map<String, dynamic>> _view() async {
@@ -194,48 +233,81 @@ class LocalRegisterAdapter {
     final available = [for (final r in resolved) if (r.$2 != null) r.$2!];
     final totals = snapshot == null ? null : saleTotals([for (final l in available) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded);
     final currency = snapshot?.store.currency == 'FCFA' || snapshot == null ? 'F' : snapshot.store.currency;
-    final payment = _draft.payment;
-    final paymentValid = totals != null && payment != null && _paymentError(payment, totals.payable) == null;
+    final payments = _draft.payments;
+    final payment = payments.firstOrNull;
+    final paymentValid = totals != null && payments.isNotEmpty && _paymentsError(snapshot!, payments, totals.payable) == null;
+    final paid = payments.fold<int>(0, (sum, p) => sum + p.amount);
+    final cash = payments.where((p) => p.received != null).firstOrNull;
     final ready = snapshot != null && reason == null;
+    final payReason = !ready
+        ? (reason ?? 'Aucun catalogue reçu : connectez le terminal une première fois.')
+        : _operator == null
+        ? 'Identifiez le caissier.'
+        : !engine.sessionOpen
+        ? 'Aucune session de caisse ouverte sur ce terminal.'
+        : available.isEmpty
+        ? 'Le panier est vide.'
+        : available.length != resolved.length
+        ? 'Un article du panier a été retiré du catalogue : retirez-le.'
+        : _discountIssue(snapshot, resolved);
+    final suspended = (await engine.openDrafts()).where((d) => d.content['suspendu'] == true).length;
     return {
       'schema': 1,
       'revision': _revision,
       'ready': ready,
       'block_reason': reason,
-      'can_pay': ready && _operator != null && engine.sessionOpen && available.isNotEmpty && available.length == resolved.length,
+      'can_pay': payReason == null,
+      'pay_reason': payReason,
       'draft_id': _draft.uuid,
+      'suspended_count': suspended,
       'store_name': snapshot?.store.name ?? '',
       'sync_label': _syncLabel(),
       'total_label': totals == null ? '' : formatFcfa(totals.payable, currency),
-      'payment_label': payment == null ? '' : '${payment.methodCode} ${formatFcfa(payment.amount, currency)}',
+      'payment_label': payments.map((p) => '${p.methodCode} ${formatFcfa(p.amount, currency)}').join(' + '),
       'payment_valid': paymentValid,
       // Détail calculé par le moteur, rendu en libellés : l'écran ne refait aucun calcul financier.
       'totals': totals == null
           ? null
           : {
               'gross_label': formatFcfa(totals.gross, currency),
+              'discounts_label': formatFcfa(available.fold<int>(0, (sum, l) => sum + l.discount), currency),
               'base_ht_label': formatFcfa(totals.baseHt, currency),
               'vat_label': formatFcfa(totals.vat, currency),
               'vat_rate': snapshot!.store.vatRate,
               'vat_included': snapshot.store.vatIncluded,
               'payable_label': formatFcfa(totals.payable, currency),
             },
+      // Premier paiement (vue d'un paiement unique) ; reçu et monnaie portent sur la ligne d'espèces.
       'payment': payment == null || totals == null
           ? null
           : {
               'method': payment.methodCode,
               'amount_label': formatFcfa(payment.amount, currency),
-              'received_label': payment.received == null ? null : formatFcfa(payment.received!, currency),
-              'change_label': payment.received == null ? null : formatFcfa(payment.received! - payment.amount, currency),
-              'remaining_label': formatFcfa(totals.payable - payment.amount, currency),
+              'received_label': cash == null ? null : formatFcfa(cash.received!, currency),
+              'change_label': cash == null ? null : formatFcfa(cash.received! - cash.amount, currency),
+              'paid_label': formatFcfa(paid, currency),
+              'remaining_label': formatFcfa(totals.payable - paid, currency),
             },
+      'payments': [
+        for (final p in payments)
+          {
+            'method': p.methodCode,
+            'name': snapshot?.methods.where((m) => m.code == p.methodCode).firstOrNull?.name ?? p.methodCode,
+            'amount_label': formatFcfa(p.amount, currency),
+            'received_label': p.received == null ? null : formatFcfa(p.received!, currency),
+            'reference': p.reference,
+          },
+      ],
       'query': _query,
+      'category': _category,
+      'categories': snapshot?.categories ?? const <String>[],
       'products': [
         if (snapshot != null)
-          for (final p in snapshot.search(_query, limit: 60))
+          for (final p in snapshot.search(_query, limit: 60, category: _category))
             {
               'id': p.id,
               'name': p.name,
+              'category': p.category,
               'price_label': formatFcfa(p.price, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'packagings': [for (final k in p.packagings) {'id': k.id, 'name': k.name, 'price_label': formatFcfa(k.price, currency)}],
@@ -250,11 +322,23 @@ class LocalRegisterAdapter {
             'quantity': formatMicros(line.quantity),
             'unit_price_label': cart == null ? '' : formatFcfa(cart.unitPrice, currency),
             'discount_label': cart == null || cart.discount == 0 ? '' : formatFcfa(cart.discount, currency),
+            'discount': line.discount,
             'total_label': cart == null ? '' : formatFcfa(cart.total, currency),
             'available': cart != null,
           },
       ],
     };
+  }
+
+  /// Remise de ligne que l'encaissement refuserait (droit retiré, politique abaissée, quantité réduite), ou null.
+  String? _discountIssue(Snapshot snapshot, List<(_DraftLine, CartLine?)> resolved) {
+    for (final (_, cart) in resolved) {
+      if (cart == null || cart.discount == 0) continue;
+      if (!engine.hasRight(_operator!, 'remise')) return '${_operator!.name} n’a pas le droit d’accorder une remise : retirez celle de « ${cart.label} ».';
+      final max = maxLineDiscount(cart.base, snapshot.rules.maxLineDiscountPercent);
+      if (cart.discount > max) return 'Remise sur « ${cart.label} » au-delà du maximum (${formatFcfa(max)}) : corrigez-la.';
+    }
+    return null;
   }
 
   String _stockLabel(Product p, BigInt sold) {
@@ -347,15 +431,109 @@ class LocalRegisterAdapter {
     return _mutate(() => line.quantity = micros);
   }
 
+  /// Remise de ligne en francs (0 = retirer). Droit `remise` du caissier et plafond de la politique, contrôlés de
+  /// nouveau par le moteur à l'encaissement.
+  Future<Map<String, dynamic>> _setLineDiscount(String lineId, int amount) {
+    final line = _draft.lines.where((l) => l.id == lineId).firstOrNull;
+    if (line == null) throw const AdapterFailure('ligne_inconnue', 'Ligne introuvable dans le panier.');
+    if (amount < 0) throw const AdapterFailure('remise_invalide', 'Remise invalide (montant positif en francs).');
+    if (amount > 0) {
+      final refusal = _discountRefusal();
+      if (refusal != null) throw AdapterFailure('remise_refusee', refusal);
+      final snapshot = _snapshot();
+      final cart = line.materialize(snapshot);
+      if (cart == null) throw const AdapterFailure('panier_invalide', 'Article retiré du catalogue : retirez-le du panier.');
+      final max = maxLineDiscount(cart.base, snapshot.rules.maxLineDiscountPercent);
+      if (amount > max) {
+        throw AdapterFailure(
+          'remise_refusee',
+          'Remise au-delà du maximum hors ligne (${snapshot.rules.maxLineDiscountPercent} %, soit ${formatFcfa(max)} sur cette ligne).',
+        );
+      }
+    }
+    return _mutate(() => line.discount = amount);
+  }
+
   Future<Map<String, dynamic>> _mutate(void Function() change) async {
     final before = _draft.copy();
     change();
-    _draft.payment = null; // tout changement du panier invalide le paiement préparé
+    _draft.payments.clear(); // tout changement du panier invalide les paiements préparés
+    await _save(before);
+    _emit('panier');
+    return _view();
+  }
+
+  /// Conserve le panier courant (révision suivante) ; en cas de refus, rétablit [before].
+  Future<void> _save(_Draft before) async {
     _draft.revision++;
     if (!await engine.saveDraft(_draft.uuid, _draft.revision, _draft.toJson())) {
       _draft = before;
       throw const AdapterFailure('panier_perime', 'Ce panier a changé ou a déjà été encaissé : vue rechargée.');
     }
+  }
+
+  // ------------------------------------------------------------------ Paniers en attente
+
+  /// Met le panier courant en attente (conservé) et ouvre un panier vide.
+  Future<Map<String, dynamic>> _suspend() async {
+    if (_draft.lines.isEmpty) throw const AdapterFailure('panier_vide', 'Le panier est vide : rien à mettre en attente.');
+    final before = _draft.copy();
+    _draft
+      ..suspended = true
+      ..payments.clear();
+    await _save(before);
+    _draft = _Draft(_newUuid());
+    _emit('panier');
+    return _view();
+  }
+
+  /// Paniers en attente, le plus récent d'abord : résumé calculé par le moteur au catalogue courant.
+  Future<Map<String, dynamic>> _drafts() async {
+    final snapshot = engine.snapshot;
+    final currency = snapshot?.store.currency == 'FCFA' || snapshot == null ? 'F' : snapshot.store.currency;
+    final items = <Map<String, dynamic>>[];
+    for (final stored in await engine.openDrafts()) {
+      if (stored.content['suspendu'] != true) continue;
+      final draft = _Draft.fromStored(stored);
+      final lines = snapshot == null ? const <CartLine?>[] : [for (final l in draft.lines) l.materialize(snapshot)];
+      final valid = lines.whereType<CartLine>().toList();
+      items.add({
+        'draft_id': draft.uuid,
+        'updated_at': stored.updatedAt.toUtc().toIso8601String(),
+        'lines_count': draft.lines.length,
+        'summary': [for (final l in valid.take(3)) l.label].join(', '),
+        'total_label': snapshot == null
+            ? ''
+            : formatFcfa(saleTotals([for (final l in valid) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded).payable, currency),
+        'complete': snapshot != null && valid.length == draft.lines.length,
+      });
+    }
+    return {'items': items};
+  }
+
+  /// Reprend un panier en attente ; le panier courant, s'il n'est pas vide, est mis en attente à sa place. Les
+  /// paiements préparés sont effacés (prix et droits peuvent avoir changé depuis).
+  Future<Map<String, dynamic>> _resume(String draftId) async {
+    final stored = (await engine.openDrafts()).where((d) => d.uuid == draftId && d.content['suspendu'] == true).firstOrNull;
+    if (stored == null) throw const AdapterFailure('panier_inconnu', 'Panier en attente introuvable (repris, encaissé ou supprimé).');
+    if (_draft.lines.isNotEmpty) {
+      await _suspend();
+    } else {
+      await engine.deleteDraft(_draft.uuid);
+    }
+    _draft = _Draft.fromStored(stored)..suspended = false;
+    _draft.payments.clear();
+    await _save(_Draft(_newUuid()));
+    _emit('panier');
+    return _view();
+  }
+
+  Future<Map<String, dynamic>> _deleteDraft(String draftId) async {
+    if (draftId != _draft.uuid && !(await engine.openDrafts()).any((d) => d.uuid == draftId && d.content['suspendu'] == true)) {
+      throw const AdapterFailure('panier_inconnu', 'Panier en attente introuvable (repris, encaissé ou supprimé).');
+    }
+    await engine.deleteDraft(draftId);
+    if (draftId == _draft.uuid) _draft = _Draft(_newUuid());
     _emit('panier');
     return _view();
   }
@@ -372,29 +550,62 @@ class LocalRegisterAdapter {
     };
   }
 
-  Future<Map<String, dynamic>> _setPayment(Map<String, dynamic> args) async {
+  /// Remplace les paiements préparés ([entries] : method, amount, received pour les espèces, reference pour un moyen
+  /// déclaré). Une édition invalide EFFACE les paiements préparés (jamais de retour silencieux à un ancien paiement
+  /// valide) puis est refusée : la validation reste impossible jusqu'à une saisie correcte.
+  Future<Map<String, dynamic>> _setPayments(List<Map<String, dynamic>> entries) async {
     final snapshot = _snapshot();
-    final method = snapshot.methods.where((m) => m.code == args['method']).firstOrNull;
-    if (method == null) throw const AdapterFailure('moyen_refuse', 'Moyen de paiement non autorisé sur ce terminal.');
     final payable = _payable(snapshot);
-    final payment = _DraftPayment(
-      methodCode: method.code,
-      amount: args['amount'] is int ? args['amount'] as int : payable,
-      received: method.isCash && args['received'] is int ? args['received'] as int : null,
-    );
-    final error = _paymentError(payment, payable);
-    if (error != null) throw AdapterFailure('paiement_invalide', error);
-    _draft
-      ..payment = payment
-      ..revision += 1;
-    await engine.saveDraft(_draft.uuid, _draft.revision, _draft.toJson());
+    final payments = <_DraftPayment>[];
+    String? error;
+    for (final e in entries) {
+      final method = snapshot.methods.where((m) => m.code == e['method']).firstOrNull;
+      final amount = e['amount'] ?? (entries.length == 1 ? payable : null);
+      final received = e['received'];
+      final reference = e['reference'];
+      if (method == null) {
+        error = 'Moyen de paiement non autorisé sur ce terminal.';
+        break;
+      }
+      if (amount is! int || (received != null && received is! int) || (reference != null && reference is! String)) {
+        error = 'Paiement mal formé (montant et reçu en francs entiers).';
+        break;
+      }
+      final text = (reference as String?)?.trim() ?? '';
+      payments.add(
+        _DraftPayment(
+          methodCode: method.code,
+          amount: amount,
+          received: method.isCash ? (received as int? ?? amount) : null,
+          reference: method.isCash || text.isEmpty ? null : text,
+        ),
+      );
+    }
+    error ??= _paymentsError(snapshot, payments, payable);
+    final before = _draft.copy();
+    _draft.payments
+      ..clear()
+      ..addAll(error == null ? payments : const []);
+    await _save(before);
     _emit('paiement');
-    return {...await _view(), 'change': payment.received == null ? 0 : payment.received! - payment.amount};
+    if (error != null) throw AdapterFailure('paiement_invalide', error);
+    final cash = payments.where((p) => p.received != null).firstOrNull;
+    return {...await _view(), 'change': cash == null ? 0 : cash.received! - cash.amount};
   }
 
-  String? _paymentError(_DraftPayment payment, int payable) {
-    if (payment.amount != payable) return 'Le paiement doit égaler le montant à payer (${formatFcfa(payable)}).';
-    if (payment.received != null && payment.received! < payment.amount) return 'Le montant reçu est inférieur au montant à régler.';
+  String? _paymentsError(Snapshot snapshot, List<_DraftPayment> payments, int payable) {
+    if (payments.isEmpty) return 'Ajoutez au moins un paiement.';
+    if (payments.length > 10) return 'Au plus 10 paiements par vente.';
+    if (payments.where((p) => p.received != null).length > 1) return 'Une seule ligne d’espèces par vente.';
+    var paid = 0;
+    for (final p in payments) {
+      if (!snapshot.methods.any((m) => m.code == p.methodCode)) return 'Moyen de paiement non autorisé sur ce terminal.';
+      if (p.amount <= 0) return 'Chaque paiement doit être positif.';
+      if (p.received != null && p.received! < p.amount) return 'Le montant reçu est inférieur au montant à régler.';
+      if ((p.reference?.length ?? 0) > 100) return 'Référence de paiement trop longue (100 caractères au plus).';
+      paid += p.amount;
+    }
+    if (paid != payable) return 'La somme des paiements (${formatFcfa(paid)}) doit égaler le montant à payer (${formatFcfa(payable)}).';
     return null;
   }
 
@@ -409,14 +620,18 @@ class LocalRegisterAdapter {
     if (lines.isEmpty || lines.any((l) => l == null)) {
       throw const AdapterFailure('panier_invalide', 'Panier vide ou article retiré du catalogue : corrigez le panier.');
     }
-    final payment = _draft.payment;
-    if (payment == null) throw const AdapterFailure('paiement_requis', 'Préparez le paiement avant d’encaisser.');
-    final method = snapshot.methods.firstWhere((m) => m.code == payment.methodCode, orElse: () => throw const AdapterFailure('moyen_refuse', 'Moyen de paiement retiré.'));
+    final payments = _draft.payments;
+    if (payments.isEmpty) throw const AdapterFailure('paiement_requis', 'Préparez le paiement avant d’encaisser.');
+    final error = _paymentsError(snapshot, payments, _payable(snapshot));
+    if (error != null) throw AdapterFailure('paiement_invalide', error);
     final OfflineOperation sale;
     try {
       sale = await engine.recordSale(
         lines.cast<CartLine>(),
-        [CartPayment(method: method, amount: payment.amount, received: payment.received)],
+        [
+          for (final p in payments)
+            CartPayment(method: snapshot.methods.firstWhere((m) => m.code == p.methodCode), amount: p.amount, received: p.received, reference: p.reference),
+        ],
         operator,
         draftUuid: _draft.uuid,
         operationUuid: operationId,
@@ -558,38 +773,63 @@ class _Draft {
           productId: (m['produit_id'] as num).toInt(),
           packagingId: (m['conditionnement_id'] as num?)?.toInt(),
           quantity: parseMicros('${m['quantite']}') ?? BigInt.zero,
+          discount: (m['remise'] as num?)?.toInt() ?? 0,
         ),
       );
     }
-    final p = stored.content['paiement'];
-    if (p is Map) payment = _DraftPayment(methodCode: p['moyen'] as String, amount: (p['montant'] as num).toInt(), received: (p['recu'] as num?)?.toInt());
+    // `paiement` : panier conservé avant les paiements multiples.
+    final raw = stored.content['paiements'] ?? [if (stored.content['paiement'] != null) stored.content['paiement']];
+    for (final p in (raw as List).cast<Map>()) {
+      payments.add(
+        _DraftPayment(
+          methodCode: p['moyen'] as String,
+          amount: (p['montant'] as num).toInt(),
+          received: (p['recu'] as num?)?.toInt(),
+          reference: p['reference'] as String?,
+        ),
+      );
+    }
+    suspended = stored.content['suspendu'] == true;
   }
 
   final String uuid;
   int revision = 0;
   final List<_DraftLine> lines = [];
-  _DraftPayment? payment;
+  final List<_DraftPayment> payments = [];
+
+  /// Panier en attente (suspendu) : conservé, hors du panier courant.
+  bool suspended = false;
 
   _Draft copy() => _Draft(uuid)
     ..revision = revision
-    ..lines.addAll([for (final l in lines) _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, quantity: l.quantity)])
-    ..payment = payment;
+    ..lines.addAll([
+      for (final l in lines) _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, quantity: l.quantity, discount: l.discount),
+    ])
+    ..payments.addAll(payments)
+    ..suspended = suspended;
 
   Map<String, dynamic> toJson() => {
     'lignes': [
-      for (final l in lines) {'id': l.id, 'produit_id': l.productId, 'conditionnement_id': l.packagingId, 'quantite': formatMicros(l.quantity)},
+      for (final l in lines)
+        {'id': l.id, 'produit_id': l.productId, 'conditionnement_id': l.packagingId, 'quantite': formatMicros(l.quantity), 'remise': l.discount},
     ],
-    if (payment != null) 'paiement': {'moyen': payment!.methodCode, 'montant': payment!.amount, 'recu': payment!.received},
+    'paiements': [
+      for (final p in payments) {'moyen': p.methodCode, 'montant': p.amount, 'recu': p.received, 'reference': p.reference},
+    ],
+    if (suspended) 'suspendu': true,
   };
 }
 
 class _DraftLine {
-  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity});
+  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0});
 
   final String id;
   final int productId;
   final int? packagingId;
   BigInt quantity;
+
+  /// Remise de ligne en francs.
+  int discount;
 
   /// Ligne de vente au prix du catalogue courant, ou null si le produit (ou son conditionnement) a disparu.
   CartLine? materialize(Snapshot snapshot) {
@@ -597,14 +837,17 @@ class _DraftLine {
     if (product == null) return null;
     final packaging = packagingId == null ? null : product.packaging(packagingId);
     if (packagingId != null && packaging == null) return null;
-    return CartLine(product: product, packaging: packaging, quantity: quantity);
+    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount);
   }
 }
 
 class _DraftPayment {
-  const _DraftPayment({required this.methodCode, required this.amount, this.received});
+  const _DraftPayment({required this.methodCode, required this.amount, this.received, this.reference});
 
   final String methodCode;
   final int amount;
+
+  /// Espèces seulement : somme remise par le client.
   final int? received;
+  final String? reference;
 }

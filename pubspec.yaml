@@ -76,6 +76,10 @@ flutter:
   assets:
     - assets/branding/shopikaiss/
 
+  # Marque ShopiKaiss (logo validé le 2026-10-29), affichée dans l'en-tête de la caisse locale.
+  assets:
+    - assets/marque/embleme.png
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

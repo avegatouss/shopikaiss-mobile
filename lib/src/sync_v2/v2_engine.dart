@@ -302,8 +302,12 @@ class V2Engine extends CaisseEngine {
   }
 
   void _requireRight(Operator operator, String right, String label) {
-    if (!(_rights[operator.id] ?? const []).contains(right)) throw OfflineRefusal('${operator.name} n’a pas le droit de $label.');
+    if (!hasRight(operator, right)) throw OfflineRefusal('${operator.name} n’a pas le droit de $label.');
   }
+
+  /// Droits publiés par le serveur pour l'opérateur (`vente`, `ouverture_session`, `remise`) ; absent = refusé.
+  @override
+  bool hasRight(Operator operator, String right) => (_rights[operator.id] ?? const []).contains(right);
 
   @override
   Future<OfflineOperation> openSession(int float, Operator operator) => serialized(() async {
@@ -329,11 +333,12 @@ class V2Engine extends CaisseEngine {
           if (existing != null) return sameSale(await _view(existing));
         }
         final s = _requireSelling();
-        final payable = checkSale(s, lines, payments);
+        checkSale(s, lines, payments);
         _requireRight(operator, 'vente', 'vendre');
-        if (payments.length != 1 || !payments.single.method.isCash) {
-          throw const OfflineRefusal('Vente locale : un seul paiement, en espèces.');
-        }
+        if (lines.any((l) => l.discount > 0)) _requireRight(operator, 'remise', 'accorder une remise');
+        // Moyens admis : ceux du catalogue local (politique paiements.moyens_locaux et capacités du serveur), vérifiés
+        // par checkSale ; une seule ligne d'espèces (la monnaie se rend sur elle).
+        if (payments.where((p) => p.method.isCash).length > 1) throw const OfflineRefusal('Une seule ligne d’espèces par vente.');
         final cart = [
           for (final l in lines)
             V2CartLine(
@@ -344,7 +349,6 @@ class V2Engine extends CaisseEngine {
             ),
         ];
         final builder = V2SaleBuilder(products: _products, packagings: _packagings, revisions: _revisions, newUuid: _newUuid);
-        final payment = payments.single;
         final uuid = operationUuid ?? _newUuid();
         // Le contrat exige un UUID de brouillon ; un identifiant d'écran d'une autre forme en donne un, toujours le même
         // (le second encaissement du même panier reste refusé).
@@ -359,7 +363,15 @@ class V2Engine extends CaisseEngine {
             draftUuid: draft ?? _newUuid(),
             sessionUuid: _sessionUuid!,
             cart: cart,
-            payment: V2Payment(method: payment.method.code, amount: payable, received: payment.received ?? payable),
+            payments: [
+              for (final p in payments)
+                V2Payment(
+                  method: p.method.code,
+                  amount: p.amount,
+                  received: p.method.isCash ? (p.received ?? p.amount) : null,
+                  reference: p.method.isCash || p.reference == null || p.reference!.isEmpty ? null : p.reference,
+                ),
+            ],
             vat: _vat!,
           ),
           draftUuid: draft,
@@ -458,7 +470,7 @@ class V2Engine extends CaisseEngine {
                 },
             ],
             'paiements': [
-              for (final p in (content['paiements'] as List).cast<Map>()) {'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu']},
+              for (final p in (content['paiements'] as List).cast<Map>()) {'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu'], 'reference': p['reference']},
             ],
             'total': (content['totaux'] as Map)['a_payer'],
           }
