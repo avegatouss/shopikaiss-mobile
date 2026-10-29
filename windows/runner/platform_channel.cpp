@@ -20,11 +20,32 @@ std::string Utf8(const std::wstring& value) {
 }  // namespace
 
 std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
-CreatePlatformChannel(flutter::BinaryMessenger* messenger) {
+CreatePlatformChannel(flutter::BinaryMessenger* messenger, HWND window) {
   auto channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       messenger, "ci.khoga.shopikaiss/windows",
       &flutter::StandardMethodCodec::GetInstance());
-  channel->SetMethodCallHandler([](const auto& call, auto result) {
+  channel->SetMethodCallHandler([window, fullscreen = false,
+      saved = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)}, style = LONG_PTR{0}](const auto& call, auto result) mutable {
+    if (call.method_name() == "toggleFullscreen") {
+      if (!fullscreen) {
+        saved.length = sizeof(WINDOWPLACEMENT);
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        if (!GetWindowPlacement(window, &saved) || !GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
+          result->Error("fullscreen", "Plein ecran indisponible."); return;
+        }
+        style = GetWindowLongPtr(window, GWL_STYLE);
+        SetWindowLongPtr(window, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
+        SetWindowPos(window, nullptr, monitor.rcMonitor.left, monitor.rcMonitor.top,
+          monitor.rcMonitor.right - monitor.rcMonitor.left,
+          monitor.rcMonitor.bottom - monitor.rcMonitor.top, SWP_NOZORDER | SWP_FRAMECHANGED);
+      } else {
+        SetWindowLongPtr(window, GWL_STYLE, style);
+        SetWindowPlacement(window, &saved);
+        SetWindowPos(window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+      }
+      fullscreen = !fullscreen;
+      result->Success(flutter::EncodableValue(fullscreen)); return;
+    }
     if (call.method_name() == "dataDirectory") {
       PWSTR local = nullptr;
       if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE,

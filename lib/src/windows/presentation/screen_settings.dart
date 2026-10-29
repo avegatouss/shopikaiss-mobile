@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../platform/receipt_printing.dart';
+
 /// Local presentation preferences only; never changes shop policies or totals.
 class ScreenSettings {
   bool compact = false;
@@ -17,6 +19,19 @@ class ScreenSettings {
   String accent = 'Vert';
   String imageLayout = 'left';
   String imageFit = 'contain';
+  String backOffice = '';
+  Uri? get backOfficeUri {
+    final uri = Uri.tryParse(backOffice.trim());
+    return uri != null &&
+            uri.scheme == 'https' &&
+            uri.host.isNotEmpty &&
+            uri.userInfo.isEmpty &&
+            !uri.hasQuery &&
+            !uri.hasFragment
+        ? uri
+        : null;
+  }
+
   Color get accentColor => Color(accents[accent] ?? accents['Vert']!);
   static File? get file {
     final root = Platform.environment['LOCALAPPDATA'];
@@ -32,6 +47,7 @@ class ScreenSettings {
       final source = file;
       if (source == null || !source.existsSync()) return result;
       final data = jsonDecode(source.readAsStringSync()) as Map;
+      backOfficeRead(result, data);
       if (accents.containsKey(data['accent'])) {
         result.accent = data['accent'] as String;
       }
@@ -64,9 +80,16 @@ class ScreenSettings {
         'accent': accent,
         'image_layout': imageLayout,
         'image_fit': imageFit,
+        'back_office': backOffice,
       }),
       flush: true,
     );
+  }
+
+  static void backOfficeRead(ScreenSettings result, Map data) {
+    if (data['back_office'] is String) {
+      result.backOffice = data['back_office'] as String;
+    }
   }
 }
 
@@ -102,6 +125,44 @@ class ScreenSettingsPanel extends StatelessWidget {
             ],
           ),
           const Text('Réglages propres à ce poste. Aperçu immédiat.'),
+          TextFormField(
+            initialValue: settings.backOffice,
+            decoration: const InputDecoration(
+              labelText: 'Adresse HTTPS du back-office',
+              helperText: 'Sans identifiant ni paramètre de connexion.',
+            ),
+            onChanged: (v) {
+              settings.backOffice = v;
+              onChanged();
+            },
+          ),
+          if (settings.backOffice.isNotEmpty && settings.backOfficeUri == null)
+            const Text(
+              'Adresse HTTPS valide requise, sans paramètres ni identifiants.',
+            ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.print_outlined),
+            title: const Text('Imprimante par défaut de la caisse'),
+            subtitle: const Text(
+              'Choisir parmi les imprimantes Windows installées.',
+            ),
+            onTap: () async {
+              try {
+                await ReceiptPrinting.choose(context);
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Liste des imprimantes indisponible. Vérifiez les pilotes Windows.',
+                      ),
+                    ),
+                  );
+                }
+              }
+            },
+          ),
           const SizedBox(height: 16),
           const Text('Couleur principale'),
           Wrap(

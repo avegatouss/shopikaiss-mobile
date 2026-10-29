@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../ipc/protocol.dart';
+import '../platform/receipt_printing.dart';
 
 /// Read-only access to persisted sales; never retries or submits a payment.
 class SalesHistoryDialog extends StatefulWidget {
@@ -110,6 +111,27 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
             ),
     ),
     actions: [
+      if (_ticket != null)
+        TextButton.icon(
+          icon: const Icon(Icons.print_outlined),
+          onPressed: _busy
+              ? null
+              : () async {
+                  setState(() => _busy = true);
+                  String message;
+                  try {
+                    message = await ReceiptPrinting.printLines(_ticket!);
+                  } catch (_) {
+                    message = 'Impression à vérifier. Aucun renvoi automatique ; vente conservée.';
+                  }
+                  if (mounted && context.mounted) {
+                    setState(() => _busy = false);
+                    ScaffoldMessenger.of(context)
+                        .showSnackBar(SnackBar(content: Text(message)));
+                  }
+                },
+          label: const Text('Imprimer le duplicata'),
+        ),
       TextButton(
         onPressed: _busy ? null : () => _load(),
         child: Text(_ticket == null ? 'Actualiser' : 'Retour aux ventes'),

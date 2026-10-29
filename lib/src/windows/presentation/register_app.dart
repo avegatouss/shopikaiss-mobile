@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../platform/windows_platform.dart';
 
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
@@ -10,6 +13,7 @@ import 'brand_logo.dart';
 import 'suspended_drafts.dart';
 import 'screen_settings.dart';
 import 'sale_options_preview.dart';
+import 'quantity_step.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -161,6 +165,54 @@ class _RegisterState extends State<_Register> {
   }
 
   final _scanFocus = FocusNode();
+  final _searchFocus = FocusNode();
+  bool _fullscreen = false;
+  Future<void> _toggleFullscreen() async {
+    try {
+      final enabled = await const WindowsPlatform().toggleFullscreen();
+      if (mounted) setState(() => _fullscreen = enabled);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Plein écran indisponible sur cette installation.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _backOffice() async {
+    final uri = _screen.backOfficeUri;
+    if (uri == null) return;
+    try {
+      if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw StateError('launch');
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Impossible d’ouvrir le back-office.')),
+        );
+      }
+    }
+  }
+
+  void _shortcuts() => showDialog<void>(
+    context: context,
+    builder: (_) => AlertDialog(
+      title: const Text('Raccourcis de la caisse'),
+      content: const Text(
+        'F1 : cette aide\nF2 : scanner un article\nCtrl+F : rechercher un produit\nF4 : ouvrir le paiement\nF8 : mettre le panier en attente\nF11 : entrer / sortir du plein écran\nEntrée : valider la saisie du montant\nÉchap : fermer une fenêtre lorsque permis',
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Fermer'),
+        ),
+      ],
+    ),
+  );
   WindowsRegisterController get c => widget.controller;
   @override
   void initState() {
@@ -174,6 +226,7 @@ class _RegisterState extends State<_Register> {
     _search.dispose();
     _scan.dispose();
     _scanFocus.dispose();
+    _searchFocus.dispose();
     super.dispose();
   }
 
@@ -341,6 +394,13 @@ class _RegisterState extends State<_Register> {
     });
   }
 
+  Future<void> _stepQuantity(Map<String, dynamic> line, int step) async {
+    if (!_canEdit) return;
+    final quantity = steppedQuantity(line['quantity'] ?? line['quantity_label'], step);
+    if (quantity == null) return;
+    await c.command(HostCommand.changeQuantity, {'line_id': line['id'], 'quantity': quantity});
+  }
+
   Future<void> _clear() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -369,6 +429,10 @@ class _RegisterState extends State<_Register> {
       data: Theme.of(context).copyWith(colorScheme: _palette),
       child: CallbackShortcuts(
         bindings: {
+          const SingleActivator(LogicalKeyboardKey.f1): _shortcuts,
+          const SingleActivator(LogicalKeyboardKey.f11): _toggleFullscreen,
+          const SingleActivator(LogicalKeyboardKey.keyF, control: true):
+              _searchFocus.requestFocus,
           const SingleActivator(LogicalKeyboardKey.f4): _payment,
           const SingleActivator(LogicalKeyboardKey.f2): _scanFocus.requestFocus,
           const SingleActivator(LogicalKeyboardKey.f8): () {
@@ -397,6 +461,33 @@ class _RegisterState extends State<_Register> {
               ],
             ),
             actions: [
+              PopupMenuButton<String>(
+                tooltip: 'Menu du poste',
+                onSelected: (value) {
+                  if (value == 'full') _toggleFullscreen();
+                  if (value == 'back') _backOffice();
+                  if (value == 'help') _shortcuts();
+                },
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'full',
+                    child: Text(
+                      _fullscreen
+                          ? 'Quitter le plein écran · F11'
+                          : 'Plein écran · F11',
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'back',
+                    enabled: _screen.backOfficeUri != null,
+                    child: const Text('Retour au back-office'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'help',
+                    child: Text('Raccourcis · F1'),
+                  ),
+                ],
+              ),
               Builder(
                 builder: (context) => IconButton(
                   tooltip: 'Réglages de l’écran',
@@ -583,6 +674,7 @@ class _RegisterState extends State<_Register> {
             Expanded(
               child: TextField(
                 controller: _search,
+                focusNode: _searchFocus,
                 enabled: _canEdit,
                 decoration: InputDecoration(
                   isDense: true,
@@ -812,9 +904,15 @@ class _RegisterState extends State<_Register> {
                             c.ready && !c.busy && c.uncertainOperation == null
                             ? () => _quantity(line)
                             : null,
-                        subtitle: Text(
-                          '${line['quantity_label'] ?? ''} · ${line['total_label'] ?? ''}',
-                        ),
+                        subtitle: Row(mainAxisSize: MainAxisSize.min, children: [
+                          IconButton(tooltip: 'Diminuer la quantité', visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.remove, size: 18),
+                            onPressed: _canEdit && steppedQuantity(line['quantity'] ?? line['quantity_label'], -1) != null ? () => _stepQuantity(line, -1) : null),
+                          Flexible(child: Text('${line['quantity_label'] ?? ''}', maxLines: 1)),
+                          IconButton(tooltip: 'Augmenter la quantité', visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.add, size: 18),
+                            onPressed: _canEdit ? () => _stepQuantity(line, 1) : null),
+                        ]),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [

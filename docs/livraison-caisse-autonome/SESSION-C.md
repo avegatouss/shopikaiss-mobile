@@ -213,3 +213,9 @@ Validation : 47 tests Windows passent, analyse sans remarque, rendu Flutter fict
 Moteur B fusionné sans conflit. Commandes Windows setGlobalDiscount, setDelivery, setNote ajoutées. Panneau client/remise/livraison désormais réel pour les trois fonctions moteur, avec contrôles capabilities et motifs de refus. Sélection/création client encore indisponible. Remise de ligne : montant ou pourcentage, valeur initiale issue de discount_entry. Totaux moteur affichés pour remise globale/livraison et arrondi espèces, sans recalcul UI.
 
 L’activation contract21 reste inchangée : aucune activation forcée ni vente démo effectuée. Les moyens déclaratifs de B sont inclus dans le moteur, mais l’éditeur multi-paiements et référence reste à terminer côté Windows. Le téléchargement d’images reste en attente.
+
+## Quantités, poste et impression
+
+Boutons −/+ dans le panier, pas de retrait implicite à zéro, pas de flottants ; contrôle métier moteur conservé. Menu poste : plein écran natif/F11, back-office HTTPS configurable, aide raccourcis/F1, Ctrl+F recherche. Choix imprimante parmi pilotes Windows enregistré pour la caisse ; impression du duplicata moteur depuis historique, sans renvoi automatique ni nouvelle vente. Format PDF 80 mm ; validation papier et multi-écrans encore nécessaire. Pas de ticket original inventé (commande moteur demandée).
+
+Les demandes catalogue complet (aujourd’hui 60 résultats), filtres marque/fournisseur, clients, clôture, promotions et afficheur sont suivies dans PERIPHERIQUES-ET-PARITE.md et le journal partagé. Aucun de ces points n’est déclaré terminé tant que son raccordement et sa recette ne sont pas faits.
