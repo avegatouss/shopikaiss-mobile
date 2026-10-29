@@ -615,6 +615,8 @@ class LocalRegisterAdapter {
       if (method.referenceMode == 'obligatoire' && p.reference == null) return 'Référence obligatoire pour « ${method.name} ».';
       paid += p.amount;
     }
+    // Trop-perçu sur un moyen électronique (rendu ou avance) : en ligne seulement (décision A, 2.1).
+    if (paid > payable && payments.any((p) => p.received == null)) return 'Trop-perçu électronique : en ligne seulement. Saisissez le montant exact.';
     if (paid != payable) return 'La somme des paiements (${formatFcfa(paid)}) doit égaler le montant à payer (${formatFcfa(payable)}).';
     return null;
   }

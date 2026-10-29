@@ -476,6 +476,16 @@ void main() {
     expect((view['products'] as List).single, containsPair('brand', 'Dove'));
     final prepared = await adapter.execute('preparePayment', {}, null);
     expect([for (final m in prepared['methods'] as List) m['reference']]..sort(), ['aucune', 'obligatoire']);
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    await expectLater(
+      adapter.execute('setPayments', {
+        'payments': [
+          {'method': 'especes', 'amount': 300},
+          {'method': 'wave', 'amount': 300, 'reference': 'T-2'},
+        ],
+      }, null),
+      throwsA(isA<AdapterFailure>().having((f) => f.message, 'message', 'Trop-perçu électronique : en ligne seulement. Saisissez le montant exact.')),
+    );
     await adapter.close();
   });
 }
