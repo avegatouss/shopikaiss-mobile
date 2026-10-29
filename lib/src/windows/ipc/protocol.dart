@@ -8,6 +8,8 @@ const maxIpcFrameBytes = 1024 * 1024;
 enum HostCommand {
   pair,
   login,
+  logout,
+  openSession,
   addProduct,
   clear,
   status,

@@ -43,9 +43,15 @@ void main() {
       {'id': 'b', 'command': 'login', 'arguments': {'operator_id': 7, 'pin': '1234'}},
       {'id': 'c', 'command': 'scan', 'arguments': {'code': '6190000000011'}},
       {'id': 'd', 'command': 'setPayment', 'arguments': {'method': 'especes', 'received': 1000}},
+      {'id': 'locked', 'command': 'logout'},
+      {'id': 'lockedView', 'command': 'view'},
     ]);
     expect(first.values.every((r) => r['ok'] == true), isTrue, reason: '$first');
     final draft = (first['c']!['result'] as Map)['draft_id'];
+    expect((first['locked']!['result'] as Map)['operator'], isNull);
+    expect((first['lockedView']!['result'] as Map)['can_pay'], isFalse);
+    expect((first['lockedView']!['result'] as Map)['draft_id'], draft);
+    expect((first['lockedView']!['result'] as Map)['lines'], isNotEmpty);
 
     // Hôte arrêté (EOF) puis relancé sur la même base : l'origine, l'appairage et le panier sont restaurés.
     host = await open(transport);

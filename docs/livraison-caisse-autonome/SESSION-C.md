@@ -169,3 +169,11 @@ Lot 718ec0e : grille 58/42, présentations visuelle/compacte, scan F2 séparé d
 Six PNG fournis par le responsable conservés sans modification sous assets/branding/shopikaiss (empreintes comparées aux originaux). Logo horizontal or/noir sur fond clair et or sur noir en thème sombre, utilisé à la connexion, dans l'en-tête et sur l'écran non configuré. Icône Windows ICO dérivée du fichier 04, six tailles 16 à 256 px ; aucun changement du dessin original. pubspec.yaml ne change que l'enregistrement des ressources, aucune dépendance/version modifiée ; ces ressources seront également embarquées si B reprend ce manifeste pour Android.
 
 Pied du panier rapproché du web : libellé À payer et actions Vider le panier / Payer (F4) côte à côte. 45/45 tests Windows réussis, analyse sans anomalie. Rendu natif côte à côte non validé ; la parité complète reste ouverte.
+
+## Raccordement v2 — 29/10
+
+B 9b0a5dd et 83fd64e intégrés par fusion c36df32, sans conflit. Hôte reconstruit sur V2Engine (contrat 2.0.2) ; interface privée inchangée sauf ajout des commandes openSession/logout déjà fournies par B. Bootstrap : connexion puis ouverture locale selon capacités serveur, fond de caisse validé par le moteur ; sortie vers la connexion déconnecte réellement le caissier. Totaux HT/TVA affichés depuis les libellés moteur.
+
+Validation : analyse Windows sans anomalie, 45 tests Windows et 24 tests client/moteur v2 passent. Test de trames enrichi : logout interdit le paiement et conserve le même panier, repris après redémarrage. Exécutable moteur v2 reconstruit avant la suite, aucun test de cette passe sur l'ancien binaire v1.
+
+Protection complémentaire : présence du journal v1 pending-sale.json bloque le démarrage v2 sans le modifier ; utiliser l'ancienne version pour résoudre cet encaissement. Le journal v2 est pending-sale-v2.json, dans le même dossier de données. Analyse ciblée finale propre. La base existante est conservée, aucune suppression ni réappairage automatique. Un nouvel appairage v2 et la recette réelle sur Tablette Pâtisserie restent nécessaires ; le succès sur Caisse 2 de B n'est pas une preuve de cette interface installée.

@@ -543,6 +543,12 @@ class _RegisterState extends State<_Register> {
                   ),
           ),
           const Divider(),
+          if (c.view['totals'] is Map) ...[
+            Text(
+              'Base HT : ${(c.view['totals'] as Map)['base_ht_label'] ?? "—"}',
+            ),
+            Text('TVA : ${(c.view['totals'] as Map)['vat_label'] ?? "—"}'),
+          ],
           const Text('À payer', textAlign: TextAlign.end),
           Text(
             c.view['total_label'] as String? ?? '—',
