@@ -14,7 +14,7 @@ import 'package:uuid/uuid.dart';
 
 /// Essai réel du contrat 2.1 contre la démo (jamais la production), par phases sur une base conservée :
 ///
-///   SK_ORIGINE=https://demo.khoga.ci SK_BASE=<dossier> SK_PHASE=<phase> SK_OPERATEUR=3 SK_PIN=… \
+///   SK_ORIGINE=https://demo.khoga.ci SK_BASE=dossier SK_PHASE=phase SK_OPERATEUR=3 SK_PIN=… \
 ///     flutter test test/integration/essai_21_test.dart
 ///
 /// Phases : `appairage` (SK_CODE, instantané 2.0, relevé sans vente) ; `vente_declaree` (moitié espèces, moitié Wave
