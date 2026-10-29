@@ -13,7 +13,7 @@ Spécification : commit serveur `2221327e`, confirmé dans le worktree de la ses
 
 ## Environnement
 
-Flutter 3.47.7 / Dart 3.13.5. Visual Studio 2026 installé, mais `flutter doctor -v` signale CMake et SDK Windows manquants. Pas d’installation système ni changement de signature Android effectués.
+Flutter 3.47.7 / Dart 3.13.5. Visual Studio 2026 et les composants requis sont maintenant installés (voir ci-dessous). Les premiers essais avaient identifié CMake, SDK Windows et autorisation des symlinks manquants. Aucun changement de signature Android effectué.
 
 ### Mise à jour après autorisation d’installation
 
@@ -29,7 +29,7 @@ La compilation de contrôle a été relancée après installation de NuGet. Ces 
 - Transport privé stdin/stdout, limites de taille/version, délais bornés, sérialisation hôte et résultat inconnu après rupture. Pas de replay automatique d’encaissement. Tests avec vrai sous-processus local.
 - Interface catalogue/panier et dialogue de paiement sur une projection du moteur ; aucun calcul fiscal dupliqué. Révisions anciennes ignorées et blocage du réencaissement après résultat inconnu.
 - Adaptateur d’impression TCP sur réseau local, sans nouvelle vente ni impulsion ajoutée ; testé contre serveur TCP local, pas imprimante physique.
-- Code natif chemin LocalAppData, protection DPAPI utilisateur et mono-instance UI ; compilation/exécution native encore non vérifiée.
+- Code natif chemin LocalAppData, protection DPAPI utilisateur et mono-instance UI ; protection et verrou vérifiés par CTest, recette du canal dans l'application installée restante.
 - Scripts de test et de build de revue. Le bootstrap par défaut affiche la configuration manquante et n’autorise aucun encaissement. Aucun faux moteur en release.
 
 Proposition de raccordement détaillée : [CONTRAT-ADAPTATEUR-WINDOWS.md](CONTRAT-ADAPTATEUR-WINDOWS.md). Les quatre demandes à B restent ouvertes. Les modifications en cours de B ont été vues dans son checkout ; elles n’ont été ni copiées ni modifiées.
@@ -40,7 +40,7 @@ Proposition de raccordement détaillée : [CONTRAT-ADAPTATEUR-WINDOWS.md](CONTRA
 - `flutter test --no-pub test/windows` : **13 tests réussis**, dont transport sous-processus, réponse perdue, timeout, encaissement incertain, état ancien et dispositions 1280×800 / 800×600.
 - Un blocage de fermeture des pipes Windows a été découvert puis corrigé : EOF est envoyé avant d’attendre l’arrêt, les sorties continuent d’être drainées. Suite repassée après correction.
 - Aucun diff sur `lib/src/offline`, Android, pubspec/lock et options d’analyse dans le worktree Windows. Aucune opération serveur/production exécutée.
-- Tentative de build release dédié : échec explicite car les liens symboliques ne sont pas autorisés sur ce poste. `flutter doctor` signale également CMake/SDK Windows manquants. Ne pas interpréter les tests Flutter comme une compilation C++ réussie.
+- Première tentative de build release dédié (avant installation) : échec sur les symlinks et prérequis CMake/SDK. Ces prérequis sont maintenant résolus. Ne pas interpréter les tests Flutter comme une compilation complète de l'application réussie.
 
 Le script de test a été exécuté via `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool/windows/Test-Windows.ps1 -FlutterRoot C:/dev/flutter` : exception limitée au processus, sans modification de la politique globale de la machine.
 
@@ -69,6 +69,16 @@ Travail C effectué :
 - Verrou mono-instance non copiable ; acquisitions répétées refusées sans fuite de handle ; un échec sur une instance existante ferme son handle immédiatement.
 - `tool/windows/Test-Native.ps1` compile le vrai code C++ avec MSVC et exécute CTest : aller-retour DPAPI binaire et 64 Kio, rejet altération/vide/dépassement, deuxième processus refusé, acquisition possible après fermeture du propriétaire. **1/1 scénario natif réussi**, assertions actives en Release. Aucun secret réel utilisé. Ne prouve ni le fonctionnement entre comptes Windows ni la protection d'une sauvegarde portable.
 - Analyse Dart sans anomalie et **13/13 tests Windows réussis à nouveau**.
-- La compilation Flutter a révélé STL1011 dans le plugin WebView épinglé, qui utilise les coroutines expérimentales. Option de compatibilité MSVC explicitement limitée à ce plugin dans `windows/CMakeLists.txt`, sans changement pubspec/lock ni modification de source tierce. Remplacement à prévoir lors de la mise à niveau du plugin par B.
+- La compilation Flutter a révélé STL1011 dans les plugins WebView et permissions épinglés, qui utilisent les coroutines expérimentales. Option de compatibilité MSVC explicitement limitée à ces deux plugins dans `windows/CMakeLists.txt`, sans changement pubspec/lock ni modification de source tierce. Remplacement à prévoir lors de leur mise à niveau par B.
 
 Le contrat d'adaptateur précise désormais que `saleStatus` ne doit jamais soumettre à nouveau une vente réseau pour en connaître l'état. Les quatre demandes C à B restent ouvertes ; ne pas fabriquer de moteur release en attendant.
+
+### Compilation Release et démarrage : réussis
+
+`Build-Integration.ps1` termine avec code 0 et produit `build/windows/x64/runner/Release/shopikaiss_terminal.exe`, accompagné de ses bibliothèques et données. Le dossier contient `integration-only.json` avec `production_ready:false`, SHA-256 et état Git au build. Il faut conserver le dossier complet ; ce n'est pas un installateur signé et le moteur de vente n'est toujours pas raccordé.
+
+Le premier contrôle de fermeture a découvert un plantage réel `0xc0000602` dans `coremessaging.dll`. Le plugin WebView épinglé crée une DispatcherQueue à son enregistrement, même sans aucune WebView. Le runner de la caisse native utilise maintenant `RegisterCashierPlugins` : permissions, impression et liens externes seulement. Après retrait de l'enregistrement WebView, recompilation réussie et fermeture normale code 0. Le fichier généré et les dépendances partagées sont conservés, sans modification Android. Une future utilisation de WebView sur Windows devra faire l'objet d'une qualification de son cycle de vie ; ne pas lancer l'ancien point d'entrée WebView avec ce runner.
+
+`tool/windows/Test-Launch.ps1` : **PASS**, fenêtre native du processus créée, processus stable pendant l'essai, fermeture par WM_CLOSE et code de sortie 0. Essai masqué, ne prétend pas valider le rendu visuel, les imprimantes ou les ventes. Le contrôle utilise EnumWindows : `MainWindowHandle` ignore les fenêtres masquées et n'était pas une preuve suffisante. Les essais n'ont utilisé ni identifiants ni données client.
+
+État final de ce lot : 13 tests Flutter Windows réussis, analyse Dart propre, scénario CTest natif réussi, compilation Release et contrôle de démarrage/fermeture réussis. Restent le raccordement au moteur B, les fonctionnalités métier, la supervision, les périphériques et la distribution signée. Aucune recette de vente de bout en bout et aucune livraison production.

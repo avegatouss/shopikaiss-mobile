@@ -45,8 +45,11 @@ Depuis ce worktree, après résolution des dépendances existantes :
 ./tool/windows/Test-Windows.ps1 -FlutterRoot C:/dev/flutter
 ./tool/windows/Test-Native.ps1
 ./tool/windows/Build-Integration.ps1 -FlutterRoot C:/dev/flutter
+./tool/windows/Test-Launch.ps1
 ```
 
 Si la politique locale interdit les scripts, une exécution explicitement limitée au processus est possible avec `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool/windows/Test-Windows.ps1 -FlutterRoot C:/dev/flutter`, après lecture du script. Ne pas changer la politique globale pour ces tests.
 
-La dernière commande construit uniquement une version de revue fermée aux ventes, jamais un installateur production. Ne pas substituer des tests Flutter ou CTest au contrôle de l'exécutable installé.
+La commande Build-Integration construit uniquement une version de revue fermée aux ventes, jamais un installateur production. Test-Launch vérifie de manière masquée la création de fenêtre et la fermeture normale du processus ; il ne valide ni le rendu visuel ni le moteur métier. Ne pas substituer ces tests au contrôle de l'application installée chez le pilote.
+
+Le runner est dédié à `lib/src/windows/main_windows.dart`. Il initialise les plugins permissions, impression et liens externes via `RegisterCashierPlugins`, pas le plugin WebView de l'ancien point d'entrée mobile. Ce dernier provoquait une erreur de fermeture Windows `coremessaging.dll / 0xc0000602` même sans WebView affichée. Les dépendances partagées restent inchangées. B doit conserver cet enregistrement explicite lors du raccordement, ou qualifier tout changement de plugins sur Windows.

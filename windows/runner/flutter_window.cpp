@@ -2,7 +2,7 @@
 
 #include <optional>
 
-#include "flutter/generated_plugin_registrant.h"
+#include "cashier_plugins.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -24,7 +24,7 @@ bool FlutterWindow::OnCreate() {
   if (!flutter_controller_->engine() || !flutter_controller_->view()) {
     return false;
   }
-  RegisterPlugins(flutter_controller_->engine());
+  RegisterCashierPlugins(flutter_controller_->engine());
   platform_channel_ = CreatePlatformChannel(flutter_controller_->engine()->messenger());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 

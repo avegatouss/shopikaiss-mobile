@@ -57,14 +57,17 @@ add_subdirectory("runner")
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
-# The pinned WebView plugin still uses /await and experimental/coroutine.
+# The pinned WebView and permission plugins use experimental coroutines.
 # MSVC 19.51 requires this explicit compatibility opt-in. Scope it to that
-# plugin, without changing the shared dependency lock or third-party sources.
-# Remove when B upgrades the plugin to standard C++20 coroutines.
-if(MSVC AND TARGET flutter_inappwebview_windows_plugin)
-  target_compile_definitions(flutter_inappwebview_windows_plugin PRIVATE
-    _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
-endif()
+# plugins, without changing the shared dependency lock or third-party sources.
+# Remove when B upgrades these plugins to standard C++20 coroutines.
+foreach(legacy_coroutine_plugin IN ITEMS
+    flutter_inappwebview_windows_plugin permission_handler_windows_plugin)
+  if(MSVC AND TARGET ${legacy_coroutine_plugin})
+    target_compile_definitions(${legacy_coroutine_plugin} PRIVATE
+      _SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+  endif()
+endforeach()
 
 
 # === Installation ===
