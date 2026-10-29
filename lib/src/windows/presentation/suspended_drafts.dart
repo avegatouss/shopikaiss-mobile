@@ -53,6 +53,42 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
     }
   }
 
+  Future<void> remove(Map<String, dynamic> item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Supprimer ce panier en attente ?'),
+        content: Text(
+          '${item['summary'] ?? 'Panier'}\nCette action retire ce panier local. Aucune vente ne sera annulée.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Conserver'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Supprimer ce panier'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    final c = widget.controller;
+    if (!c.ready || c.busy || c.uncertainOperation != null) return;
+    setState(() => busy = true);
+    await c.command(HostCommand.deleteDraft, {'draft_id': item['draft_id']});
+    if (!mounted) return;
+    if (c.message != null) {
+      setState(() {
+        error = c.message;
+        busy = false;
+      });
+    } else {
+      await load();
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AlertDialog(
     title: const Text('Paniers en attente sur ce poste'),
@@ -81,7 +117,21 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
                         subtitle: Text(
                           '${item['lines_count']} ligne(s) · ${item['total_label'] ?? "—"}',
                         ),
-                        trailing: const Icon(Icons.play_arrow),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Reprendre ce panier',
+                              icon: const Icon(Icons.play_arrow),
+                              onPressed: () => resume(item),
+                            ),
+                            IconButton(
+                              tooltip: 'Supprimer ce panier en attente',
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed: () => remove(item),
+                            ),
+                          ],
+                        ),
                         onTap: () => resume(item),
                       );
                     },

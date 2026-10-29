@@ -164,9 +164,12 @@ void main() {
       final host = await ProcessWindowsHost.start(
         dart!,
         arguments: ['test/windows/fixtures/host_process.dart', mode],
-        timeout: const Duration(seconds: 2),
+        timeout: const Duration(seconds: 15),
       );
       addTearDown(host.close);
+      // Warm up the Dart child before measuring the malformed response. A cold
+      // JIT startup must not turn this protocol test into a timeout test.
+      await host.call(HostCommand.status);
       final disconnected = host.events.firstWhere(
         (event) => event['name'] == 'disconnected',
       );

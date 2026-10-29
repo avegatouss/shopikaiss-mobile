@@ -223,3 +223,9 @@ Les demandes catalogue complet (aujourd’hui 60 résultats), filtres marque/fou
 ## Taille, catégories et accès session
 
 Taille des produits 150–330 px avec boutons −/+ dans les réglages. Flèches gauche/droite autour de la liste de catégories. Accès session dans menu du poste : relecture état/capacités, conservation de la session existante, saisie fond de caisse et seconde vérification avant commande openSession. Aucun ajout de clôture fictive. Analyse sans remarque ; 49 tests Windows passent en série.
+
+## Paiements multiples et entretien des paniers
+
+Raccordement setPayments : jusqu'a 10 lignes, reference par paiement, validation automatique apres 250 ms et totaux exclusivement fournis par le moteur. Toute edition invalide immediatement la confirmation, avec controle supplementaire au clic. Les moyens proposes restent ceux autorises par le serveur ; aucune activation 2.1 forcee. Suppression d'un panier en attente avec confirmation explicite.
+
+Moteur B 2180f4c integre (plafond global distinct). Validation : 50 tests Windows reussis, analyse sans remarque ; 19 tests moteur v2/regles web reussis. Test de reponse IPC malformee stabilise par une requete de demarrage avant injection : le demarrage JIT n'est plus confondu avec la panne testee. Recette des nouveaux paiements sur la demo et impression physique restent a effectuer.

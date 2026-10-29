@@ -14,6 +14,7 @@ import 'suspended_drafts.dart';
 import 'screen_settings.dart';
 import 'sale_options_preview.dart';
 import 'quantity_step.dart';
+import 'multiple_payments.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -1288,6 +1289,25 @@ class _PaymentState extends State<_Payment> {
                   ),
               ],
             ),
+            TextButton.icon(
+              onPressed: c.canPay
+                  ? () async {
+                      _validation?.cancel();
+                      ++_editRevision;
+                      setState(() => _accepted = false);
+                      final committed = await showDialog<bool>(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (_) => MultiplePayments(controller: c),
+                      );
+                      if (mounted && context.mounted && committed == true) {
+                        Navigator.pop(context);
+                      }
+                    }
+                  : null,
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+              label: const Text('Plusieurs paiements / référence'),
+            ),
             const SizedBox(height: 12),
             if (_cash) ...[
               TextField(
@@ -1341,6 +1361,11 @@ class _PaymentState extends State<_Payment> {
         FilledButton(
           onPressed: c.canPay && _accepted && c.view['payment_valid'] == true
               ? () async {
+                  if (!_accepted ||
+                      !c.canPay ||
+                      c.view['payment_valid'] != true) {
+                    return;
+                  }
                   await c.commitSale();
                   if (context.mounted &&
                       c.receipt != null &&

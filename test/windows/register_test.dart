@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/ipc/protocol.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/register_app.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/register_controller.dart';
+import 'package:shopikaiss_terminal/src/windows/presentation/multiple_payments.dart';
 
 class _Host implements WindowsHost {
   final changes = StreamController<Map<String, dynamic>>.broadcast();
@@ -390,6 +391,88 @@ void main() {
     expect(host.argumentsByCommand[HostCommand.setNote], {'text': 'Merci'});
     expect(host.calls, isNot(contains(HostCommand.commitSale)));
   });
+
+  testWidgets(
+    'declared payments send reference and editing disables confirmation',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await c.refresh();
+      c.paymentMethods = [
+        {
+          'code': 'wave',
+          'name': 'Wave',
+          'cash': false,
+          'reference': 'obligatoire',
+        },
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: MultiplePayments(controller: c)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Wave').last);
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Montant affecté (F CFA)'),
+        '2000',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Référence obligatoire'),
+        'REF-DEMO',
+      );
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Confirmer ces paiements'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.setPayments], {
+        'payments': [
+          {'method': 'wave', 'amount': 2000, 'reference': 'REF-DEMO'},
+        ],
+      });
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Confirmer ces paiements'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Montant affecté (F CFA)'),
+        '1000',
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Confirmer ces paiements'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(host.calls, isNot(contains(HostCommand.commitSale)));
+    },
+  );
 
   testWidgets('late amount validation never enables an edited payment', (
     tester,
