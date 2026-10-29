@@ -1,9 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:shopikaiss_terminal/src/windows/platform/sale_intent.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/ipc/protocol.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/register_app.dart';
@@ -123,6 +126,89 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  if (Platform.environment['SHOPIKAISS_VISUAL_PREVIEW'] == '1') {
+    testWidgets('render visual review with fictitious data', (tester) async {
+      await tester.runAsync(() async {
+      final font = FontLoader('Segoe UI');
+      font.addFont(
+        Future.value(
+          ByteData.sublistView(
+            await File('C:/Windows/Fonts/segoeui.ttf').readAsBytes(),
+          ),
+        ),
+      );
+      await font.load();
+      });
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      host.state['store_name'] = 'Boutique de démonstration';
+      host.state['sync_label'] = 'À jour';
+      final names = [
+        'Riz parfumé 5 kg',
+        'Huile végétale 1 L',
+        'Savon de ménage',
+        'Café moulu 250 g',
+        'Biscuits secs',
+        'Eau minérale 1,5 L',
+        'Pâtes alimentaires',
+        'Lait en poudre',
+        'Jus de bissap',
+        'Concentré de tomate',
+        'Farine de blé',
+        'Sucre en poudre',
+      ];
+      host.state['products'] = [
+        for (var i = 0; i < 24; i++)
+          <String, dynamic>{
+            'id': i,
+            'name': names[i % names.length],
+            'price_label': '1 500 F',
+            'stock_label': '24 disponibles',
+          },
+      ];
+      host.state['lines'] = [
+        for (var i = 0; i < 6; i++)
+          <String, dynamic>{
+            'id': '$i',
+            'name': names[i],
+            'quantity_label': '1',
+            'total_label': '1 500 F',
+          },
+      ];
+      host.state['total_label'] = '9 000 F';
+      host.state['totals'] = {
+        'base_ht_label': '7 627 F',
+        'vat_label': '1 373 F',
+      };
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      final key = GlobalKey();
+      await tester.pumpWidget(
+        RepaintBoundary(
+          key: key,
+          child: WindowsRegisterApp(controller: c),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.runAsync(() async {
+        final boundary =
+            key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
+        final image = await boundary.toImage();
+        final png = await image.toByteData(format: ui.ImageByteFormat.png);
+        final output = File('build/visual-review/caisse-windows.png');
+        await output.parent.create(recursive: true);
+        await output.writeAsBytes(png!.buffer.asUint8List());
+        image.dispose();
+      });
+    });
+  }
   testWidgets('search Enter never scans and packaging choice reaches engine', (
     tester,
   ) async {

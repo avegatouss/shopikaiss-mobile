@@ -17,9 +17,43 @@ class WindowsRegisterApp extends StatelessWidget {
     title: 'Shopikaiss · Caisse',
     theme: ThemeData(
       useMaterial3: true,
+      fontFamily: 'Segoe UI',
       colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xff164e42)),
       scaffoldBackgroundColor: const Color(0xfff3f5f4),
+      visualDensity: VisualDensity.compact,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        titleTextStyle: TextStyle(
+          color: Color(0xff26332e),
+          fontSize: 14,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        elevation: 0,
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: Color(0xffdbe3de)),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(40, 40),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(40, 40),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+      ),
       inputDecorationTheme: const InputDecorationTheme(
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(),
@@ -219,10 +253,10 @@ class _RegisterState extends State<_Register> {
       },
       child: Scaffold(
         appBar: AppBar(
-          toolbarHeight: 48,
+          toolbarHeight: 40,
           title: Row(
             children: [
-              const ShopikaissLogo(width: 155),
+              const ShopikaissLogo(width: 125),
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
@@ -248,10 +282,17 @@ class _RegisterState extends State<_Register> {
                 c.ready ? Icons.check_circle_outline : Icons.warning_amber,
                 size: 18,
               ),
-              label: Text(
-                c.ready
-                    ? c.view['sync_label'] as String? ?? 'Moteur local prêt'
-                    : 'Moteur local indisponible',
+              label: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.sizeOf(context).width * .32,
+                ),
+                child: Text(
+                  c.ready
+                      ? c.view['sync_label'] as String? ?? 'Moteur local prêt'
+                      : 'Moteur local indisponible',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
             if (widget.onConnection != null)
@@ -275,7 +316,7 @@ class _RegisterState extends State<_Register> {
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
-                  vertical: 6,
+                  vertical: 2,
                 ),
                 child: Row(
                   children: [
@@ -441,8 +482,8 @@ class _RegisterState extends State<_Register> {
                 )
               : GridView.builder(
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 185,
-                    mainAxisExtent: 130,
+                    maxCrossAxisExtent: 175,
+                    mainAxisExtent: 115,
                     crossAxisSpacing: 4,
                     mainAxisSpacing: 4,
                   ),
@@ -462,24 +503,58 @@ class _RegisterState extends State<_Register> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Expanded(
-                                child: Text(
-                                  p['name'] as String? ?? '',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Padding(
+                                      padding: EdgeInsets.only(
+                                        right: 6,
+                                        top: 2,
+                                      ),
+                                      child: Icon(
+                                        Icons.inventory_2_outlined,
+                                        size: 19,
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        p['name'] as String? ?? '',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                          fontSize: 13,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      p['price_label'] as String? ?? '—',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
                                   ),
-                                ),
+                                  const CircleAvatar(
+                                    radius: 12,
+                                    backgroundColor: Color(0xff164e42),
+                                    child: Icon(
+                                      Icons.add,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              Text(
-                                p['price_label'] as String? ?? '—',
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 4),
                               Text(
                                 p['stock_label'] as String? ??
                                     'Stock à vérifier',
@@ -505,22 +580,43 @@ class _RegisterState extends State<_Register> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Text(
-            'Panier',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              const Icon(Icons.shopping_basket_outlined, size: 18),
+              const SizedBox(width: 8),
+              const Text(
+                'Panier',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              Text(
+                '${c.lines.length} ligne(s)',
+                style: const TextStyle(fontSize: 12, color: Color(0xff627168)),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
+          const Divider(height: 18),
           Expanded(
             child: c.lines.isEmpty
                 ? const Center(child: Text('Scannez votre premier article.'))
                 : ListView.separated(
                     itemCount: c.lines.length,
-                    separatorBuilder: (_, _) => const Divider(),
+                    separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final line = c.lines[index];
                       return ListTile(
+                        dense: true,
+                        minVerticalPadding: 8,
                         contentPadding: EdgeInsets.zero,
-                        title: Text(line['name'] as String? ?? ''),
+                        title: Text(
+                          line['name'] as String? ?? '',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
                         onTap:
                             c.ready && !c.busy && c.uncertainOperation == null
                             ? () => _quantity(line)
@@ -528,15 +624,32 @@ class _RegisterState extends State<_Register> {
                         subtitle: Text(
                           '${line['quantity_label'] ?? ''} · ${line['total_label'] ?? ''}',
                         ),
-                        trailing: IconButton(
-                          tooltip: 'Retirer du panier',
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed:
-                              c.ready && !c.busy && c.uncertainOperation == null
-                              ? () => c.command(HostCommand.removeLine, {
-                                  'line_id': line['id'],
-                                })
-                              : null,
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 85,
+                              child: Text(
+                                line['total_label'] as String? ?? '',
+                                textAlign: TextAlign.right,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Retirer du panier',
+                              icon: const Icon(Icons.delete_outline),
+                              onPressed:
+                                  c.ready &&
+                                      !c.busy &&
+                                      c.uncertainOperation == null
+                                  ? () => c.command(HostCommand.removeLine, {
+                                      'line_id': line['id'],
+                                    })
+                                  : null,
+                            ),
+                          ],
                         ),
                       );
                     },
@@ -549,13 +662,26 @@ class _RegisterState extends State<_Register> {
             ),
             Text('TVA : ${(c.view['totals'] as Map)['vat_label'] ?? "—"}'),
           ],
-          const Text('À payer', textAlign: TextAlign.end),
-          Text(
-            c.view['total_label'] as String? ?? '—',
-            textAlign: TextAlign.end,
-            style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Text(
+                'À payer',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+              Expanded(
+                child: Text(
+                  c.view['total_label'] as String? ?? '—',
+                  textAlign: TextAlign.end,
+                  style: const TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 10),
           Row(
             children: [
               OutlinedButton(
@@ -567,7 +693,7 @@ class _RegisterState extends State<_Register> {
                 child: FilledButton.icon(
                   onPressed: c.canPay ? _payment : null,
                   style: FilledButton.styleFrom(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(12),
                   ),
                   icon: const Icon(Icons.payments_outlined),
                   label: const Text('Payer (F4)'),
