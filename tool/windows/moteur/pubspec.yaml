@@ -1,0 +1,14 @@
+name: shopikaiss_moteur
+description: Hôte exécutable du moteur de caisse Windows (protocole privé de la session C, moteur partagé de B).
+publish_to: none
+version: 1.0.0
+
+environment:
+  sdk: ^3.13.5
+
+# Paquet séparé : la bibliothèque SQLite native (hook de sqlite3) n'est embarquée que dans l'hôte Windows, jamais dans
+# l'APK Android. Versions verrouillées sur celles de l'application (pubspec.lock copié puis résolu hors ligne).
+dependencies:
+  shopikaiss_terminal:
+    path: ../../..
+  sqflite_common_ffi: ^2.4.4

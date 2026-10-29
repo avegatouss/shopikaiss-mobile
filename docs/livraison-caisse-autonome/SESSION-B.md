@@ -94,6 +94,37 @@ encaissements, `not_found` définitif ; `LocalRegisterAdapter` (commandes de C +
 Tests : `test/register_adapter_test.dart` (9, SQLite réelle) ; suite **137 tests passés**. C (`79bce79`) a validé
 `f61da3e` fusionné sans conflit (21/21 tests Windows).
 
+## Incrément 5 — client de synchronisation v2 (commit 14a1529)
+
+Contrat 2.0.0-l1 (A `71953e43`, schémas identiques à la branche A au 29/10 08:30). Stockage **schéma 4** (tables `v2_*`,
+migration additive 3 → 4, tables v1 intactes). `lib/src/sync_v2/` : transport et client (en-têtes, erreurs typées,
+réponses validées par les schémas embarqués `contract_schemas.dart`), projection (bootstrap vérifié page par page puis
+projection + curseur en une transaction ; journal par groupes, type critique inconnu = arrêt sans sauter), file figée par
+empreinte (renvoi identique après réponse perdue, quarantaine `rejet_protocole` jamais renvoyée), couverture mouvement par
+mouvement (§6, exemple 10 → 7 → 7 → 7 vérifié), `/operations/etats` en lecture seule, accusés. Vente v2 construite par la
+règle de calcul unique du moteur (`money.dart`) et recoupée comme `CoherenceVente`.
+Tests : `test/sync_v2_client_test.dart` (16, faux serveur validant chaque requête par le contrat) ;
+`test/integration/serveur_a_v2_test.dart` (serveur A réel, `SK_V2_CODE`) — **pas encore exécuté** : code X9DX-6VPT expiré.
+Pas encore branché sur l'écran ni sur l'adaptateur Windows (prochain incrément) ; TVA à fournir par l'appelant (B-REQ-005).
+
+## Incrément 6 — intégration de C et hôte exécutable Windows
+
+Fusion `89556c0` de `feat/caisse-windows-raccordement` (C `02843f4`), sans conflit. Hôte : `lib/src/windows/host/engine_host.dart`
+(propriétaire unique de la base : verrou système exclusif `caisse.lock`, valable entre sessions Windows ; origine et panier
+restaurés ; synchronisation planifiée toutes les minutes, jamais attendue ; fermeture après la synchronisation et les commandes
+en cours) et exécutable `tool/windows/moteur/` (paquet Dart séparé, construit par `Build-Moteur.ps1` :
+`build/windows-moteur/bundle/bin/shopikaiss_moteur.exe` + `bundle/lib/sqlite3.dll`). Codes de sortie : 0 EOF, 2 arguments,
+3 base déjà possédée, 1 démarrage impossible. `sqflite_common_ffi` reste hors des dépendances de l'application : son hook
+natif ajouterait SQLite à l'APK.
+
+Validation sur le commit intégré (29/10) :
+- analyse sans remarque ; suite `--exclude-tags integration` **187/187** (avec `SHOPIKAISS_DART_EXECUTABLE`) ;
+  `Test-Windows.ps1` **34/34** (30 C + 4 hôte, dont l'exécutable réel piloté par `ProcessWindowsHost`) ;
+- Android : `flutter build apk --release` OK, `ci.khoga.shopikaiss.terminal`, versionCode 7, certificat SHA-256
+  F5:D8:84:71…C2:C5:1B:EB = clé de release existante ; aucune bibliothèque native ajoutée ;
+- Windows : `Build-Integration.ps1` OK (NuGet `C:/dev/nuget` au PATH), `Test-Launch.ps1` PASS, `Test-Native.ps1` 1/1.
+Non fait : recette sur téléphone réel, écran Windows branché sur l'hôte (bootstrap de C), installateur signé.
+
 ## Demandes à A
 
 ```text
@@ -136,10 +167,21 @@ Preuve attendue : test « lecture d’état ne déclenche aucune intégration »
 Bloque : purge et stock des ventes arbitrées seulement (sans elle, leur consommation reste déduite indéfiniment).
 ```
 
+```text
+ID : B-REQ-005
+Destinataire : A
+Besoin et scénario : le journal v2 ne publie pas la TVA de la boutique (taux, incluse/ajoutée) que le référentiel v1 donne
+(boutique.tva_taux / tva_incluse). Sans elle, une vente v2 d'une boutique à TVA ajoutée aurait un « a_payer » différent du
+total recalculé par l'intégration v1 (vente à arbitrer). Proposition : entité « boutique » ou politiques « tva.taux » /
+« tva.incluse » dans donnees.json (révision du contrat).
+Bloque : vente v2 dans une boutique à TVA non nulle.
+```
+
 ## Prochaines étapes B
 
 0. ~~Recette du palier contre le serveur A réel~~ (fait, PASS) ; reste : Android réel.
 1. Matrice de parité des parcours mobile actuels (doc 06 § C).
 2. Panier durable (brouillon persistant et reprise après redémarrage), écran « vente retrouvée » entre COMMIT et impression.
 3. Extraction d’un moteur sans Flutter (interfaces stockage/horloge/transport) et faux moteur pour C — contrat moteur v0.
-4. Client v2 dès réception des fixtures de A.
+4. ~~Client v2~~ (incrément 5) : essai réel contre A (nouveau code), puis branchement écran Android et hôte Windows.
+5. Bootstrap Windows (C) : lancer `shopikaiss_moteur.exe` depuis l'interface, journal durable de l'intention d'encaissement.
