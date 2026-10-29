@@ -330,6 +330,56 @@ void main() {
     });
   });
 
+  testWidgets('late amount validation never enables an edited payment', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final host = _Host();
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Payer (F4)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Espèces'));
+    await tester.pumpAndSettle();
+    final pending = Completer<Map<String, dynamic>>();
+    host.pendingView = pending;
+    final input = find.widgetWithText(TextField, 'Montant reçu (F CFA)');
+    await tester.enterText(input, '5000');
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.enterText(input, '6000');
+    pending.complete(Map<String, dynamic>.from(host.state));
+    host.pendingView = null;
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Confirmer le paiement'),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.setPayment]?['received'], 6000);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Confirmer le paiement'),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+  });
+
   testWidgets(
     'cash edits invalidate confirmation until engine validates received amount',
     (tester) async {
@@ -362,7 +412,7 @@ void main() {
             .onPressed,
         isNull,
       );
-      await tester.tap(find.text('Vérifier le montant reçu'));
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
       expect(host.argumentsByCommand[HostCommand.setPayment], {
         'method': 'especes',
@@ -381,7 +431,7 @@ void main() {
         find.widgetWithText(TextField, 'Montant reçu (F CFA)'),
         '-5',
       );
-      await tester.tap(find.text('Vérifier le montant reçu'));
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pumpAndSettle();
       expect(
         tester

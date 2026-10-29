@@ -191,3 +191,11 @@ Commandes IPC ajoutées : setLineDiscount, suspendDraft, drafts, resumeDraft, de
 46 tests Windows réussis ; analyse finale sans anomalie. Aperçu généré par Flutter à 1366×768 avec données fictives, inspecté : catalogue à gauche, panier à droite, lignes et outils compacts, actions de fin de vente fixées en bas. Ce rendu de test ne remplace pas la recette native sur le poste.
 
 Appairage réel v2 effectué avec l'hôte installé bf4f3f9, Tablette Pâtisserie / Plateau : prêt, session déjà ouverte reprise de l'instantané, Caissier Démo identifié, panier vide, fermeture code 0. Aucune nouvelle session ni vente créée pendant ce contrôle ; aucune donnée secrète consignée. Résultat transmis dans JOURNAL.md.
+
+## Réglages écran et validation automatique du paiement
+
+Panneau local : catalogue liste/grille, largeur des fiches, proportion catalogue/panier. Préférences dans LocalAppData/ShopiKaiss/screen-settings.json ; une erreur de préférences ne bloque pas la caisse. Le changement ne touche ni prix, ni droits, ni taxes.
+
+Montant reçu : validation moteur automatique après 250 ms de pause, collage compris ; Entrée force la validation. Toute modification invalide immédiatement la confirmation. Une réponse antérieure à la dernière saisie ne la réactive pas. Aucun calcul monétaire ajouté dans Windows, aucun encaissement automatique.
+
+47 tests Windows passent et analyse sans remarque, dont le cas réponse montant tardive suivi d’une nouvelle saisie. Images : cadrage et demande A/B dans IMAGES-PRODUITS.md ; service non raccordé tant que manifeste/cache ne sont pas fournis.

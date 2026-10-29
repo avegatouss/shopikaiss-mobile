@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -6,6 +8,7 @@ import 'register_controller.dart';
 import 'sales_history.dart';
 import 'brand_logo.dart';
 import 'suspended_drafts.dart';
+import 'screen_settings.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -117,7 +120,29 @@ class _Register extends StatefulWidget {
 class _RegisterState extends State<_Register> {
   final _search = TextEditingController();
   final _scan = TextEditingController();
-  bool _compact = false;
+  final _screen = ScreenSettings.load();
+  bool get _compact => _screen.compact;
+  Timer? _saveSettings;
+  void _screenChanged() {
+    setState(() {});
+    _saveSettings?.cancel();
+    _saveSettings = Timer(const Duration(milliseconds: 400), () async {
+      try {
+        await _screen.save();
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Réglages appliqués, mais non sauvegardés sur ce poste.',
+              ),
+            ),
+          );
+        }
+      }
+    });
+  }
+
   final _scanFocus = FocusNode();
   WindowsRegisterController get c => widget.controller;
   @override
@@ -128,10 +153,16 @@ class _RegisterState extends State<_Register> {
 
   @override
   void dispose() {
+    _saveSettings?.cancel();
     _search.dispose();
     _scan.dispose();
     _scanFocus.dispose();
     super.dispose();
+  }
+
+  void _setCatalogueMode(bool value) {
+    _screen.compact = value;
+    _screenChanged();
   }
 
   Future<void> _payment() async {
@@ -297,6 +328,10 @@ class _RegisterState extends State<_Register> {
         },
       },
       child: Scaffold(
+        endDrawer: ScreenSettingsPanel(
+          settings: _screen,
+          onChanged: _screenChanged,
+        ),
         appBar: AppBar(
           toolbarHeight: 40,
           title: Row(
@@ -312,6 +347,13 @@ class _RegisterState extends State<_Register> {
             ],
           ),
           actions: [
+            Builder(
+              builder: (context) => IconButton(
+                tooltip: 'Réglages de l’écran',
+                icon: const Icon(Icons.tune),
+                onPressed: () => Scaffold.of(context).openEndDrawer(),
+              ),
+            ),
             IconButton(
               tooltip: 'Ventes de ce poste',
               onPressed: c.ready && !c.busy
@@ -380,7 +422,7 @@ class _RegisterState extends State<_Register> {
                       ],
                       selected: {_compact},
                       onSelectionChanged: (value) =>
-                          setState(() => _compact = value.single),
+                          _setCatalogueMode(value.single),
                     ),
                     const SizedBox(width: 12),
                     TextButton.icon(
@@ -424,8 +466,14 @@ class _RegisterState extends State<_Register> {
                     ? Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(flex: 58, child: _catalogue()),
-                          Expanded(flex: 42, child: _cart()),
+                          Expanded(
+                            flex: _screen.cataloguePercent,
+                            child: _catalogue(),
+                          ),
+                          Expanded(
+                            flex: 100 - _screen.cataloguePercent,
+                            child: _cart(),
+                          ),
                         ],
                       )
                     : DefaultTabController(
@@ -555,9 +603,9 @@ class _RegisterState extends State<_Register> {
                   },
                 )
               : GridView.builder(
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 175,
-                    mainAxisExtent: 115,
+                  gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                    maxCrossAxisExtent: _screen.tileWidth,
+                    mainAxisExtent: _screen.tileWidth * 115 / 175,
                     crossAxisSpacing: 4,
                     mainAxisSpacing: 4,
                   ),
@@ -835,15 +883,34 @@ class _PaymentState extends State<_Payment> {
   bool _cash = false;
   bool _accepted = false;
   String? _inputError;
+  Timer? _validation;
+  int _editRevision = 0;
+  void _scheduleValidation() {
+    _validation?.cancel();
+    ++_editRevision;
+    setState(() {
+      _accepted = false;
+      _inputError = null;
+    });
+    _validation = Timer(const Duration(milliseconds: 250), _apply);
+  }
 
   @override
   void dispose() {
+    _validation?.cancel();
     _received.dispose();
     super.dispose();
   }
 
   Future<void> _apply() async {
-    if (_method == null || !c.canPay) return;
+    _validation?.cancel();
+    if (!mounted || _method == null) return;
+    if (c.busy) {
+      _validation = Timer(const Duration(milliseconds: 100), _apply);
+      return;
+    }
+    if (!c.canPay) return;
+    final revision = _editRevision;
     final text = _received.text.trim();
     final value = text.isEmpty ? null : int.tryParse(text);
     setState(() {
@@ -862,7 +929,7 @@ class _PaymentState extends State<_Payment> {
       'method': _method,
       if (_cash && value != null) 'received': value,
     });
-    if (mounted) {
+    if (mounted && revision == _editRevision) {
       setState(
         () => _accepted = c.message == null && c.view['payment_valid'] == true,
       );
@@ -905,6 +972,7 @@ class _PaymentState extends State<_Payment> {
                               _accepted = false;
                               _received.clear();
                             });
+                            ++_editRevision;
                             _apply();
                           }
                         : null,
@@ -916,20 +984,18 @@ class _PaymentState extends State<_Payment> {
             if (_cash) ...[
               TextField(
                 controller: _received,
-                enabled: c.canPay,
+                enabled: c.ready && c.uncertainOperation == null,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: 'Montant reçu (F CFA)',
                   helperText: 'Laisser vide pour le montant exact.',
                   errorText: _inputError,
                 ),
-                onChanged: (_) => setState(() => _accepted = false),
+                onChanged: (_) => _scheduleValidation(),
                 onSubmitted: (_) => _apply(),
               ),
-              TextButton(
-                onPressed: c.canPay ? _apply : null,
-                child: const Text('Vérifier le montant reçu'),
-              ),
+              if (!_accepted && _inputError == null && _method != null)
+                const Text('Validation automatique du montant…'),
               if (_accepted && c.paymentChange != null)
                 Text('Monnaie à rendre : ${c.paymentChange} F CFA'),
             ],
