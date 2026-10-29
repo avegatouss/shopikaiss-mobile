@@ -55,15 +55,24 @@ class Snapshot {
     final q = fold(query.trim());
     return products
         .where((p) => category == null || p.category == category)
-        .where((p) => q.isEmpty || fold(p.name).contains(q) || fold(p.reference ?? '').contains(q) || p.codes.any((c) => c.code.contains(query.trim())))
+        .where(
+          (p) =>
+              q.isEmpty ||
+              fold(p.name).contains(q) ||
+              fold(p.reference ?? '').contains(q) ||
+              fold(p.brand ?? '').contains(q) ||
+              p.codes.any((c) => c.code.contains(query.trim())),
+        )
         .take(limit)
         .toList();
   }
 
-  /// Catégories du catalogue, dans l'ordre alphabétique (sans accents ni casse).
+  /// Catégories du catalogue : ordre de la boutique (contrat 2.1), sinon ordre alphabétique (sans accents ni casse).
   List<String> get categories {
-    final names = {for (final p in products) if (p.category != null && p.category!.isNotEmpty) p.category!}.toList();
-    return names..sort((a, b) => fold(a).compareTo(fold(b)));
+    final names = {for (final p in products) if (p.category != null && p.category!.isNotEmpty) p.category!};
+    final ordered = [for (final c in (raw['categories'] as List? ?? const [])) if (names.contains(c)) c as String];
+    final rest = names.where((n) => !ordered.contains(n)).toList()..sort((a, b) => fold(a).compareTo(fold(b)));
+    return [...ordered, ...rest];
   }
 
   Operator? operatorById(int? id) {
@@ -146,11 +155,18 @@ class OfflineRules {
 }
 
 class PaymentMethodInfo {
-  PaymentMethodInfo(Map<String, dynamic> m) : code = (m['code'] ?? '') as String, name = (m['nom'] ?? '') as String, isCash = m['especes'] == true;
+  PaymentMethodInfo(Map<String, dynamic> m)
+    : code = (m['code'] ?? '') as String,
+      name = (m['nom'] ?? '') as String,
+      isCash = m['especes'] == true,
+      referenceMode = (m['reference'] as String?) ?? (m['especes'] == true ? 'aucune' : 'facultative');
 
   final String code;
   final String name;
   final bool isCash;
+
+  /// Référence de transaction : `aucune`, `facultative` ou `obligatoire` (contrat 2.1, réglage Trésorerie du web).
+  final String referenceMode;
 }
 
 class Operator {
@@ -189,6 +205,9 @@ class Product {
       name = (m['nom'] ?? '') as String,
       reference = m['reference'] as String?,
       category = m['categorie'] as String?,
+      brand = m['marque'] as String?,
+      supplier = m['fournisseur'] as String?,
+      unit = m['unite'] as String?,
       price = (m['prix'] as num?)?.toInt() ?? 0,
       unlimitedStock = m['stock_illimite'] == true,
       stockMicros = parseMicros(((m['stock'] ?? '0') as String).replaceFirst('-', '')) ?? BigInt.zero,
@@ -200,6 +219,11 @@ class Product {
   final String name;
   final String? reference;
   final String? category;
+  final String? brand;
+  final String? supplier;
+
+  /// Nom de l'unité de vente (contrat 2.1), ou null.
+  final String? unit;
   final int price;
   final bool unlimitedStock;
   final BigInt stockMicros;
@@ -219,10 +243,39 @@ class Product {
   BigInt get signedStock => negativeStock ? -stockMicros : stockMicros;
 }
 
+/// Remise telle que saisie (contrat 2.1 `remise_saisie`) : `montant` ou `pourcentage`, valeur normalisée.
+class DiscountEntry {
+  const DiscountEntry(this.type, this.value);
+
+  DiscountEntry.fromJson(Map m) : type = m['type'] as String, value = m['valeur'] as String;
+
+  final String type;
+  final String value;
+
+  bool get isPercent => type == 'pourcentage';
+
+  Map<String, String> toJson() => {'type': type, 'valeur': value};
+}
+
+/// Éléments de vente du contrat 2.1 hors lignes et paiements : remise globale, livraison, note.
+class SaleExtras {
+  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note});
+
+  final int globalDiscount;
+  final DiscountEntry? globalEntry;
+  final int delivery;
+  final String? note;
+
+  bool get isEmpty => globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty);
+}
+
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.
 class CartLine {
-  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice})
+  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry})
     : quantity = quantity ?? BigInt.from(1000000);
+
+  /// Saisie de la remise (montant ou pourcentage), figée dans la vente 2.1 ; [discount] en est le montant.
+  final DiscountEntry? discountEntry;
 
   final Product product;
   final Packaging? packaging;

@@ -105,10 +105,10 @@
             "erreur_attendue": "format invalide"
         },
         {
-            "fichier": "invalides/operation--vente-sans-paiement.json",
+            "fichier": "invalides/operation--ligne-tarif-inconnu.json",
             "schema": "operation.json",
             "valide": false,
-            "erreur_attendue": "au moins 1"
+            "erreur_attendue": "valeur hors liste"
         },
         {
             "fichier": "invalides/operations-demande--lot-de-51.json",

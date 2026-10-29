@@ -70,6 +70,9 @@ class V2Keys {
   static const localSession = 'v2.session_locale';
   static const lastContact = 'v2.dernier_contact';
   static const snapshotAt = 'v2.catalogue_le';
+
+  /// Révision des formes de données de la projection (`2.0` ou `2.1`) : un changement impose un nouvel instantané.
+  static const contractRevision = 'v2.revision_contrat';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
@@ -77,6 +80,9 @@ const knownV2Types = {
   'boutique', 'produit', 'conditionnement', 'code_barre', 'moyen_paiement', 'operateur', 'stock.projection', //
   'politique', 'autorisation', 'revocation', 'session', 'operation_etat',
 };
+
+/// Types ajoutés par la révision 2.1 (donnees-2.1.json), connus seulement quand la forme 2.1 est active.
+const knownV2Types21 = {'categorie'};
 
 /// Résultat de l'application d'une page du journal.
 class V2ApplyResult {
@@ -114,6 +120,11 @@ class V2Store {
 
   final Database db;
   final SchemaValidator validator;
+
+  /// Forme 2.1 active (capacité `contrat.2_1` annoncée et rendue) : données validées par donnees-2.1.json.
+  bool contract21 = false;
+
+  Set<String> get knownTypes => contract21 ? {...knownV2Types, ...knownV2Types21} : knownV2Types;
 
   static String _now() => DateTime.now().toUtc().toIso8601String();
 
@@ -157,14 +168,14 @@ class V2Store {
   /// reçues non intégrées gardent leur consommation. Ventes, brouillons et file ne sont pas touchés.
   Future<void> replaceProjection(List<Map<String, dynamic>> entities, Map<String, dynamic> manifest) => db.transaction((txn) async {
     for (final e in entities) {
-      if (!knownV2Types.contains(e['type']) && e['critique'] == true) throw V2Incompatible(e['type'] as String);
+      if (!knownTypes.contains(e['type']) && e['critique'] == true) throw V2Incompatible(e['type'] as String);
       final error = _invalidData(e);
       if (error != null) throw V2Incompatible(error);
     }
     await txn.delete('v2_entites');
     final batch = txn.batch();
     for (final e in entities) {
-      if (!knownV2Types.contains(e['type'])) continue;
+      if (!knownTypes.contains(e['type'])) continue;
       batch.insert('v2_entites', {'type': e['type'], 'cle': e['cle'], 'revision': e['revision'], 'donnees': jsonEncode(e['donnees'])},
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
@@ -188,7 +199,7 @@ class V2Store {
       final changes = [for (final c in (rawGroup as Map)['changements'] as List) Map<String, dynamic>.from(c as Map)];
       String? blocker;
       for (final c in changes) {
-        if (!knownV2Types.contains(c['type'])) {
+        if (!knownTypes.contains(c['type'])) {
           if (c['critique'] == true) blocker = c['type'] as String;
         } else if (_invalidData(c) != null) {
           blocker = c['type'] as String;
@@ -200,7 +211,7 @@ class V2Store {
         return V2ApplyResult(applied, blockedBy: blocker);
       }
       for (final c in changes) {
-        if (knownV2Types.contains(c['type'])) await _applyChange(txn, c);
+        if (knownTypes.contains(c['type'])) await _applyChange(txn, c);
       }
       applied++;
     }
@@ -211,9 +222,9 @@ class V2Store {
 
   String? _invalidData(Map<String, dynamic> change) {
     final type = change['type'] as String;
-    if (!knownV2Types.contains(type)) return null;
+    if (!knownTypes.contains(type)) return null;
     if (change['action'] == 'suppression') return null;
-    final errors = validator.validate(change['donnees'], 'donnees.json#/\$defs/$type');
+    final errors = validator.validate(change['donnees'], '${contract21 ? 'donnees-2.1.json' : 'donnees.json'}#/\$defs/$type');
     return errors.isEmpty ? null : '$type ${change['cle']} : ${errors.first}';
   }
 

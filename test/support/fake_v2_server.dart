@@ -41,6 +41,13 @@ class FakeV2Server implements V2Transport {
   /// Clé web rendue à l'appairage (révision 2.0.2) ; null : serveur 2.0.1.
   String? webKey = 'ClefWeb0123456789abcdefghijklmnopqrstuvwxyzABCDE';
 
+  /// Règles commerciales de la boutique pour le recoupement 2.1 (comme `CoherenceVente` avec `$regles`).
+  String percentRounding = 'down';
+  ({int step, String mode})? cashRounding;
+
+  /// Capacités rendues à l'appairage et par `/etat`.
+  List<String> capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes'];
+
   /// Autorisation de vente locale rendue par `/etat`.
   bool authorized = true;
   String authorizationExpires = '2026-10-30T08:00:00Z';
@@ -121,14 +128,14 @@ class FakeV2Server implements V2Transport {
           'jeton': 'jeton-appareil-0123456789',
           'epoque': 3,
           'appareil': {'uuid': fakeDevice, 'nom': 'Poste', 'terminal_uuid': fakeTerminal, 'terminal_nom': 'Caisse 2', 'boutique_uuid': fakeShop, 'boutique_nom': 'Boutique', 'derniere_sequence': 0},
-          'capacites_serveur': ['instantane.v1', 'stock.couverture', 'vente.especes'],
+          'capacites_serveur': capabilities,
           'cle_web': ?webKey,
         }, 'appairage.json#/\$defs/reponse');
       case ('GET', '/etat'):
         return _ok({
           'heure_serveur': '2026-10-29T08:00:00Z',
           'protocole': {'courant': 2, 'minimum': 2, 'maximum': 2},
-          'capacites_serveur': ['instantane.v1', 'stock.couverture', 'vente.especes'],
+          'capacites_serveur': capabilities,
           'fonctions_restreintes': [],
           'autorisation': {
             'vente_locale': authorized,
@@ -214,7 +221,7 @@ class FakeV2Server implements V2Transport {
         {'uuid': uuid, 'etat': 'rejet_protocole', 'version_etat': '1', 'raison': {'code': code, 'message': code, 'details': null}, 'vente': null, 'mouvements': [], 'couverture': {'curseur': null}};
     if (fakeValidator.validate(op, 'operation.json').isNotEmpty) return reject('schema_invalide');
     if (CanonicalJson.operationFingerprint(op) != op['empreinte']) return reject('empreinte_invalide');
-    if (op['type'] == 'vente' && coherenceGaps(op).isNotEmpty) return reject('calcul_incoherent');
+    if (op['type'] == 'vente' && coherenceGaps(op, percentRounding: percentRounding, cashRounding: cashRounding).isNotEmpty) return reject('calcul_incoherent');
     final existing = received[uuid];
     if (existing != null) return existing['operation']['empreinte'] == op['empreinte'] ? _result(uuid) : reject('conflit_contenu');
     final state = verdict?.call(op) ?? 'integree';
@@ -224,25 +231,71 @@ class FakeV2Server implements V2Transport {
   }
 }
 
-/// Recoupement de la référence serveur `CoherenceVente` (lignes, quantités de base, brut, remises, paiements, mouvements).
-List<String> coherenceGaps(Map<String, dynamic> op) {
+/// Recoupement de la référence serveur `CoherenceVente` (lot 1b de la 2.1, 4bb14454) : lignes, quantités de base, brut,
+/// remises (saisies comprises), remise globale bornée, TVA, base HT, à payer (livraison), paiements, écart d'arrondi des
+/// espèces, mouvements. Écrit indépendamment du moteur (aucune fonction de lib/), comme le serveur PHP.
+List<String> coherenceGaps(Map<String, dynamic> op, {String percentRounding = 'down', ({int step, String mode})? cashRounding}) {
   final content = op['contenu'] as Map;
   final gaps = <String>[];
-  var gross = 0, discounts = content['remise_globale'] as int;
+  var gross = 0, lineDiscounts = 0;
   final bases = <String, int>{};
+  int entered(Map entry, int base) {
+    if (entry['type'] != 'pourcentage') return int.parse(entry['valeur'] as String);
+    final parts = (entry['valeur'] as String).split('.');
+    final hundredths = int.parse(parts[0]) * 100 + int.parse('${parts.length > 1 ? parts[1] : ''}00'.substring(0, 2));
+    final raw = base * hundredths;
+    final amount = percentRounding == 'nearest' ? (raw + 5000) ~/ 10000 : raw ~/ 10000;
+    return amount > base ? base : amount;
+  }
+
   for (final l in (content['lignes'] as List).cast<Map>()) {
     final q = Decimal6.parse(l['quantite'] as String);
     final amount = Decimal6.amount(l['prix_unitaire'] as int, q);
     if (amount - (l['remise'] as int) != l['total']) gaps.add('total');
+    if (l['remise_saisie'] != null && entered(l['remise_saisie'] as Map, amount) != l['remise']) gaps.add('remise_saisie');
     if (Decimal6.multiply(q, Decimal6.parse(l['coefficient'] as String)) != Decimal6.parse(l['quantite_base'] as String)) gaps.add('base');
     gross += amount;
-    discounts += l['remise'] as int;
+    lineDiscounts += l['remise'] as int;
     bases[l['produit_uuid'] as String] = (bases[l['produit_uuid']] ?? 0) + Decimal6.parse(l['quantite_base'] as String);
   }
+  final global = content['remise_globale'] as int;
   final totals = content['totaux'] as Map;
   if (gross != totals['brut']) gaps.add('brut');
-  if (discounts != totals['remises']) gaps.add('remises');
-  if ((content['paiements'] as List).fold<int>(0, (s, p) => s + ((p as Map)['montant'] as int)) != totals['a_payer']) gaps.add('paiements');
+  if (lineDiscounts + global != totals['remises']) gaps.add('remises');
+  if (global > gross - lineDiscounts) gaps.add('remise_globale');
+  if (content['remise_globale_saisie'] != null && entered(content['remise_globale_saisie'] as Map, gross - lineDiscounts) != global) {
+    gaps.add('remise_globale_saisie');
+  }
+  final after = gross - lineDiscounts - global < 0 ? 0 : gross - lineDiscounts - global;
+  final tva = content['tva'] as Map;
+  final rateMicros = Decimal6.parse(tva['taux'] as String);
+  final included = tva['incluse'] == true;
+  final numerator = BigInt.from(after) * BigInt.from(rateMicros);
+  final denominator = included ? BigInt.from(rateMicros + 100000000) : BigInt.from(100000000);
+  final vat = rateMicros == 0 ? 0 : ((numerator * BigInt.two + denominator) ~/ (denominator * BigInt.two)).toInt();
+  final net = included ? after : after + vat;
+  if (totals['tva'] != vat) gaps.add('tva');
+  if (totals['base_ht'] != net - vat) gaps.add('base_ht');
+  if (totals['a_payer'] != net + (content['livraison'] as int)) gaps.add('a_payer');
+  final payments = (content['paiements'] as List).cast<Map>();
+  if (payments.fold<int>(0, (s, p) => s + (p['montant'] as int)) != totals['a_payer']) gaps.add('paiements');
+  for (final p in payments) {
+    if (p['ecart_arrondi'] == null) continue;
+    final amount = p['montant'] as int;
+    var expected = 0;
+    if (p['moyen'] == 'especes' && cashRounding != null) {
+      final r = amount % cashRounding.step;
+      final rounded = r == 0
+          ? amount
+          : switch (cashRounding.mode) {
+              'up' => amount - r + cashRounding.step,
+              'nearest' => 2 * r > cashRounding.step ? amount - r + cashRounding.step : amount - r,
+              _ => amount - r,
+            };
+      expected = rounded - amount;
+    }
+    if (p['ecart_arrondi'] != expected) gaps.add('ecart_arrondi');
+  }
   final variations = <String, int>{};
   for (final m in (content['mouvements'] as List).cast<Map>()) {
     variations[m['produit_uuid'] as String] = (variations[m['produit_uuid']] ?? 0) + Decimal6.parseSigned(m['variation'] as String);

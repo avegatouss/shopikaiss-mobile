@@ -48,6 +48,7 @@ class TerminalSession extends ChangeNotifier {
       appVersion: package.version,
       platform: 'android',
       legacyTransport: HttpRegisterTransport(appVersion: package.version),
+      declaredPayments: true,
     );
     if (settings.configured) await offline.load(settings.origin);
     final session = TerminalSession._(settings, TerminalInfo.unsupported, package.version, offline);

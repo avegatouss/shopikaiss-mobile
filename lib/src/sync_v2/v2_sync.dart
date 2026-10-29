@@ -58,7 +58,18 @@ class V2Sync {
     try {
       final state = await client.state();
       await store.write(V2Keys.serverState, jsonEncode(state));
-      if (await store.read(V2Keys.cursor) == null) await bootstrap('premier_demarrage', report);
+      // Forme des données : 2.1 si les deux côtés ont `contrat.2_1`. Changement de forme : nouvel instantané complet,
+      // jamais un mélange des deux formes dans la projection.
+      final contract21 = client.capabilities.contains(CaisseV2Client.contract21Capability) &&
+          ((state['capacites_serveur'] as List?)?.contains(CaisseV2Client.contract21Capability) ?? false);
+      store.contract21 = contract21;
+      final revision = contract21 ? '2.1' : '2.0';
+      if (await store.read(V2Keys.cursor) == null) {
+        await bootstrap('premier_demarrage', report);
+      } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {
+        await bootstrap('reparation', report);
+      }
+      await store.write(V2Keys.contractRevision, revision);
       await _push(report);
       await _reconcile(report);
       await _pull(report);

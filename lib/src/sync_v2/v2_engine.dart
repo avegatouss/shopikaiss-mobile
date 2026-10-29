@@ -2,6 +2,9 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
+import '../offline/money.dart';
+import '../offline/web_rules.dart';
+
 import '../offline/api.dart';
 import '../offline/engine.dart';
 import '../offline/models.dart';
@@ -37,7 +40,18 @@ class V2Engine extends CaisseEngine {
     super.clock,
     String Function()? newUuid,
     super.pinVerifier,
+    this.declaredPayments = false,
+    this.contract21 = false,
   }) : _newUuid = newUuid ?? (() => const Uuid().v4());
+
+  /// Annonce `contrat.2_1` : formes 2.1 des données (catégories ordonnées, marque, fournisseur, unité, plafonds de
+  /// remise par opérateur, référence de paiement selon le moyen). Sans effet si le serveur ne la rend pas.
+  final bool contract21;
+
+  /// Annonce `vente.paiement_declare` : les moyens déclarés (mobile money…) publiés pour la vente locale deviennent
+  /// utilisables hors connexion comme les espèces, SI le serveur rend aussi cette capacité (ouverte par A le 29/10,
+  /// lot 0 de la 2.1). Activé par Android et l'hôte Windows.
+  final bool declaredPayments;
 
   /// Transport v1, pour vider seulement la file d'une installation 1.1.5 mise à jour (routes v1 gardées par le
   /// serveur) ; aucune nouvelle opération v1. Null : pas d'ancienne file (Windows).
@@ -70,6 +84,9 @@ class V2Engine extends CaisseEngine {
   Map<int, String> _productUuids = const {};
   Map<int, String> _packagingUuids = const {};
   Map<int, List<String>> _rights = const {};
+
+  /// Plafonds de remise du rôle (contrat 2.1) : pourcentage en millionièmes, montant par vente ; null = sans limite.
+  Map<int, (BigInt?, int?)> _discountCaps = const {};
   String? _sessionUuid;
   V2Vat? _vat;
 
@@ -83,6 +100,8 @@ class V2Engine extends CaisseEngine {
     DateTime Function()? clock,
     String Function()? newUuid,
     Future<bool> Function(String pin, String hash)? pinVerifier,
+    bool declaredPayments = false,
+    bool contract21 = false,
   }) => V2Engine(
     store: store,
     v2: V2Store(store.database, SchemaValidator((file) => contractV2Schemas[file] ?? (throw SchemaProfileError('Schéma inconnu : $file')))),
@@ -93,6 +112,8 @@ class V2Engine extends CaisseEngine {
     clock: clock,
     newUuid: newUuid,
     pinVerifier: pinVerifier,
+    declaredPayments: declaredPayments,
+    contract21: contract21,
   );
 
   static String apiBaseFor(String origin) => '$origin/api/caisse/v2';
@@ -126,7 +147,17 @@ class V2Engine extends CaisseEngine {
       await v2.write(V2Keys.token, null);
     }
     apiBase = apiBaseFor(effective);
-    _client = CaisseV2Client(apiBase: apiBase!, transport: transport, appVersion: appVersion, localSchema: offlineSchemaVersion);
+    _client = CaisseV2Client(
+      apiBase: apiBase!,
+      transport: transport,
+      appVersion: appVersion,
+      localSchema: offlineSchemaVersion,
+      capabilities: [
+        ...CaisseV2Client.defaultCapabilities,
+        if (declaredPayments) CaisseV2Client.declaredPaymentCapability,
+        if (contract21) CaisseV2Client.contract21Capability,
+      ],
+    );
     _sync = V2Sync(_client!, v2);
     _token = await v2.read(V2Keys.token);
     _client!.token = _token;
@@ -310,6 +341,27 @@ class V2Engine extends CaisseEngine {
   bool hasRight(Operator operator, String right) => (_rights[operator.id] ?? const []).contains(right);
 
   @override
+  int maxLineDiscountFor(Operator operator, int base) {
+    final terminal = super.maxLineDiscountFor(operator, base);
+    final percent = _discountCaps[operator.id]?.$1;
+    if (percent == null) return terminal;
+    final role = (BigInt.from(base) * percent ~/ BigInt.from(100000000)).toInt();
+    return role < terminal ? role : terminal;
+  }
+
+  @override
+  int? maxSaleDiscountFor(Operator operator) => _discountCaps[operator.id]?.$2;
+
+  /// Montant d'une remise saisie sur [base], par la règle du web (pourcentage arrondi selon la boutique).
+  int _entered(DiscountEntry entry, int base) {
+    try {
+      return enteredDiscount(type: entry.type, value: entry.value, base: base, rounding: percentRounding);
+    } on WebRuleRefusal catch (e) {
+      throw OfflineRefusal(e.message);
+    }
+  }
+
+  @override
   Future<OfflineOperation> openSession(int float, Operator operator) => serialized(() async {
     final s = _requireSelling(allowWithoutSession: true);
     if (!s.rules.sessionOpening) throw const OfflineRefusal('L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.');
@@ -324,18 +376,65 @@ class V2Engine extends CaisseEngine {
     return operation;
   });
 
+  /// Règles commerciales de la boutique (forme 2.1, `boutique.regles`), ou null.
+  Map<String, dynamic>? _shopRules;
+
   @override
-  Future<OfflineOperation> recordSale(List<CartLine> lines, List<CartPayment> payments, Operator operator, {String? draftUuid, String? operationUuid}) =>
-      serialized(() async {
+  bool get saleExtrasSupported => v2.contract21 && _shopRules != null;
+
+  @override
+  String get percentRounding => (_shopRules?['remise_pourcentage_arrondi'] as String?) ?? 'down';
+
+  /// Arrondi de caisse : appliqué seulement en vente 2.1 (le serveur ne l'applique que si la vente le déclare).
+  @override
+  ({int step, String mode})? get cashRounding {
+    final rounding = _shopRules?['arrondi_especes'] as Map?;
+    if (!v2.contract21 || rounding == null) return null;
+    return (step: rounding['pas'] as int, mode: rounding['mode'] as String);
+  }
+
+  @override
+  String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
+
+  @override
+  Future<OfflineOperation> recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator, {
+    String? draftUuid,
+    String? operationUuid,
+    SaleExtras extras = const SaleExtras(),
+  }) => serialized(() async {
         if (operationUuid != null) {
           if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant de vente invalide (UUID en minuscules attendu).');
           final existing = await v2.operation(operationUuid);
           if (existing != null) return sameSale(await _view(existing));
         }
         final s = _requireSelling();
-        checkSale(s, lines, payments);
+        if (!extras.isEmpty && !saleExtrasSupported) throw const OfflineRefusal('Remise globale, livraison et note : disponibles avec le contrat 2.1.');
+        checkSale(s, lines, payments, extras);
         _requireRight(operator, 'vente', 'vendre');
-        if (lines.any((l) => l.discount > 0)) _requireRight(operator, 'remise', 'accorder une remise');
+        if (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) _requireRight(operator, 'remise', 'accorder une remise');
+        for (final l in lines) {
+          if (l.discount > maxLineDiscountFor(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
+          final entry = l.discountEntry;
+          if (entry != null && _entered(entry, l.base) != l.discount) throw OfflineRefusal('Remise sur « ${l.label} » différente de sa saisie.');
+        }
+        final subtotal = lines.fold<int>(0, (sum, l) => sum + l.base - l.discount);
+        if (extras.globalDiscount > maxLineDiscountFor(operator, subtotal)) throw OfflineRefusal('Remise globale au-delà du plafond de ${operator.name}.');
+        if (extras.globalEntry != null && _entered(extras.globalEntry!, subtotal) != extras.globalDiscount) {
+          throw const OfflineRefusal('Remise globale différente de sa saisie.');
+        }
+        if (extras.delivery > 0 && deliveryRight != null) _requireRight(operator, deliveryRight!, 'ajouter une livraison');
+        final saleCap = maxSaleDiscountFor(operator);
+        if (saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) + extras.globalDiscount > saleCap) {
+          throw OfflineRefusal('Remises au-delà du plafond de ${operator.name} par vente (${formatFcfa(saleCap)}).');
+        }
+        for (final p in payments) {
+          if (p.method.referenceMode == 'obligatoire' && (p.reference == null || p.reference!.trim().isEmpty)) {
+            throw OfflineRefusal('Référence obligatoire pour « ${p.method.name} ».');
+          }
+        }
         // Moyens admis : ceux du catalogue local (politique paiements.moyens_locaux et capacités du serveur), vérifiés
         // par checkSale ; une seule ligne d'espèces (la monnaie se rend sur elle).
         if (payments.where((p) => p.method.isCash).length > 1) throw const OfflineRefusal('Une seule ligne d’espèces par vente.');
@@ -346,8 +445,10 @@ class V2Engine extends CaisseEngine {
               packagingUuid: l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.'))),
               quantityMicros: l.quantity.toInt(),
               discount: l.discount,
+              discountEntry: l.discountEntry,
             ),
         ];
+        final revision21 = v2.contract21;
         final builder = V2SaleBuilder(products: _products, packagings: _packagings, revisions: _revisions, newUuid: _newUuid);
         final uuid = operationUuid ?? _newUuid();
         // Le contrat exige un UUID de brouillon ; un identifiant d'écran d'une autre forme en donne un, toujours le même
@@ -369,12 +470,16 @@ class V2Engine extends CaisseEngine {
                   method: p.method.code,
                   amount: p.amount,
                   received: p.method.isCash ? (p.received ?? p.amount) : null,
-                  reference: p.method.isCash || p.reference == null || p.reference!.isEmpty ? null : p.reference,
+                  reference: p.method.isCash || p.method.referenceMode == 'aucune' || p.reference == null || p.reference!.isEmpty ? null : p.reference,
                 ),
             ],
             vat: _vat!,
+            extras: extras,
+            cashRounding: cashRounding,
+            revision21: revision21,
           ),
           draftUuid: draft,
+          calculation: revision21 ? '2' : '1',
         );
         await _afterWrite();
         return operation;
@@ -386,6 +491,7 @@ class V2Engine extends CaisseEngine {
     Operator operator,
     Map<String, dynamic> Function(int sequence) content, {
     String? draftUuid,
+    String calculation = '1',
   }) async {
     final epoch = int.parse(await v2.read(V2Keys.epoch) ?? (throw const OfflineRefusal('Terminal non appairé.')));
     final policies = await v2.read(V2Keys.policiesVersion) ?? '0';
@@ -404,6 +510,7 @@ class V2Engine extends CaisseEngine {
           policiesVersion: policies,
           catalogueCursor: cursor,
           content: content(sequence),
+          calculation: calculation,
         ),
         draftUuid: draftUuid,
       );
@@ -519,17 +626,33 @@ class V2Engine extends CaisseEngine {
     final ids = await v2.localIds([...products.keys, ...packagings.keys]);
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
+    _shopRules = (shop?['regles'] as Map?)?.cast<String, dynamic>();
+    final categories = await v2.entities('categorie');
+    String? categoryOf(Map<String, dynamic> product) {
+      final category = categories[product['categorie_uuid']];
+      return category != null && category['actif'] == true ? category['nom'] as String : product['categorie'] as String?;
+    }
+
+    final orderedCategories = categories.values.where((c) => c['actif'] == true).toList()
+      ..sort((a, b) => (a['ordre'] as int).compareTo(b['ordre'] as int));
     final localMethods = (policies['paiements.moyens_locaux'] as List?)?.cast<String>() ?? const <String>[];
+    // Espèces, et moyens déclarés quand les deux côtés ont la capacité ; toujours dans la politique de la boutique.
+    final declared = declaredPayments && ((_state?['capacites_serveur'] as List?)?.contains(CaisseV2Client.declaredPaymentCapability) ?? false);
     final methods = [
       for (final m in (await v2.entities('moyen_paiement')).values)
-        if (m['local'] == true && m['especes'] == true && localMethods.contains(m['code'])) {'code': m['code'], 'nom': m['nom'], 'especes': true},
+        if (m['local'] == true && (m['especes'] == true || declared) && localMethods.contains(m['code']))
+          {'code': m['code'], 'nom': m['nom'], 'especes': m['especes'] == true, 'reference': m['reference']},
     ];
     final rights = <int, List<String>>{};
+    final caps = <int, (BigInt?, int?)>{};
     final operators = <Map<String, dynamic>>[];
     for (final o in (await v2.entities('operateur')).values) {
       final id = int.tryParse('${o['operateur_id']}');
       if (id == null) continue;
       rights[id] = (o['droits'] as List).cast<String>();
+      if (o['remise_max_pourcent'] != null || o['remise_max_montant'] != null) {
+        caps[id] = (o['remise_max_pourcent'] == null ? null : parseMicros(o['remise_max_pourcent'] as String), o['remise_max_montant'] as int?);
+      }
       if (rights[id]!.contains('vente')) operators.add({'id': id, 'nom': o['nom'], 'pin': o['pin_empreinte']});
     }
     final session = await _ownSession();
@@ -553,6 +676,7 @@ class V2Engine extends CaisseEngine {
       'empreinte': cursor,
       'moyens': methods,
       'caissiers': operators,
+      'categories': [for (final c in orderedCategories) c['nom']],
       'produits': [
         for (final e in products.entries)
           if (e.value['actif'] == true && e.value['vente_locale'] == true)
@@ -560,7 +684,10 @@ class V2Engine extends CaisseEngine {
               'id': ids[e.key],
               'nom': e.value['nom'],
               'reference': e.value['reference'],
-              'categorie': e.value['categorie'],
+              'categorie': categoryOf(e.value),
+              'marque': e.value['marque'],
+              'fournisseur': e.value['fournisseur'],
+              'unite': (e.value['unite'] as Map?)?['nom'],
               'prix': e.value['prix'],
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
@@ -585,6 +712,7 @@ class V2Engine extends CaisseEngine {
     _productUuids = {for (final e in products.keys) ids[e]!: e};
     _packagingUuids = {for (final e in packagings.keys) ids[e]!: e};
     _rights = rights;
+    _discountCaps = caps;
     _sessionUuid = session?['session_uuid'] as String?;
     snapshot = Snapshot(raw);
   }

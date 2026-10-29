@@ -7,6 +7,7 @@ import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
 import 'store.dart';
+import 'web_rules.dart';
 
 /// Vérifie un PIN contre l'empreinte bcrypt du serveur (Laravel écrit `$2y$`, équivalent de `$2a$`).
 Future<bool> verifyPinHash(String pin, String hash) => Isolate.run(() => _checkPin([pin, hash]));
@@ -132,7 +133,34 @@ abstract class CaisseEngine extends EngineNotifier {
   ///
   /// [operationUuid] : identifiant stable choisi par l'écran AVANT l'encaissement. Rejouer la même commande rend la
   /// vente déjà enregistrée, sans en créer une seconde ; un second encaissement du panier [draftUuid] est refusé.
-  Future<OfflineOperation> recordSale(List<CartLine> lines, List<CartPayment> payments, Operator operator, {String? draftUuid, String? operationUuid});
+  ///
+  /// [extras] : remise globale, livraison et note (contrat 2.1) ; refusés si [saleExtrasSupported] est faux.
+  Future<OfflineOperation> recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator, {
+    String? draftUuid,
+    String? operationUuid,
+    SaleExtras extras = const SaleExtras(),
+  });
+
+  /// Remise globale, livraison et note utilisables (vente 2.1 acceptée par le serveur).
+  bool get saleExtrasSupported => false;
+
+  /// Arrondi des remises en pourcentage (`down` ou `nearest`, règle de la boutique).
+  String get percentRounding => 'down';
+
+  /// Arrondi de caisse des espèces (pas et mode), ou null.
+  ({int step, String mode})? get cashRounding => null;
+
+  /// Droit exigé pour une livraison (null : aucun droit particulier).
+  String? get deliveryRight => null;
+
+  /// Montant dû au tiroir pour une ligne d'espèces de [amount] (arrondi de caisse).
+  int cashDue(int amount) {
+    final rounding = cashRounding;
+    return rounding == null ? amount : cashRound(amount, step: rounding.step, mode: rounding.mode);
+  }
 
   /// État local d'une vente, sans réseau ni renvoi.
   Future<OfflineOperation?> saleStatus(String operationUuid);
@@ -145,6 +173,13 @@ abstract class CaisseEngine extends EngineNotifier {
   /// L'opérateur a-t-il le droit métier [right] (`vente`, `ouverture_session`, `remise`) ? Contrôlé de nouveau par le
   /// moteur au moment de l'écriture ; l'écran s'en sert pour proposer ou non l'action.
   bool hasRight(Operator operator, String right);
+
+  /// Remise maximale (francs) que [operator] peut accorder sur une ligne de [base] francs : plafond du terminal
+  /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
+  int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
+
+  /// Total des remises permis à [operator] sur une vente (contrat 2.1 `remise_max_montant`), ou null sans limite.
+  int? maxSaleDiscountFor(Operator operator) => null;
 
   /// Heures restantes avant l'arrêt de la vente locale.
   Duration? get remaining {
@@ -244,7 +279,7 @@ abstract class CaisseEngine extends EngineNotifier {
   }
 
   /// Contrôles de la vente communs aux deux protocoles (règles de la boutique, paiements). Rend le total à payer.
-  int checkSale(Snapshot s, List<CartLine> lines, List<CartPayment> payments) {
+  int checkSale(Snapshot s, List<CartLine> lines, List<CartPayment> payments, [SaleExtras extras = const SaleExtras()]) {
     if (lines.isEmpty) throw const OfflineRefusal('Le panier est vide.');
     if (lines.length > 100) throw const OfflineRefusal('Au plus 100 lignes par vente.');
     for (final line in lines) {
@@ -253,7 +288,20 @@ abstract class CaisseEngine extends EngineNotifier {
         throw OfflineRefusal('Remise sur « ${line.label} » au-delà du maximum hors ligne (${s.rules.maxLineDiscountPercent} %).');
       }
     }
-    final totals = saleTotals([for (final l in lines) l.total], s.store.vatRate, s.store.vatIncluded);
+    if ((extras.note?.length ?? 0) > 2000) throw const OfflineRefusal('Note trop longue (2 000 caractères au plus).');
+    final WebTotals totals;
+    try {
+      totals = webTotals(
+        lineBases: [for (final l in lines) l.base],
+        lineDiscounts: [for (final l in lines) l.discount],
+        globalDiscount: extras.globalDiscount,
+        vatRate: s.store.vatRate,
+        vatIncluded: s.store.vatIncluded,
+        delivery: extras.delivery,
+      );
+    } on WebRuleRefusal catch (e) {
+      throw OfflineRefusal(e.message);
+    }
     if (s.rules.maxSaleAmount != null && totals.payable > s.rules.maxSaleAmount!) {
       throw OfflineRefusal('Vente au-dessus du montant maximal hors ligne (${formatFcfa(s.rules.maxSaleAmount!)}).');
     }
@@ -262,7 +310,7 @@ abstract class CaisseEngine extends EngineNotifier {
     for (final payment in payments) {
       if (!allowed.contains(payment.method.code)) throw OfflineRefusal('« ${payment.method.name} » n’est pas autorisé hors ligne.');
       if (payment.amount <= 0) throw const OfflineRefusal('Chaque paiement doit être positif.');
-      if (payment.method.isCash && (payment.received ?? payment.amount) < payment.amount) {
+      if (payment.method.isCash && (payment.received ?? cashDue(payment.amount)) < cashDue(payment.amount)) {
         throw const OfflineRefusal('Le montant reçu est inférieur au montant espèces à régler.');
       }
       paid += payment.amount;

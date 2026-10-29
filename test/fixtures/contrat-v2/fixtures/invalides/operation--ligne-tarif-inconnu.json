@@ -13,7 +13,7 @@
         "calcul": "1",
         "curseur_catalogue": "c-000105"
     },
-    "empreinte": "5dc8d80c3a87a07ecb363070cdda5874bb909bdedba057c086aec74e516924a0",
+    "empreinte": "4565c72423a9c19979a4846536dc9eb7f3975901682c47cea90fccc7c112733d",
     "contenu": {
         "numero_local": "HL-001-000042",
         "brouillon_uuid": "b0000000-0000-4000-8000-000000000001",
@@ -35,7 +35,8 @@
                 "prix_unitaire": 1000,
                 "remise": 0,
                 "total": 2000,
-                "revision_prix": "3"
+                "revision_prix": "3",
+                "tarif": "promo"
             }
         ],
         "remise_globale": 0,
