@@ -142,6 +142,10 @@ abstract class CaisseEngine extends EngineNotifier {
 
   Future<List<OfflineOperation>> history();
 
+  /// L'opérateur a-t-il le droit métier [right] (`vente`, `ouverture_session`, `remise`) ? Contrôlé de nouveau par le
+  /// moteur au moment de l'écriture ; l'écran s'en sert pour proposer ou non l'action.
+  bool hasRight(Operator operator, String right);
+
   /// Heures restantes avant l'arrêt de la vente locale.
   Duration? get remaining {
     final s = snapshot;

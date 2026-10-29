@@ -110,7 +110,7 @@ void main() {
           draftUuid: draft,
           sessionUuid: (session?['session_uuid'] as String?) ?? uuid.v4(),
           cart: cart,
-          payment: V2Payment(method: 'especes', amount: payable, received: payable),
+          payments: [V2Payment(method: 'especes', amount: payable, received: payable)],
           vat: vat,
         ),
       ),

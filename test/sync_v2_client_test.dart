@@ -70,7 +70,7 @@ void main() {
           draftUuid: draftUuid,
           sessionUuid: fakeSession,
           cart: cart,
-          payment: V2Payment(method: 'especes', amount: payable, received: payable),
+          payments: [V2Payment(method: 'especes', amount: payable, received: payable)],
           vat: vat,
         ),
       ),
