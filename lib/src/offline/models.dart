@@ -307,6 +307,28 @@ class QueueCounts {
   final int arbitration;
 }
 
+/// Une opération porte déjà cet identifiant : l'encaissement a déjà eu lieu (reprise après réponse perdue).
+class OperationAlreadyRecorded implements Exception {
+  const OperationAlreadyRecorded(this.operation);
+
+  final OfflineOperation operation;
+
+  @override
+  String toString() => 'Opération ${operation.uuid} déjà enregistrée.';
+}
+
+/// Panier en cours conservé sur le terminal (redémarrage, coupure, écran fermé), tant qu'il n'est ni encaissé ni vidé.
+class StoredDraft {
+  const StoredDraft({required this.uuid, required this.revision, required this.content, required this.updatedAt});
+
+  final String uuid;
+
+  /// Révision croissante : une écriture plus ancienne ne remplace jamais une plus récente.
+  final int revision;
+  final Map<String, dynamic> content;
+  final DateTime updatedAt;
+}
+
 /// Le brouillon (panier) a déjà donné lieu à une vente : un second encaissement du même panier est refusé.
 class DraftAlreadyConsumed implements Exception {
   const DraftAlreadyConsumed(this.operationUuid);

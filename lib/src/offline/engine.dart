@@ -505,10 +505,55 @@ class OfflineEngine extends EngineNotifier {
   /// Vente, mouvements de stock (conversion du conditionnement figée) et consommation du panier [draftUuid] sont écrits
   /// dans une seule transaction, la séquence réservée dans cette transaction. Deux encaissements simultanés sont
   /// exécutés l'un après l'autre ; un second encaissement du même panier lève [OfflineRefusal] sans rien écrire.
-  Future<OfflineOperation> recordSale(List<CartLine> lines, List<CartPayment> payments, Operator operator, {String? draftUuid}) =>
-      _serialized(() => _recordSale(lines, payments, operator, draftUuid));
+  ///
+  /// [operationUuid] : identifiant stable choisi par l'écran AVANT l'encaissement. Rejouer la même commande (réponse
+  /// perdue, hôte redémarré) rend la vente déjà enregistrée, sans en créer une seconde.
+  Future<OfflineOperation> recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator, {
+    String? draftUuid,
+    String? operationUuid,
+  }) => _serialized(() async {
+    if (operationUuid != null) {
+      final existing = await store.operation(operationUuid);
+      if (existing != null) return _sameSale(existing);
+    }
+    try {
+      return await _recordSale(lines, payments, operator, draftUuid, operationUuid);
+    } on OperationAlreadyRecorded catch (e) {
+      // Rejeu de la MÊME commande (même identifiant d'opération) : la vente existe déjà, on la rend. Sans identifiant,
+      // ou avec un autre, c'est un second encaissement du panier : refusé (pas de second ticket « vente réussie »).
+      if (operationUuid != null && e.operation.uuid == operationUuid) return _sameSale(e.operation);
+      throw OfflineRefusal('Ce panier a déjà été encaissé (vente ${e.operation.number ?? e.operation.uuid}).');
+    }
+  });
 
-  Future<OfflineOperation> _recordSale(List<CartLine> lines, List<CartPayment> payments, Operator operator, String? draftUuid) async {
+  OfflineOperation _sameSale(OfflineOperation existing) {
+    if (!existing.isSale) throw OfflineRefusal('Identifiant déjà utilisé par une autre opération (${existing.type}).');
+    return existing;
+  }
+
+  /// État local d'une vente, sans réseau ni renvoi. Exécuté dans la file d'écriture : un encaissement en cours est
+  /// terminé avant la lecture, donc « absente » est une réponse définitive pour ce moteur.
+  Future<OfflineOperation?> saleStatus(String operationUuid) => _serialized(() => store.operation(operationUuid));
+
+  /// Conserve le panier en cours (révision croissante). Faux si une révision plus récente est conservée ou si le
+  /// panier est déjà encaissé.
+  Future<bool> saveDraft(String uuid, int revision, Map<String, dynamic> content) =>
+      _serialized(() => store.saveDraft(uuid, revision, content));
+
+  Future<List<StoredDraft>> openDrafts() => store.openDrafts();
+
+  Future<void> deleteDraft(String uuid) => _serialized(() => store.deleteDraft(uuid));
+
+  Future<OfflineOperation> _recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator,
+    String? draftUuid,
+    String? operationUuid,
+  ) async {
     final s = _requireSelling();
     if (lines.isEmpty) throw const OfflineRefusal('Le panier est vide.');
     if (lines.length > 100) throw const OfflineRefusal('Au plus 100 lignes par vente.');
@@ -553,6 +598,7 @@ class OfflineEngine extends EngineNotifier {
         number: (sequence) => '${s.terminal.ticketPrefix}-${sequence.toString().padLeft(6, '0')}',
         movements: (operation) => saleMovements(operation, (productId, packagingId) => packagingId == null ? null : coefficients[(productId, packagingId)]),
         draftUuid: draftUuid,
+        uuid: operationUuid,
       );
     } on DraftAlreadyConsumed catch (e) {
       throw OfflineRefusal('Ce panier a déjà été encaissé : retrouvez la vente dans les opérations hors ligne (${e.operationUuid}).');
@@ -592,13 +638,17 @@ class OfflineEngine extends EngineNotifier {
     String? Function(int sequence)? number,
     List<StockMovement> Function(OfflineOperation operation)? movements,
     String? draftUuid,
+    String? uuid,
   }) async {
-    final uuid = _newUuid();
+    if (uuid != null && !RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$').hasMatch(uuid)) {
+      throw const OfflineRefusal('Identifiant de vente invalide (UUID en minuscules attendu).');
+    }
+    final id = uuid ?? _newUuid();
     final date = now;
     final operation = await store.appendAtomic(
       sequenceFloor: snapshot?.lastSequence ?? 0,
       build: (sequence) => OfflineOperation(
-        uuid: uuid,
+        uuid: id,
         sequence: sequence,
         type: type,
         number: number?.call(sequence),

@@ -35,6 +35,19 @@ abstract class OfflineStore {
   Future<void> update(OfflineOperation operation);
   Future<List<OfflineOperation>> operations({String? status, int? limit});
 
+  /// Opération de cet identifiant, ou null.
+  Future<OfflineOperation?> operation(String uuid);
+
+  /// Conserve le panier [uuid] à la révision [revision]. Faux, sans rien écrire, si une révision égale ou plus récente
+  /// est déjà conservée, ou si ce panier a déjà été encaissé.
+  Future<bool> saveDraft(String uuid, int revision, Map<String, dynamic> content);
+
+  /// Paniers conservés (non encaissés, non vidés), le plus récent d'abord.
+  Future<List<StoredDraft>> openDrafts();
+
+  /// Oublie un panier vidé (un panier encaissé est retiré par la transaction de la vente).
+  Future<void> deleteDraft(String uuid);
+
   /// Opérations reçues par le serveur mais encore à arbitrer, les plus anciennes d'abord.
   Future<List<OfflineOperation>> awaitingArbitration({int limit = 50});
 
@@ -79,7 +92,7 @@ class StoreKeys {
 }
 
 /// Version du schéma SQLite local. Les migrations sont additives : aucune donnée existante n'est réécrite.
-const offlineSchemaVersion = 2;
+const offlineSchemaVersion = 3;
 
 /// Espace de noms des identifiants de mouvements : `v5(espace, "<uuid opération>:<rang de ligne>")`, recalculable à
 /// l'identique (migration, reprise) sans dépendre d'un tirage aléatoire.
@@ -124,6 +137,10 @@ StockMovement _movement(Map<String, Object?> r) => StockMovement(
   quantityMicros: r['quantite_micros'] as int,
   coveredAt: DateTime.tryParse(r['couvert_le'] as String? ?? '')?.toLocal(),
 );
+
+Future<void> _createV3Tables(DatabaseExecutor db) async {
+  await db.execute('CREATE TABLE paniers (uuid TEXT PRIMARY KEY, revision INTEGER NOT NULL, contenu TEXT NOT NULL, maj_le TEXT NOT NULL)');
+}
 
 Future<void> _createV2Tables(DatabaseExecutor db) async {
   await db.execute(
@@ -229,11 +246,14 @@ class SqfliteOfflineStore implements OfflineStore {
           );
           await db.execute('CREATE INDEX operations_statut ON operations (statut, sequence)');
           await _createV2Tables(db);
+          await _createV3Tables(db);
         },
         // sqflite exécute la migration dans une transaction : interrompue, elle est annulée et rejouée au prochain
         // démarrage, sans effacement.
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) await _migrateTo2(db);
+          // 2 → 3 : paniers conservés (table nouvelle, rien d'existant modifié).
+          if (oldVersion < 3) await _createV3Tables(db);
         },
         onDowngrade: (db, oldVersion, newVersion) async {
           // Une application plus ancienne ne doit pas lire un schéma qu'elle ne comprend pas, ni l'effacer.
@@ -276,7 +296,11 @@ class SqfliteOfflineStore implements OfflineStore {
   }) => _db.transaction((txn) async {
     if (draftUuid != null) {
       final consumed = await txn.query('paniers_consommes', where: 'brouillon_uuid = ?', whereArgs: [draftUuid], limit: 1);
-      if (consumed.isNotEmpty) throw DraftAlreadyConsumed(consumed.first['operation_uuid'] as String);
+      if (consumed.isNotEmpty) {
+        final previous = await txn.query('operations', where: 'uuid = ?', whereArgs: [consumed.first['operation_uuid']], limit: 1);
+        if (previous.isNotEmpty) throw OperationAlreadyRecorded(_operation(previous.first));
+        throw DraftAlreadyConsumed(consumed.first['operation_uuid'] as String);
+      }
     }
     final stored = int.tryParse(
           (await txn.query('kv', where: 'cle = ?', whereArgs: [StoreKeys.lastSequence], limit: 1)).firstOrNull?['valeur'] as String? ?? '',
@@ -285,6 +309,8 @@ class SqfliteOfflineStore implements OfflineStore {
     final used = (await txn.rawQuery('SELECT MAX(sequence) AS s FROM operations')).first['s'] as int? ?? 0;
     final sequence = [stored, used, sequenceFloor].reduce((a, b) => a > b ? a : b) + 1;
     final operation = build(sequence);
+    final existing = await txn.query('operations', where: 'uuid = ?', whereArgs: [operation.uuid], limit: 1);
+    if (existing.isNotEmpty) throw OperationAlreadyRecorded(_operation(existing.first));
     await txn.insert('operations', _row(operation));
     await txn.insert('kv', {'cle': StoreKeys.lastSequence, 'valeur': '$sequence'}, conflictAlgorithm: ConflictAlgorithm.replace);
     final now = DateTime.now().toUtc().toIso8601String();
@@ -300,9 +326,47 @@ class SqfliteOfflineStore implements OfflineStore {
     }
     if (draftUuid != null) {
       await txn.insert('paniers_consommes', {'brouillon_uuid': draftUuid, 'operation_uuid': operation.uuid, 'consomme_le': now});
+      await txn.delete('paniers', where: 'uuid = ?', whereArgs: [draftUuid]);
     }
     return operation;
   }, exclusive: true);
+
+  @override
+  Future<OfflineOperation?> operation(String uuid) async {
+    final rows = await _db.query('operations', where: 'uuid = ?', whereArgs: [uuid], limit: 1);
+    return rows.isEmpty ? null : _operation(rows.first);
+  }
+
+  @override
+  Future<bool> saveDraft(String uuid, int revision, Map<String, dynamic> content) => _db.transaction((txn) async {
+    if ((await txn.query('paniers_consommes', where: 'brouillon_uuid = ?', whereArgs: [uuid], limit: 1)).isNotEmpty) return false;
+    final current = await txn.query('paniers', columns: ['revision'], where: 'uuid = ?', whereArgs: [uuid], limit: 1);
+    if (current.isNotEmpty && (current.first['revision'] as int) >= revision) return false;
+    await txn.insert('paniers', {
+      'uuid': uuid,
+      'revision': revision,
+      'contenu': jsonEncode(content),
+      'maj_le': DateTime.now().toUtc().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return true;
+  });
+
+  @override
+  Future<List<StoredDraft>> openDrafts() async {
+    final rows = await _db.query('paniers', orderBy: 'maj_le DESC');
+    return [
+      for (final r in rows)
+        StoredDraft(
+          uuid: r['uuid'] as String,
+          revision: r['revision'] as int,
+          content: Map<String, dynamic>.from(jsonDecode(r['contenu'] as String) as Map),
+          updatedAt: DateTime.parse(r['maj_le'] as String).toLocal(),
+        ),
+    ];
+  }
+
+  @override
+  Future<void> deleteDraft(String uuid) => _db.delete('paniers', where: 'uuid = ?', whereArgs: [uuid]);
 
   @override
   Future<void> update(OfflineOperation operation) => _db.update(
@@ -445,15 +509,42 @@ class MemoryOfflineStore implements OfflineStore {
     List<StockMovement> Function(OfflineOperation operation)? movements,
     String? draftUuid,
   }) async {
-    if (draftUuid != null && consumedDrafts.containsKey(draftUuid)) throw DraftAlreadyConsumed(consumedDrafts[draftUuid]!);
+    if (draftUuid != null && consumedDrafts.containsKey(draftUuid)) {
+      final previous = items.where((o) => o.uuid == consumedDrafts[draftUuid]).firstOrNull;
+      if (previous != null) throw OperationAlreadyRecorded(previous);
+      throw DraftAlreadyConsumed(consumedDrafts[draftUuid]!);
+    }
     final stored = int.tryParse(values[StoreKeys.lastSequence] ?? '') ?? 0;
     final used = items.fold<int>(0, (max, o) => o.sequence > max ? o.sequence : max);
     final operation = build([stored, used, sequenceFloor].reduce((a, b) => a > b ? a : b) + 1);
+    final existing = items.where((o) => o.uuid == operation.uuid).firstOrNull;
+    if (existing != null) throw OperationAlreadyRecorded(existing);
     await append(operation);
     stock.addAll(movements?.call(operation) ?? const []);
-    if (draftUuid != null) consumedDrafts[draftUuid] = operation.uuid;
+    if (draftUuid != null) {
+      consumedDrafts[draftUuid] = operation.uuid;
+      drafts.remove(draftUuid);
+    }
     return operation;
   }
+
+  final Map<String, StoredDraft> drafts = {};
+
+  @override
+  Future<OfflineOperation?> operation(String uuid) async => items.where((o) => o.uuid == uuid).firstOrNull;
+
+  @override
+  Future<bool> saveDraft(String uuid, int revision, Map<String, dynamic> content) async {
+    if (consumedDrafts.containsKey(uuid) || (drafts[uuid]?.revision ?? -1) >= revision) return false;
+    drafts[uuid] = StoredDraft(uuid: uuid, revision: revision, content: content, updatedAt: DateTime.now());
+    return true;
+  }
+
+  @override
+  Future<List<StoredDraft>> openDrafts() async => drafts.values.toList()..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+
+  @override
+  Future<void> deleteDraft(String uuid) async => drafts.remove(uuid);
 
   @override
   Future<void> update(OfflineOperation operation) async {}

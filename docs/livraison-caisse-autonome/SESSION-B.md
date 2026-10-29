@@ -86,6 +86,14 @@ vrai moteur, `HttpRegisterTransport`, SQLite réelle (FFI), poste de développem
 
 UUID de l’ouverture de session de Caisse 2 non relevé (base temporaire supprimée) : à lire côté serveur, séquence 1 du terminal.
 
+## Incrément 4 — moteur pour Windows (réponse à C-REQ-001 à 004)
+
+Contrat : [CONTRAT-MOTEUR-B.md](CONTRAT-MOTEUR-B.md) (version 1). Stockage **schéma 3** (table `paniers`, migration
+additive 2 → 3) ; encaissement idempotent par identifiant d'opération ; `saleStatus` local, sérialisé derrière les
+encaissements, `not_found` définitif ; `LocalRegisterAdapter` (commandes de C + `pair`, `login`, `addProduct`, `clear`).
+Tests : `test/register_adapter_test.dart` (9, SQLite réelle) ; suite **137 tests passés**. C (`79bce79`) a validé
+`f61da3e` fusionné sans conflit (21/21 tests Windows).
+
 ## Demandes à A
 
 ```text
