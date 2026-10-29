@@ -1,0 +1,2 @@
+# Keep the source contract byte-comparable with Dart multiline constants on Windows.
+schemas/*.json text eol=lf

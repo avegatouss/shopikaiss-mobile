@@ -4,10 +4,11 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../ipc/protocol.dart';
+import '../platform/sale_intent.dart';
 
 /// Presentation only. The engine owns totals, permissions and durable drafts.
 class WindowsRegisterController extends ChangeNotifier {
-  WindowsRegisterController(this.host) {
+  WindowsRegisterController(this.host, {this.journal}) {
     _subscription = host.events.listen(
       (event) {
         if (_disposed) return;
@@ -30,6 +31,27 @@ class WindowsRegisterController extends ChangeNotifier {
     );
   }
   final WindowsHost host;
+  final SaleIntentJournal? journal;
+  Future<void>? _recovery;
+  bool _journalBlocked = false;
+
+  Future<void> recoverIntent() => _recovery ??= _recoverIntent();
+  Future<void> _recoverIntent() async {
+    try {
+      uncertainOperation = await journal?.read();
+      if (uncertainOperation != null) {
+        message = 'Encaissement précédent à vérifier avant de continuer.';
+      }
+    } catch (_) {
+      _journalBlocked = true;
+      message = 'Journal de caisse illisible. Contactez le support ; ne le supprimez pas.';
+    }
+  }
+
+  Future<void> _resolveIntent(String operation) async {
+    if (journal != null) await journal!.resolve(operation);
+  }
+
   late final StreamSubscription<Map<String, dynamic>> _subscription;
   Map<String, dynamic> view = const {};
   bool ready = false;
@@ -50,6 +72,7 @@ class WindowsRegisterController extends ChangeNotifier {
           .whereType<Map<String, dynamic>>()
           .toList();
   bool get canPay =>
+      !_journalBlocked &&
       !_disposed &&
       _transportAvailable &&
       ready &&
@@ -59,7 +82,8 @@ class WindowsRegisterController extends ChangeNotifier {
       view['can_pay'] == true;
 
   Future<void> refresh() async {
-    if (_disposed || !_transportAvailable) return;
+    await recoverIntent();
+    if (_disposed || !_transportAvailable || _journalBlocked) return;
     final generation = ++_refreshGeneration;
     try {
       final next = await host.call(HostCommand.view);
@@ -98,7 +122,7 @@ class WindowsRegisterController extends ChangeNotifier {
     HostCommand command,
     Map<String, dynamic> arguments,
   ) async {
-    if (!ready || busy || uncertainOperation != null) return;
+    if (_journalBlocked || !ready || busy || uncertainOperation != null) return;
     busy = true;
     message = null;
     if (command == HostCommand.preparePayment) paymentMethods = const [];
@@ -135,6 +159,15 @@ class WindowsRegisterController extends ChangeNotifier {
     receipt = null;
     notifyListeners();
     try {
+      await journal?.begin(operation);
+    } catch (_) {
+      _journalBlocked = true;
+      busy = false;
+      message = 'Impossible de conserver la vente avant envoi. Aucun encaissement envoyé.';
+      if (!_disposed) notifyListeners();
+      return;
+    }
+    try {
       final result = await host.call(
         HostCommand.commitSale,
         arguments: {'draft_id': view['draft_id'], 'revision': view['revision']},
@@ -148,12 +181,23 @@ class WindowsRegisterController extends ChangeNotifier {
           outcomeUnknown: true,
         );
       }
+      await _resolveIntent(operation);
       receipt = result['number'] as String?;
       _checkoutId = null;
       await refresh();
     } on HostFailure catch (error) {
       message = error.message;
-      if (error.outcomeUnknown) uncertainOperation = operation;
+      if (error.outcomeUnknown) {
+        uncertainOperation = operation;
+      } else {
+        try {
+          await _resolveIntent(operation);
+          _checkoutId = null;
+        } catch (_) {
+          uncertainOperation = operation;
+          message = 'Journal à vérifier avant de continuer.';
+        }
+      }
     } catch (_) {
       uncertainOperation = operation;
       message =
@@ -176,6 +220,7 @@ class WindowsRegisterController extends ChangeNotifier {
       );
       if (result['state'] == 'committed' &&
           result['operation_id'] == operation) {
+        await _resolveIntent(operation);
         receipt = result['number'] as String?;
         uncertainOperation = null;
         _checkoutId = null;
@@ -184,6 +229,7 @@ class WindowsRegisterController extends ChangeNotifier {
       } else if (result['state'] == 'not_found' &&
           result['definitive'] == true &&
           result['operation_id'] == operation) {
+        await _resolveIntent(operation);
         uncertainOperation = null;
         _checkoutId = null;
         message = 'Vente non enregistrée. Le panier peut être repris.';

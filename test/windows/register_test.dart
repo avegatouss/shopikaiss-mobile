@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io';
+
+import 'package:shopikaiss_terminal/src/windows/platform/sale_intent.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -90,6 +93,73 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  test(
+    'durable intent survives UI disposal and resolves without recommit',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('windows-intent-');
+      final file = File('${dir.path}/pending.json');
+      final host = _Host()..loseReply = true;
+      final first = WindowsRegisterController(
+        host,
+        journal: SaleIntentJournal(file),
+      );
+      await first.refresh();
+      await first.commitSale();
+      final id = first.uncertainOperation;
+      expect(await SaleIntentJournal(file).read(), id);
+      first.dispose();
+      final next = WindowsRegisterController(
+        host,
+        journal: SaleIntentJournal(file),
+      );
+      await next.refresh();
+      expect(next.canPay, isFalse);
+      expect(next.uncertainOperation, id);
+      host.reconciled = true;
+      await next.reconcile();
+      expect(next.receipt, 'TEST-1');
+      expect(await file.exists(), isFalse);
+      expect(host.calls.where((c) => c == HostCommand.commitSale).length, 1);
+      next.dispose();
+      await host.close();
+      await dir.delete(recursive: true);
+    },
+  );
+
+  test('corrupt durable intent fails closed without sending sale', () async {
+    final dir = await Directory.systemTemp.createTemp('windows-intent-');
+    final file = File('${dir.path}/pending.json');
+    await file.writeAsString('{');
+    final host = _Host();
+    final c = WindowsRegisterController(host, journal: SaleIntentJournal(file));
+    await c.refresh();
+    await c.commitSale();
+    expect(c.canPay, isFalse);
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+    expect(await file.readAsString(), '{');
+    c.dispose();
+    await host.close();
+    await dir.delete(recursive: true);
+  });
+
+  test('failed durable write prevents sending sale', () async {
+    final dir = await Directory.systemTemp.createTemp('windows-intent-');
+    final host = _Host();
+    final c = WindowsRegisterController(
+      host,
+      journal: SaleIntentJournal(File('${dir.path}/pending.json')),
+    );
+    await c.refresh();
+    await dir.delete();
+    await File(dir.path).writeAsString('blocked parent');
+    await c.commitSale();
+    expect(c.canPay, isFalse);
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+    c.dispose();
+    await host.close();
+    await File(dir.path).delete();
+  });
+
   testWidgets('catalogue and payment buttons use B commands', (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
