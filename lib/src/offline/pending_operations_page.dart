@@ -9,7 +9,7 @@ import 'money.dart';
 class PendingOperationsPage extends StatefulWidget {
   const PendingOperationsPage({super.key, required this.engine, this.onReprint});
 
-  final OfflineEngine engine;
+  final CaisseEngine engine;
 
   /// Réimpression d'un ticket de vente (caisse hors ligne) ; absent depuis les réglages.
   final Future<void> Function(OfflineOperation operation)? onReprint;
@@ -63,6 +63,8 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
                 (OperationStatus.refused, _) => (Icons.error, Colors.red, 'Refusée : ${o.message ?? ''}'),
                 (_, 'a_arbitrer') => (Icons.gavel, Colors.amber.shade800, 'Reçue, à arbitrer par la boutique : ${o.message ?? ''}'),
                 (_, 'ecartee') => (Icons.block, Colors.grey, 'Écartée par la boutique'),
+                (_, 'recue') => (Icons.hourglass_top, Colors.blueGrey, 'Reçue par la boutique, intégration en cours'),
+                (_, 'resolue') => (Icons.task_alt, Colors.blueGrey, 'Résolue par la boutique${o.message != null ? ' : ${o.message}' : ''}'),
                 _ => (Icons.check_circle, Colors.green, 'Intégrée${o.serverNumber != null ? ' : vente ${o.serverNumber}' : ''}'),
               };
               final d = o.date;

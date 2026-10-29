@@ -34,7 +34,7 @@ class AdapterFailure implements Exception {
 class LocalRegisterAdapter {
   LocalRegisterAdapter(this.engine, {this.paperWidth = 80, String Function()? newUuid}) : _newUuid = newUuid ?? (() => const Uuid().v4());
 
-  final OfflineEngine engine;
+  final CaisseEngine engine;
   final int paperWidth;
   final String Function() _newUuid;
   final StreamController<Map<String, dynamic>> _changes = StreamController.broadcast();

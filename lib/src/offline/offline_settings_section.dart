@@ -20,7 +20,7 @@ class _OfflineSettingsSectionState extends State<OfflineSettingsSection> {
   String? _message;
   bool _busy = false;
 
-  OfflineEngine get _engine => widget.session.offline;
+  CaisseEngine get _engine => widget.session.offline;
 
   @override
   void initState() {

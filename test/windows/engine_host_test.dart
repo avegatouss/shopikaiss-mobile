@@ -9,17 +9,23 @@ import 'package:shopikaiss_terminal/src/windows/ipc/process_host.dart';
 import 'package:shopikaiss_terminal/src/windows/ipc/protocol.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-import '../offline_test.dart' show FakeTransport;
+import '../support/fake_v2_server.dart';
 
-/// Hôte du moteur (C-REQ-002/003) : propriétaire unique de la base, protocole C de bout en bout, fermeture propre.
+/// Hôte du moteur v2 (C-REQ-002/003/005) : propriétaire unique de la base, protocole C de bout en bout, fermeture propre.
 void main() {
   sqfliteFfiInit();
   late Directory dir;
   setUp(() => dir = Directory.systemTemp.createTempSync('hote_moteur_'));
   tearDown(() => dir.deleteSync(recursive: true));
 
-  Future<EngineHost> open(FakeTransport transport) =>
-      EngineHost.open(directory: dir.path, appVersion: 'essai', factory: databaseFactoryFfi, transport: transport, syncEvery: null);
+  Future<EngineHost> open(FakeV2Server transport) => EngineHost.open(
+    directory: dir.path,
+    appVersion: 'essai',
+    factory: databaseFactoryFfi,
+    transport: transport,
+    syncEvery: null,
+    pinVerifier: FakeV2Server.pinVerifier,
+  );
 
   /// Envoie [requests] dans le canal de l'hôte, rend les réponses par identifiant ; l'EOF ferme l'hôte.
   Future<Map<String, Map<String, dynamic>>> exchange(EngineHost host, List<Map<String, dynamic>> requests) async {
@@ -30,7 +36,7 @@ void main() {
   }
 
   test('appairage, identification, panier, encaissement par trames ; panier et vente retrouvés après redémarrage de l’hôte', () async {
-    final transport = FakeTransport();
+    final transport = FakeV2Server.sellable();
     var host = await open(transport);
     final first = await exchange(host, [
       {'id': 'a', 'command': 'pair', 'arguments': {'origin': 'https://boutique.exemple.ci', 'code': 'ABCD-EFGH', 'model': 'Windows', 'app_version': '1.2.0'}},
@@ -65,16 +71,16 @@ void main() {
   });
 
   test('un seul hôte par base : le second s’arrête sans ouvrir la base ; libérée à la fermeture', () async {
-    final host = await open(FakeTransport());
-    await expectLater(open(FakeTransport()), throwsA(isA<EngineHostBusy>()));
+    final host = await open(FakeV2Server());
+    await expectLater(open(FakeV2Server()), throwsA(isA<EngineHostBusy>()));
     await host.close();
-    final again = await open(FakeTransport());
+    final again = await open(FakeV2Server());
     await again.close();
   });
 
   test('dossier relatif refusé (aucun chemin implicite)', () async {
     await expectLater(
-      EngineHost.open(directory: 'relatif', appVersion: 'x', factory: databaseFactoryFfi, transport: FakeTransport()),
+      EngineHost.open(directory: 'relatif', appVersion: 'x', factory: databaseFactoryFfi, transport: FakeV2Server()),
       throwsA(isA<ArgumentError>()),
     );
   });
