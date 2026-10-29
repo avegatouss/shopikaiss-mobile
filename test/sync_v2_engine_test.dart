@@ -488,4 +488,115 @@ void main() {
     );
     await adapter.close();
   });
+
+  test('contrat 2.1 (lot 1b) : remise %, remise globale, livraison, note, arrondi espèces — intégrée au franc près', () async {
+    // En 2.0 : remise globale, livraison et note indisponibles, avec le motif.
+    final legacy = await paired();
+    final legacyAdapter = LocalRegisterAdapter(legacy, newUuid: newUuid);
+    await legacyAdapter.start();
+    final legacyCaps = (await legacyAdapter.execute('status', {}, null))['capabilities'] as Map;
+    expect(legacyCaps['global_discount']['reason'], contains('contrat 2.1'));
+    await expectLater(legacyAdapter.execute('setNote', {'text': 'x'}, null),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'fonction_indisponible')));
+    await legacyAdapter.close();
+
+    // Boutique en 2.1 : TVA 18 % ajoutée, pourcentages au franc inférieur, espèces arrondies à 25 F au plus proche.
+    serve21(server, vatIncluded: false, rules: {'remise_pourcentage_arrondi': 'down', 'arrondi_especes': {'pas': 25, 'mode': 'nearest'}});
+    server.cashRounding = (step: 25, mode: 'nearest');
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true, contract21: true);
+    await e.load('https://boutique.exemple.ci');
+    await e.sync();
+    expect(e.saleExtrasSupported, isTrue);
+
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    for (var i = 0; i < 3; i++) {
+      await adapter.execute('scan', {'code': '6190000000011'}, null);
+    }
+    await adapter.execute('search', {'query': 'Emballage'}, null);
+    final serviceId = ((await adapter.execute('view', {}, null))['products'] as List).single['id'] as int;
+    var view = await adapter.execute('addProduct', {'product_id': serviceId}, null);
+    final serviceLine = (view['lines'] as List).firstWhere((l) => l['name'] == 'Emballage')['id'] as String;
+    await adapter.execute('changeQuantity', {'line_id': serviceLine, 'quantity': '5'}, null);
+    view = await adapter.execute('setLineDiscount', {'line_id': serviceLine, 'percent': '10'}, null);
+    expect((view['lines'] as List).firstWhere((l) => l['id'] == serviceLine)['discount'], 50);
+    await adapter.execute('setGlobalDiscount', {'percent': '5,0'}, null);
+    await adapter.execute('setDelivery', {'amount': 300}, null);
+    view = await adapter.execute('setNote', {'text': 'Livrer à Cocody'}, null);
+
+    // Sous-total 1 950 ; remise globale tronqué(97,5) = 97 ; X = 1 853 ; TVA arrondi(333,54) = 334 ; + 300 = 2 487.
+    var totals = view['totals'] as Map;
+    expect([totals['gross_label'], totals['discounts_label'], totals['global_discount_label'], totals['vat_label'], totals['delivery_label'], totals['payable_label']],
+        ['1 950 F', '50 F', '97 F', '334 F', '300 F', '2 487 F']);
+    expect([view['note'], (view['global_discount_entry'] as Map)['valeur']], ['Livrer à Cocody', '5']);
+
+    // Pourcentages recalculés quand la quantité change (comme le web).
+    view = await adapter.execute('changeQuantity', {'line_id': serviceLine, 'quantity': '6'}, null);
+    expect((view['lines'] as List).firstWhere((l) => l['id'] == serviceLine)['discount'], 60);
+    expect((view['totals'] as Map)['global_discount_label'], '102 F', reason: 'tronqué(5 % de 2 040)');
+    view = await adapter.execute('changeQuantity', {'line_id': serviceLine, 'quantity': '5'}, null);
+    expect((view['totals'] as Map)['payable_label'], '2 487 F');
+
+    // Espèces : montant exact 2 487, tiroir 2 475 (reste 12 ; 24 ≤ 25 → bas), reçu 3 000 → monnaie 525.
+    view = await adapter.execute('setPayment', {'method': 'especes', 'received': 3000}, null);
+    final payment = view['payment'] as Map;
+    expect([payment['amount_label'], payment['cash_due_label'], payment['rounding_label'], payment['change_label']], ['2 487 F', '2 475 F', '-12 F', '525 F']);
+    expect(view['change'], 525);
+
+    final sale = await adapter.execute('commitSale', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
+    expect(sale['total'], 2487);
+    final op = (await e.v2.operation('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!['operation'] as Map;
+    final content = op['contenu'] as Map;
+    expect((op['versions'] as Map)['calcul'], '2');
+    expect(content['totaux'], {'brut': 2000, 'remises': 147, 'base_ht': 1853, 'tva': 334, 'a_payer': 2487});
+    expect([content['remise_globale'], content['remise_globale_saisie'], content['livraison'], content['note']],
+        [97, {'type': 'pourcentage', 'valeur': '5'}, 300, 'Livrer à Cocody']);
+    final lines = (content['lignes'] as List).cast<Map>();
+    expect(lines.firstWhere((l) => l['remise'] == 50)['remise_saisie'], {'type': 'pourcentage', 'valeur': '10'});
+    final cashPayment = (content['paiements'] as List).single as Map;
+    expect([cashPayment['montant'], cashPayment['recu'], cashPayment['monnaie'], cashPayment['ecart_arrondi']], [2487, 3000, 525, -12]);
+
+    // Le serveur (recoupement de CoherenceVente 4bb14454) l'intègre.
+    await e.sync();
+    expect((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!.serverStatus, 'integree');
+    await adapter.close();
+  });
+}
+
+/// Catalogue de la boutique d'essai en forme 2.1 (lot 1a), règles commerciales [rules] fusionnées aux défauts.
+void serve21(FakeV2Server server, {bool vatIncluded = true, Map<String, dynamic> rules = const {}}) {
+  Map<String, dynamic> product(String nom, String? ref, int prix, bool illimite) => {
+    'nom': nom, 'reference': ref, 'categorie': null, 'prix': prix, 'stock_illimite': illimite, 'actif': true, 'vente_locale': true,
+    'categorie_uuid': null, 'marque': null, 'fournisseur': null, 'unite': null,
+    'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null, 'cree_le': null,
+  };
+  server
+    ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1']
+    ..put('boutique', fakeShop, {
+      'nom': 'Boutique', 'devise': 'FCFA', 'tva_taux': '18.000000', 'tva_incluse': vatIncluded,
+      'regles': {
+        'remise_pourcentage_arrondi': 'down', 'arrondi_especes': null, 'trop_percu': 'refuse', 'moins_a_un': 'refuse',
+        'livraison_droit': null, 'ouverture_session': 'automatic', 'survente': 'refuse',
+        'gros': {'actif': false, 'mode': 'cart', 'quantite_min': null, 'droit': null, 'remises': 'refuse', 'prix_lot': 'refuse'},
+        'fuseau': 'Africa/Abidjan',
+        ...rules,
+      },
+      'ticket': {'raison_sociale': null, 'adresse': null, 'telephone': null, 'ncc': null, 'entete': null, 'pied': null, 'largeur_papier': 80},
+      'devise_secondaire': null,
+    }, critical: true)
+    ..put('produit', fakeSavon, product('Savon', 'SAV', 500, false))
+    ..put('produit', fakeService, product('Emballage', null, 100, true))
+    ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
+    ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
+    ..put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 10, 'source': 'boutique', 'verrouillee': false})
+    ..put('operateur', 'operateur:7', {
+      'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'remise', 'vente'],
+      'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+    }, critical: true)
+    ..put('operateur', 'operateur:8', {
+      'operateur_id': '8', 'nom': 'Stagiaire', 'pin_empreinte': null, 'droits': <String>[],
+      'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+    });
 }

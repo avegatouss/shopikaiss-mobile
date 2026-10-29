@@ -243,10 +243,39 @@ class Product {
   BigInt get signedStock => negativeStock ? -stockMicros : stockMicros;
 }
 
+/// Remise telle que saisie (contrat 2.1 `remise_saisie`) : `montant` ou `pourcentage`, valeur normalisée.
+class DiscountEntry {
+  const DiscountEntry(this.type, this.value);
+
+  DiscountEntry.fromJson(Map m) : type = m['type'] as String, value = m['valeur'] as String;
+
+  final String type;
+  final String value;
+
+  bool get isPercent => type == 'pourcentage';
+
+  Map<String, String> toJson() => {'type': type, 'valeur': value};
+}
+
+/// Éléments de vente du contrat 2.1 hors lignes et paiements : remise globale, livraison, note.
+class SaleExtras {
+  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note});
+
+  final int globalDiscount;
+  final DiscountEntry? globalEntry;
+  final int delivery;
+  final String? note;
+
+  bool get isEmpty => globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty);
+}
+
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.
 class CartLine {
-  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice})
+  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry})
     : quantity = quantity ?? BigInt.from(1000000);
+
+  /// Saisie de la remise (montant ou pourcentage), figée dans la vente 2.1 ; [discount] en est le montant.
+  final DiscountEntry? discountEntry;
 
   final Product product;
   final Packaging? packaging;

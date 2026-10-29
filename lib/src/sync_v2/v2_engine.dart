@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 import '../offline/money.dart';
+import '../offline/web_rules.dart';
 
 import '../offline/api.dart';
 import '../offline/engine.dart';
@@ -351,6 +352,15 @@ class V2Engine extends CaisseEngine {
   @override
   int? maxSaleDiscountFor(Operator operator) => _discountCaps[operator.id]?.$2;
 
+  /// Montant d'une remise saisie sur [base], par la règle du web (pourcentage arrondi selon la boutique).
+  int _entered(DiscountEntry entry, int base) {
+    try {
+      return enteredDiscount(type: entry.type, value: entry.value, base: base, rounding: percentRounding);
+    } on WebRuleRefusal catch (e) {
+      throw OfflineRefusal(e.message);
+    }
+  }
+
   @override
   Future<OfflineOperation> openSession(int float, Operator operator) => serialized(() async {
     final s = _requireSelling(allowWithoutSession: true);
@@ -366,23 +376,58 @@ class V2Engine extends CaisseEngine {
     return operation;
   });
 
+  /// Règles commerciales de la boutique (forme 2.1, `boutique.regles`), ou null.
+  Map<String, dynamic>? _shopRules;
+
   @override
-  Future<OfflineOperation> recordSale(List<CartLine> lines, List<CartPayment> payments, Operator operator, {String? draftUuid, String? operationUuid}) =>
-      serialized(() async {
+  bool get saleExtrasSupported => v2.contract21 && _shopRules != null;
+
+  @override
+  String get percentRounding => (_shopRules?['remise_pourcentage_arrondi'] as String?) ?? 'down';
+
+  /// Arrondi de caisse : appliqué seulement en vente 2.1 (le serveur ne l'applique que si la vente le déclare).
+  @override
+  ({int step, String mode})? get cashRounding {
+    final rounding = _shopRules?['arrondi_especes'] as Map?;
+    if (!v2.contract21 || rounding == null) return null;
+    return (step: rounding['pas'] as int, mode: rounding['mode'] as String);
+  }
+
+  @override
+  String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
+
+  @override
+  Future<OfflineOperation> recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator, {
+    String? draftUuid,
+    String? operationUuid,
+    SaleExtras extras = const SaleExtras(),
+  }) => serialized(() async {
         if (operationUuid != null) {
           if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant de vente invalide (UUID en minuscules attendu).');
           final existing = await v2.operation(operationUuid);
           if (existing != null) return sameSale(await _view(existing));
         }
         final s = _requireSelling();
-        checkSale(s, lines, payments);
+        if (!extras.isEmpty && !saleExtrasSupported) throw const OfflineRefusal('Remise globale, livraison et note : disponibles avec le contrat 2.1.');
+        checkSale(s, lines, payments, extras);
         _requireRight(operator, 'vente', 'vendre');
-        if (lines.any((l) => l.discount > 0)) _requireRight(operator, 'remise', 'accorder une remise');
+        if (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) _requireRight(operator, 'remise', 'accorder une remise');
         for (final l in lines) {
           if (l.discount > maxLineDiscountFor(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
+          final entry = l.discountEntry;
+          if (entry != null && _entered(entry, l.base) != l.discount) throw OfflineRefusal('Remise sur « ${l.label} » différente de sa saisie.');
         }
+        final subtotal = lines.fold<int>(0, (sum, l) => sum + l.base - l.discount);
+        if (extras.globalDiscount > maxLineDiscountFor(operator, subtotal)) throw OfflineRefusal('Remise globale au-delà du plafond de ${operator.name}.');
+        if (extras.globalEntry != null && _entered(extras.globalEntry!, subtotal) != extras.globalDiscount) {
+          throw const OfflineRefusal('Remise globale différente de sa saisie.');
+        }
+        if (extras.delivery > 0 && deliveryRight != null) _requireRight(operator, deliveryRight!, 'ajouter une livraison');
         final saleCap = maxSaleDiscountFor(operator);
-        if (saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) > saleCap) {
+        if (saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) + extras.globalDiscount > saleCap) {
           throw OfflineRefusal('Remises au-delà du plafond de ${operator.name} par vente (${formatFcfa(saleCap)}).');
         }
         for (final p in payments) {
@@ -400,8 +445,10 @@ class V2Engine extends CaisseEngine {
               packagingUuid: l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.'))),
               quantityMicros: l.quantity.toInt(),
               discount: l.discount,
+              discountEntry: l.discountEntry,
             ),
         ];
+        final revision21 = v2.contract21;
         final builder = V2SaleBuilder(products: _products, packagings: _packagings, revisions: _revisions, newUuid: _newUuid);
         final uuid = operationUuid ?? _newUuid();
         // Le contrat exige un UUID de brouillon ; un identifiant d'écran d'une autre forme en donne un, toujours le même
@@ -427,8 +474,12 @@ class V2Engine extends CaisseEngine {
                 ),
             ],
             vat: _vat!,
+            extras: extras,
+            cashRounding: cashRounding,
+            revision21: revision21,
           ),
           draftUuid: draft,
+          calculation: revision21 ? '2' : '1',
         );
         await _afterWrite();
         return operation;
@@ -440,6 +491,7 @@ class V2Engine extends CaisseEngine {
     Operator operator,
     Map<String, dynamic> Function(int sequence) content, {
     String? draftUuid,
+    String calculation = '1',
   }) async {
     final epoch = int.parse(await v2.read(V2Keys.epoch) ?? (throw const OfflineRefusal('Terminal non appairé.')));
     final policies = await v2.read(V2Keys.policiesVersion) ?? '0';
@@ -458,6 +510,7 @@ class V2Engine extends CaisseEngine {
           policiesVersion: policies,
           catalogueCursor: cursor,
           content: content(sequence),
+          calculation: calculation,
         ),
         draftUuid: draftUuid,
       );
@@ -573,6 +626,7 @@ class V2Engine extends CaisseEngine {
     final ids = await v2.localIds([...products.keys, ...packagings.keys]);
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
+    _shopRules = (shop?['regles'] as Map?)?.cast<String, dynamic>();
     final categories = await v2.entities('categorie');
     String? categoryOf(Map<String, dynamic> product) {
       final category = categories[product['categorie_uuid']];

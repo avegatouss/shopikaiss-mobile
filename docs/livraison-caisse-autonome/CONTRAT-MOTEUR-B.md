@@ -64,7 +64,10 @@ class BEngineAdapter implements WindowsEngineAdapter {
 | `scan` | `code` | vue ; `code_inconnu` sinon |
 | `changeQuantity` | `line_id`, `quantity` (chaîne, 6 décimales au plus, > 0) | vue |
 | `removeLine` / `clear` | `line_id` / — | vue |
-| `setLineDiscount` | `line_id`, `amount` (francs, 0 = retirer) | vue ; `remise_refusee` (caissier sans droit `remise`, politique à 0, au-delà de `remises.ligne_max_pourcent`) |
+| `setLineDiscount` | `line_id`, `amount` (francs, 0 = retirer) **ou** `percent` (« 12,5 », 2 décimales, ≤ 100) | vue ; `remise_refusee` (sans droit `remise`, au-delà du plafond du rôle ou du terminal, au-delà de la base), `remise_invalide` ; un pourcentage est recalculé à chaque changement du panier |
+| `setGlobalDiscount` | `amount` **ou** `percent` (0 = retirer) | vue ; sur le sous-total (après remises de ligne) ; mêmes droits et plafonds ; `fonction_indisponible` avant la 2.1 |
+| `setDelivery` | `amount` (francs, 0 = retirer) | vue ; hors TVA, ajoutée au montant à payer ; droit `boutique.regles.livraison_droit` s'il est défini |
+| `setNote` | `text` (≤ 2 000, vide = retirer) | vue ; note du ticket |
 | `suspendDraft` | — | vue (panier vide, `suspended_count`) ; `panier_vide` si rien à mettre en attente |
 | `drafts` | — | `items[]` : `draft_id`, `updated_at`, `lines_count`, `summary`, `total_label` (catalogue courant), `complete` |
 | `resumeDraft` | `draft_id` | vue ; le panier courant non vide part en attente à sa place ; paiements préparés effacés ; `panier_inconnu` |
@@ -81,16 +84,18 @@ class BEngineAdapter implements WindowsEngineAdapter {
 Vue schéma 1 : `schema`, `revision` (croissante dans le processus), `ready`, `block_reason`, `can_pay`, `pay_reason`
 (motif quand `can_pay` est faux : caissier, session, panier vide, article retiré, remise devenue invalide), `draft_id`,
 `suspended_count`, `store_name`, `sync_label`, `total_label`, `payment_label`, `payment_valid`, `query`, `category`,
-`categories[]`, `products[]` (`id`, `name`, `category`, `price_label`, `stock_label`, `packagings[]`), `lines[]` (`id`,
+`categories[]`, `global_discount_entry`, `delivery`, `note`, `products[]` (`id`, `name`, `category`, `price_label`, `stock_label`, `packagings[]`), `lines[]` (`id`,
 `name`, `quantity_label`, `quantity` (canonique, 6 décimales), `unit_price_label`, `discount_label`, `discount` (francs,
-pour l'édition), `total_label`, `available`), `totals` (`gross_label`, `discounts_label`, `base_ht_label`, `vat_label`,
+pour l'édition), `discount_entry` (`{type, valeur}` ou null), `total_label`, `available`), `totals` (`gross_label` = sous-total
+après remises de ligne, `discounts_label` (lignes), `global_discount_label`, `delivery_label`, `base_ht_label`, `vat_label`,
 `vat_rate`, `vat_included`, `payable_label`) ou null, `payment` (premier paiement : `method`, `amount_label` ; ligne
-d'espèces : `received_label`, `change_label` ; ensemble : `paid_label`, `remaining_label`) ou null, `payments[]`
+d'espèces : `received_label`, `cash_due_label` (montant au tiroir, arrondi de caisse), `rounding_label` (écart, ou null),
+`change_label` (sur le montant au tiroir) ; ensemble : `paid_label`, `remaining_label`) ou null, `payments[]`
 (`method`, `name`, `amount_label`, `received_label`, `reference`).
 Montants et libellés calculés par le moteur ; Windows n'en recalcule aucun.
 
 `capabilities` (C-REQ-005 §2) : `sell`, `open_session`, `pair`, `synchronize`, `discount` (+ `max_percent`),
-`suspend`, chacune `{allowed, reason, network_required}`. Indication pour l'écran seulement : le moteur refait chaque contrôle à l'exécution.
+`global_discount`, `delivery`, `note`, `suspend`, chacune `{allowed, reason, network_required}`. Indication pour l'écran seulement : le moteur refait chaque contrôle à l'exécution.
 
 ## Protocole v2 (décision du 2026-10-29)
 
@@ -136,6 +141,13 @@ production avant l'accord de A). Apports visibles : catégories dans l'ordre de 
 `supplier`, `unit`, recherche par marque ; plafond de remise du rôle (`remise_max_pourcent`, le plus petit avec la
 politique du terminal) et `remise_max_montant` par vente, contrôlés par l'adaptateur et par le moteur ;
 `preparePayment.methods[].reference` (`aucune` | `facultative` | `obligatoire`), référence obligatoire exigée.
+
+**Lot 1b (`4bb14454` de A)** : vente 2.1 (`versions.calcul = "2"`) avec `remise_saisie` par ligne, remise globale
+(`remise_globale_saisie`), livraison, note, `monnaie` et `ecart_arrondi` des espèces. Calcul de la caisse web
+(`lib/src/offline/web_rules.dart`, exemples E1–E11 du référentiel de A) : remise en % arrondie selon la boutique
+(`down` / `nearest`), remise globale ≤ sous-total, TVA sur le reste, livraison hors TVA ; espèces : le montant reste la
+part exacte, le tiroir reçoit le montant arrondi (`arrondi_especes`), la monnaie se calcule dessus. Trop-perçu
+électronique refusé hors connexion (« Trop-perçu électronique : en ligne seulement. Saisissez le montant exact. »).
 
 ## Limites actuelles
 

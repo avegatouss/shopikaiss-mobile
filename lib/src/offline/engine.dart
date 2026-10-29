@@ -396,7 +396,9 @@ class OfflineEngine extends CaisseEngine {
     Operator operator, {
     String? draftUuid,
     String? operationUuid,
+    SaleExtras extras = const SaleExtras(),
   }) => serialized(() async {
+    if (!extras.isEmpty) throw const OfflineRefusal('Remise globale, livraison et note : non disponibles sur ce protocole.');
     if (operationUuid != null) {
       final existing = await store.operation(operationUuid);
       if (existing != null) return sameSale(existing);

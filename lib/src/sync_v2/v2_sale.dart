@@ -1,14 +1,19 @@
+import '../offline/models.dart';
 import '../offline/money.dart';
+import '../offline/web_rules.dart';
 import 'decimal6.dart';
 
 /// Ligne d'un panier v2, telle que choisie à l'écran (catalogue de la projection v2).
 class V2CartLine {
-  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0});
+  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry});
 
   final String productUuid;
   final String? packagingUuid;
   final int quantityMicros;
   final int discount;
+
+  /// Saisie de la remise (forme 2.1 `remise_saisie`).
+  final DiscountEntry? discountEntry;
 }
 
 /// Paiement d'une vente (au plus 10) ; [received] = somme remise par le client (espèces seulement), [reference] =
@@ -58,12 +63,16 @@ class V2SaleBuilder {
     required List<V2CartLine> cart,
     required List<V2Payment> payments,
     V2Vat vat = const V2Vat(),
+    SaleExtras extras = const SaleExtras(),
+    ({int step, String mode})? cashRounding,
+    bool revision21 = false,
   }) {
+    if (!revision21 && !extras.isEmpty) throw const V2SaleInvalid('Remise globale, livraison et note : contrat 2.1 requis.');
     if (cart.isEmpty) throw const V2SaleInvalid('Panier vide.');
     final lines = <Map<String, dynamic>>[];
     final movements = <Map<String, dynamic>>[];
-    final lineTotals = <int>[];
-    var gross = 0, discounts = 0;
+    final bases = <int>[];
+    final lineDiscounts = <int>[];
     for (final item in cart) {
       final product = products[item.productUuid] ?? (throw const V2SaleInvalid('Produit absent du catalogue local.'));
       if (product['actif'] != true || product['vente_locale'] != true) {
@@ -92,20 +101,34 @@ class V2SaleBuilder {
         'remise': item.discount,
         'total': base - item.discount,
         'revision_prix': revisions[item.packagingUuid ?? item.productUuid] ?? '0',
+        if (revision21) 'remise_saisie': item.discountEntry?.toJson(),
       });
       if (product['stock_illimite'] != true) {
         movements.add({'mouvement_uuid': newUuid(), 'produit_uuid': item.productUuid, 'lot_uuid': null, 'variation': Decimal6.format(-baseQuantity)});
       }
-      gross += base;
-      discounts += item.discount;
-      lineTotals.add(base - item.discount);
+      bases.add(base);
+      lineDiscounts.add(item.discount);
     }
-    final totals = saleTotals(lineTotals, vat.rate, vat.included);
-    if (payments.isEmpty || payments.length > 10) throw const V2SaleInvalid('Entre 1 et 10 paiements par vente.');
+    final WebTotals totals;
+    try {
+      totals = webTotals(
+        lineBases: bases,
+        lineDiscounts: lineDiscounts,
+        globalDiscount: extras.globalDiscount,
+        vatRate: vat.rate,
+        vatIncluded: vat.included,
+        delivery: extras.delivery,
+      );
+    } on WebRuleRefusal catch (e) {
+      throw V2SaleInvalid(e.message);
+    }
+    if ((payments.isEmpty && totals.payable > 0) || payments.length > 10) throw const V2SaleInvalid('Entre 1 et 10 paiements par vente.');
+    // Espèces (reçu renseigné) : le tiroir reçoit le montant arrondi ; montant = part exacte de la vente.
+    int due(V2Payment p) => p.received == null || cashRounding == null ? p.amount : cashRound(p.amount, step: cashRounding.step, mode: cashRounding.mode);
     var paid = 0;
     for (final payment in payments) {
       if (payment.amount <= 0) throw const V2SaleInvalid('Chaque paiement doit être positif.');
-      if (payment.received != null && payment.received! < payment.amount) throw const V2SaleInvalid('Somme reçue insuffisante.');
+      if (payment.received != null && payment.received! < due(payment)) throw const V2SaleInvalid('Somme reçue insuffisante.');
       if ((payment.reference?.length ?? 0) > 100) throw const V2SaleInvalid('Référence de paiement trop longue (100 caractères au plus).');
       paid += payment.amount;
     }
@@ -119,12 +142,23 @@ class V2SaleBuilder {
       'client_uuid': null,
       'tva': {'taux': vat.rate, 'incluse': vat.included},
       'lignes': lines,
-      'remise_globale': 0,
-      'livraison': 0,
-      'totaux': {'brut': gross, 'remises': discounts, 'base_ht': totals.baseHt, 'tva': totals.vat, 'a_payer': totals.payable},
+      'remise_globale': extras.globalDiscount,
+      'livraison': extras.delivery,
+      'totaux': {'brut': totals.gross, 'remises': totals.discounts, 'base_ht': totals.baseHt, 'tva': totals.vat, 'a_payer': totals.payable},
       'paiements': [
-        for (final p in payments) {'tentative_uuid': newUuid(), 'moyen': p.method, 'montant': p.amount, 'recu': p.received, 'reference': p.reference},
+        for (final p in payments)
+          {
+            'tentative_uuid': newUuid(),
+            'moyen': p.method,
+            'montant': p.amount,
+            'recu': p.received,
+            'reference': p.reference,
+            if (revision21) 'monnaie': p.received == null ? null : p.received! - due(p),
+            if (revision21) 'ecart_arrondi': due(p) - p.amount,
+          },
       ],
+      if (revision21) 'remise_globale_saisie': extras.globalDiscount == 0 ? null : extras.globalEntry?.toJson(),
+      if (revision21) 'note': extras.note == null || extras.note!.isEmpty ? null : extras.note,
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[],
     };
@@ -154,6 +188,7 @@ Map<String, dynamic> v2Operation({
   required String policiesVersion,
   required String? catalogueCursor,
   required Map<String, dynamic> content,
+  String calculation = '1',
 }) => {
   'uuid': uuid,
   'type': type,
@@ -161,7 +196,7 @@ Map<String, dynamic> v2Operation({
   'sequence': sequence,
   'cree_le': '${createdAt.toUtc().toIso8601String().substring(0, 19)}Z',
   'operateur_id': operatorId,
-  'versions': {'politiques': policiesVersion, 'calcul': '1', 'curseur_catalogue': catalogueCursor},
+  'versions': {'politiques': policiesVersion, 'calcul': calculation, 'curseur_catalogue': catalogueCursor},
   'contenu': content,
 };
 

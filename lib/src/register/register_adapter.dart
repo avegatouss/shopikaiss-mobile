@@ -6,6 +6,7 @@ import '../offline/engine.dart';
 import '../offline/models.dart';
 import '../offline/money.dart';
 import '../offline/ticket.dart';
+import '../offline/web_rules.dart';
 
 /// Version de l'interface de commandes du moteur (C-REQ-001). Toute rupture incrémente ce numéro.
 const registerAdapterVersion = 1;
@@ -30,8 +31,8 @@ class AdapterFailure implements Exception {
 /// chaque modification : un redémarrage de l'écran ou de l'hôte le retrouve (C-REQ-004).
 ///
 /// Commandes (`execute`) : status, pair, login, logout, openSession, view, search, addProduct, scan, changeQuantity,
-/// removeLine, setLineDiscount, clear, suspendDraft, drafts, resumeDraft, deleteDraft, preparePayment, setPayment,
-/// setPayments, commitSale, saleStatus, history, reprint, synchronize.
+/// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
+/// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, reprint, synchronize.
 ///
 /// Paniers en attente : un seul panier courant ; les autres sont suspendus, conservés sur le terminal et repris par
 /// leur identifiant. Un panier encaissé est consommé par la transaction de la vente (une seule vente par panier).
@@ -127,7 +128,13 @@ class LocalRegisterAdapter {
         if (!_draft.lines.any((l) => l.id == id)) throw const AdapterFailure('ligne_inconnue', 'Ligne introuvable dans le panier.');
         return _mutate(() => _draft.lines.removeWhere((l) => l.id == id));
       case 'setLineDiscount':
-        return _setLineDiscount(_text(args, 'line_id', max: 64), _int(args, 'amount'));
+        return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
+      case 'setGlobalDiscount':
+        return _setGlobalDiscount(_entry(args));
+      case 'setDelivery':
+        return _setDelivery(_int(args, 'amount'));
+      case 'setNote':
+        return _setNote(args['text'] == null ? null : _text(args, 'text', max: 2000));
       case 'clear':
         await engine.deleteDraft(_draft.uuid);
         _draft = _Draft(_newUuid());
@@ -212,8 +219,22 @@ class LocalRegisterAdapter {
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
+      'global_discount': cap(_extrasRefusal() ?? _discountRefusal()),
+      'delivery': cap(_extrasRefusal() ?? _deliveryRefusal()),
+      'note': cap(_extrasRefusal()),
       'suspend': cap(_draft.lines.isEmpty ? 'Le panier est vide.' : null),
     };
+  }
+
+  /// Remise globale, livraison et note exigent la vente 2.1 (serveur à jour).
+  String? _extrasRefusal() => engine.saleExtrasSupported ? null : 'Disponible quand la boutique est passée au contrat 2.1.';
+
+  String? _deliveryRefusal() {
+    final operator = _operator;
+    if (operator == null) return 'Identifiez le caissier.';
+    final right = engine.deliveryRight;
+    if (right != null && !engine.hasRight(operator, right)) return '${operator.name} n’a pas le droit d’ajouter une livraison.';
+    return null;
   }
 
   /// Motif qui empêche le caissier courant d'accorder une remise de ligne, ou null.
@@ -231,7 +252,7 @@ class LocalRegisterAdapter {
     final sold = snapshot == null ? const <int, BigInt>{} : await engine.soldSinceSnapshot();
     final resolved = snapshot == null ? const <(_DraftLine, CartLine?)>[] : [for (final l in _draft.lines) (l, l.materialize(snapshot))];
     final available = [for (final r in resolved) if (r.$2 != null) r.$2!];
-    final totals = snapshot == null ? null : saleTotals([for (final l in available) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded);
+    final totals = snapshot == null ? null : _totalsOf(_draft, snapshot);
     final currency = snapshot?.store.currency == 'FCFA' || snapshot == null ? 'F' : snapshot.store.currency;
     final payments = _draft.payments;
     final payment = payments.firstOrNull;
@@ -249,6 +270,8 @@ class LocalRegisterAdapter {
         ? 'Le panier est vide.'
         : available.length != resolved.length
         ? 'Un article du panier a été retiré du catalogue : retirez-le.'
+        : totals == null
+        ? 'La remise globale dépasse le montant du panier.'
         : _discountIssue(snapshot, resolved);
     final suspended = (await engine.openDrafts()).where((d) => d.content['suspendu'] == true).length;
     return {
@@ -269,8 +292,10 @@ class LocalRegisterAdapter {
       'totals': totals == null
           ? null
           : {
-              'gross_label': formatFcfa(totals.gross, currency),
-              'discounts_label': formatFcfa(available.fold<int>(0, (sum, l) => sum + l.discount), currency),
+              'gross_label': formatFcfa(totals.subtotal, currency),
+              'discounts_label': formatFcfa(totals.lineDiscounts, currency),
+              'global_discount_label': totals.globalDiscount == 0 ? '' : formatFcfa(totals.globalDiscount, currency),
+              'delivery_label': totals.delivery == 0 ? '' : formatFcfa(totals.delivery, currency),
               'base_ht_label': formatFcfa(totals.baseHt, currency),
               'vat_label': formatFcfa(totals.vat, currency),
               'vat_rate': snapshot!.store.vatRate,
@@ -284,7 +309,12 @@ class LocalRegisterAdapter {
               'method': payment.methodCode,
               'amount_label': formatFcfa(payment.amount, currency),
               'received_label': cash == null ? null : formatFcfa(cash.received!, currency),
-              'change_label': cash == null ? null : formatFcfa(cash.received! - cash.amount, currency),
+              'change_label': cash == null ? null : formatFcfa(cash.received! - engine.cashDue(cash.amount), currency),
+              // Arrondi de caisse : le tiroir reçoit le montant arrondi ; la vente garde le montant exact.
+              'cash_due_label': cash == null ? null : formatFcfa(engine.cashDue(cash.amount), currency),
+              'rounding_label': cash == null || engine.cashDue(cash.amount) == cash.amount
+                  ? null
+                  : formatFcfa(engine.cashDue(cash.amount) - cash.amount, currency),
               'paid_label': formatFcfa(paid, currency),
               'remaining_label': formatFcfa(totals.payable - paid, currency),
             },
@@ -298,6 +328,9 @@ class LocalRegisterAdapter {
             'reference': p.reference,
           },
       ],
+      'global_discount_entry': _draft.globalEntry?.toJson(),
+      'delivery': _draft.delivery,
+      'note': _draft.note,
       'query': _query,
       'category': _category,
       'categories': snapshot?.categories ?? const <String>[],
@@ -326,6 +359,7 @@ class LocalRegisterAdapter {
             'unit_price_label': cart == null ? '' : formatFcfa(cart.unitPrice, currency),
             'discount_label': cart == null || cart.discount == 0 ? '' : formatFcfa(cart.discount, currency),
             'discount': line.discount,
+            'discount_entry': line.entry?.toJson(),
             'total_label': cart == null ? '' : formatFcfa(cart.total, currency),
             'available': cart != null,
           },
@@ -341,10 +375,34 @@ class LocalRegisterAdapter {
       final max = engine.maxLineDiscountFor(_operator!, cart.base);
       if (cart.discount > max) return 'Remise sur « ${cart.label} » au-delà du maximum (${formatFcfa(max)}) : corrigez-la.';
     }
+    final subtotal = resolved.fold<int>(0, (sum, r) => sum + (r.$2 == null ? 0 : r.$2!.base - r.$2!.discount));
+    if (_draft.globalDiscount > 0) {
+      if (!engine.hasRight(_operator!, 'remise')) return '${_operator!.name} n’a pas le droit d’accorder une remise : retirez la remise globale.';
+      final max = engine.maxLineDiscountFor(_operator!, subtotal);
+      if (_draft.globalDiscount > max) return 'Remise globale au-delà du maximum (${formatFcfa(max)}) : corrigez-la.';
+    }
+    if (_draft.delivery > 0 && _deliveryRefusal() != null) return _deliveryRefusal();
     final saleCap = engine.maxSaleDiscountFor(_operator!);
-    final total = resolved.fold<int>(0, (sum, r) => sum + (r.$2?.discount ?? 0));
+    final total = resolved.fold<int>(0, (sum, r) => sum + (r.$2?.discount ?? 0)) + _draft.globalDiscount;
     if (saleCap != null && total > saleCap) return 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).';
     return null;
+  }
+
+  /// Totaux du panier par la règle du web, ou null si la remise globale dépasse le sous-total.
+  WebTotals? _totalsOf(_Draft draft, Snapshot snapshot) {
+    final carts = [for (final l in draft.lines) l.materialize(snapshot)].whereType<CartLine>().toList();
+    try {
+      return webTotals(
+        lineBases: [for (final c in carts) c.base],
+        lineDiscounts: [for (final c in carts) c.discount],
+        globalDiscount: draft.globalDiscount,
+        vatRate: snapshot.store.vatRate,
+        vatIncluded: snapshot.store.vatIncluded,
+        delivery: draft.delivery,
+      );
+    } on WebRuleRefusal {
+      return null;
+    }
   }
 
   String _stockLabel(Product p, BigInt sold) {
@@ -439,16 +497,17 @@ class LocalRegisterAdapter {
 
   /// Remise de ligne en francs (0 = retirer). Droit `remise` du caissier et plafond de la politique, contrôlés de
   /// nouveau par le moteur à l'encaissement.
-  Future<Map<String, dynamic>> _setLineDiscount(String lineId, int amount) {
+  Future<Map<String, dynamic>> _setLineDiscount(String lineId, DiscountEntry? entry) {
     final line = _draft.lines.where((l) => l.id == lineId).firstOrNull;
     if (line == null) throw const AdapterFailure('ligne_inconnue', 'Ligne introuvable dans le panier.');
-    if (amount < 0) throw const AdapterFailure('remise_invalide', 'Remise invalide (montant positif en francs).');
-    if (amount > 0) {
+    var amount = 0;
+    if (entry != null) {
       final refusal = _discountRefusal();
       if (refusal != null) throw AdapterFailure('remise_refusee', refusal);
       final snapshot = _snapshot();
       final cart = line.materialize(snapshot);
       if (cart == null) throw const AdapterFailure('panier_invalide', 'Article retiré du catalogue : retirez-le du panier.');
+      amount = _amountOf(entry, cart.base, label: cart.label);
       final max = engine.maxLineDiscountFor(_operator!, cart.base);
       if (amount > max) {
         throw AdapterFailure('remise_refusee', 'Remise au-delà du maximum autorisé (${formatFcfa(max)} sur cette ligne).');
@@ -459,12 +518,110 @@ class LocalRegisterAdapter {
         throw AdapterFailure('remise_refusee', 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).');
       }
     }
-    return _mutate(() => line.discount = amount);
+    return _mutate(() {
+      line.discount = amount;
+      line.entry = entry;
+    });
+  }
+
+  /// Saisie d'une remise : `amount` (francs ; 0 = retirer) ou `percent` (« 12,5 »). Null = pas de remise.
+  static DiscountEntry? _entry(Map<String, dynamic> args) {
+    final percent = args['percent'];
+    if (percent != null) {
+      if (percent is! String || percent.length > 10) throw const AdapterFailure('argument_invalide', 'Argument « percent » invalide.');
+      try {
+        return DiscountEntry('pourcentage', formatPercent(parsePercent(percent)));
+      } on WebRuleRefusal catch (e) {
+        throw AdapterFailure('remise_invalide', e.message);
+      }
+    }
+    final amount = _int(args, 'amount');
+    if (amount < 0) throw const AdapterFailure('remise_invalide', 'Remise invalide (montant positif en francs).');
+    return amount == 0 ? null : DiscountEntry('montant', '$amount');
+  }
+
+  /// Montant d'une saisie de remise sur [base] (règle d'arrondi de la boutique) ; refus du web au-delà de la base.
+  int _amountOf(DiscountEntry entry, int base, {String? label}) {
+    try {
+      return enteredDiscount(type: entry.type, value: entry.value, base: base, rounding: engine.percentRounding, label: label);
+    } on WebRuleRefusal catch (e) {
+      throw AdapterFailure('remise_refusee', e.message);
+    }
+  }
+
+  /// Remise globale (contrat 2.1) sur le sous-total : droit `remise`, plafonds du rôle et du terminal.
+  Future<Map<String, dynamic>> _setGlobalDiscount(DiscountEntry? entry) {
+    final unavailable = _extrasRefusal();
+    if (unavailable != null) throw AdapterFailure('fonction_indisponible', unavailable);
+    var amount = 0;
+    if (entry != null) {
+      final refusal = _discountRefusal();
+      if (refusal != null) throw AdapterFailure('remise_refusee', refusal);
+      final subtotal = _subtotal(_snapshot());
+      try {
+        amount = enteredDiscount(type: entry.type, value: entry.value, base: subtotal, rounding: engine.percentRounding);
+      } on WebRuleRefusal {
+        throw const AdapterFailure('remise_refusee', 'La remise globale dépasse le montant du panier.');
+      }
+      final max = engine.maxLineDiscountFor(_operator!, subtotal);
+      if (amount > max) throw AdapterFailure('remise_refusee', 'Remise globale au-delà du maximum autorisé (${formatFcfa(max)}).');
+      final saleCap = engine.maxSaleDiscountFor(_operator!);
+      final lines = _draft.lines.fold<int>(0, (sum, l) => sum + l.discount);
+      if (saleCap != null && lines + amount > saleCap) {
+        throw AdapterFailure('remise_refusee', 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).');
+      }
+    }
+    return _mutate(() {
+      _draft
+        ..globalDiscount = amount
+        ..globalEntry = entry;
+    });
+  }
+
+  /// Livraison (contrat 2.1), hors TVA, ajoutée au montant à payer ; droit de la boutique s'il est défini.
+  Future<Map<String, dynamic>> _setDelivery(int amount) {
+    final unavailable = _extrasRefusal();
+    if (unavailable != null) throw AdapterFailure('fonction_indisponible', unavailable);
+    if (amount < 0) throw const AdapterFailure('livraison_invalide', 'Livraison invalide (montant positif en francs).');
+    if (amount > 0) {
+      final refusal = _deliveryRefusal();
+      if (refusal != null) throw AdapterFailure('livraison_refusee', refusal);
+    }
+    return _mutate(() => _draft.delivery = amount);
+  }
+
+  /// Note du ticket (contrat 2.1), 2 000 caractères au plus ; vide = retirer.
+  Future<Map<String, dynamic>> _setNote(String? text) {
+    final unavailable = _extrasRefusal();
+    if (unavailable != null) throw AdapterFailure('fonction_indisponible', unavailable);
+    final note = text?.trim();
+    return _mutate(() => _draft.note = note == null || note.isEmpty ? null : note);
+  }
+
+  /// Sous-total du panier (après remises de ligne) : base de la remise globale.
+  int _subtotal(Snapshot snapshot) =>
+      [for (final l in _draft.lines) l.materialize(snapshot)].whereType<CartLine>().fold<int>(0, (sum, c) => sum + c.base - c.discount);
+
+  /// Remises en pourcentage recalculées après un changement du panier (quantité, ligne), comme le web.
+  void _recomputePercents() {
+    final snapshot = engine.snapshot;
+    if (snapshot == null) return;
+    for (final line in _draft.lines) {
+      final cart = line.materialize(snapshot);
+      if (cart != null && line.entry != null && line.entry!.isPercent) {
+        line.discount = percentDiscount(cart.base, parsePercent(line.entry!.value), rounding: engine.percentRounding);
+      }
+    }
+    final global = _draft.globalEntry;
+    if (global != null && global.isPercent) {
+      _draft.globalDiscount = percentDiscount(_subtotal(snapshot), parsePercent(global.value), rounding: engine.percentRounding);
+    }
   }
 
   Future<Map<String, dynamic>> _mutate(void Function() change) async {
     final before = _draft.copy();
     change();
+    _recomputePercents();
     _draft.payments.clear(); // tout changement du panier invalide les paiements préparés
     await _save(before);
     _emit('panier');
@@ -510,9 +667,7 @@ class LocalRegisterAdapter {
         'updated_at': stored.updatedAt.toUtc().toIso8601String(),
         'lines_count': draft.lines.length,
         'summary': [for (final l in valid.take(3)) l.label].join(', '),
-        'total_label': snapshot == null
-            ? ''
-            : formatFcfa(saleTotals([for (final l in valid) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded).payable, currency),
+        'total_label': snapshot == null ? '' : formatFcfa(_totalsOf(draft, snapshot)?.payable ?? 0, currency),
         'complete': snapshot != null && valid.length == draft.lines.length,
       });
     }
@@ -584,7 +739,7 @@ class LocalRegisterAdapter {
         _DraftPayment(
           methodCode: method.code,
           amount: amount,
-          received: method.isCash ? (received as int? ?? amount) : null,
+          received: method.isCash ? (received as int? ?? engine.cashDue(amount)) : null,
           reference: method.isCash || method.referenceMode == 'aucune' || text.isEmpty ? null : text,
         ),
       );
@@ -598,7 +753,7 @@ class LocalRegisterAdapter {
     _emit('paiement');
     if (error != null) throw AdapterFailure('paiement_invalide', error);
     final cash = payments.where((p) => p.received != null).firstOrNull;
-    return {...await _view(), 'change': cash == null ? 0 : cash.received! - cash.amount};
+    return {...await _view(), 'change': cash == null ? 0 : cash.received! - engine.cashDue(cash.amount)};
   }
 
   String? _paymentsError(Snapshot snapshot, List<_DraftPayment> payments, int payable) {
@@ -609,7 +764,7 @@ class LocalRegisterAdapter {
     for (final p in payments) {
       if (!snapshot.methods.any((m) => m.code == p.methodCode)) return 'Moyen de paiement non autorisé sur ce terminal.';
       if (p.amount <= 0) return 'Chaque paiement doit être positif.';
-      if (p.received != null && p.received! < p.amount) return 'Le montant reçu est inférieur au montant à régler.';
+      if (p.received != null && p.received! < engine.cashDue(p.amount)) return 'Le montant reçu est inférieur au montant à régler.';
       if ((p.reference?.length ?? 0) > 100) return 'Référence de paiement trop longue (100 caractères au plus).';
       final method = snapshot.methods.firstWhere((m) => m.code == p.methodCode);
       if (method.referenceMode == 'obligatoire' && p.reference == null) return 'Référence obligatoire pour « ${method.name} ».';
@@ -647,6 +802,7 @@ class LocalRegisterAdapter {
         operator,
         draftUuid: _draft.uuid,
         operationUuid: operationId,
+        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note),
       );
     } on OfflineRefusal catch (e) {
       // Refus d'une règle, levé avant toute écriture : la vente n'existe pas, le panier reste.
@@ -748,8 +904,9 @@ class LocalRegisterAdapter {
   }
 
   int _payable(Snapshot snapshot) {
-    final lines = [for (final l in _draft.lines) l.materialize(snapshot)].whereType<CartLine>().toList();
-    return saleTotals([for (final l in lines) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded).payable;
+    final totals = _totalsOf(_draft, snapshot);
+    if (totals == null) throw const AdapterFailure('remise_refusee', 'La remise globale dépasse le montant du panier.');
+    return totals.payable;
   }
 
   static String _requireOperationId(String? id) {
@@ -786,9 +943,15 @@ class _Draft {
           packagingId: (m['conditionnement_id'] as num?)?.toInt(),
           quantity: parseMicros('${m['quantite']}') ?? BigInt.zero,
           discount: (m['remise'] as num?)?.toInt() ?? 0,
+          entry: m['remise_saisie'] is Map ? DiscountEntry.fromJson(m['remise_saisie'] as Map) : null,
         ),
       );
     }
+    globalDiscount = (stored.content['remise_globale'] as num?)?.toInt() ?? 0;
+    final global = stored.content['remise_globale_saisie'];
+    globalEntry = global is Map ? DiscountEntry.fromJson(global) : null;
+    delivery = (stored.content['livraison'] as num?)?.toInt() ?? 0;
+    note = stored.content['note'] as String?;
     // `paiement` : panier conservé avant les paiements multiples.
     final raw = stored.content['paiements'] ?? [if (stored.content['paiement'] != null) stored.content['paiement']];
     for (final p in (raw as List).cast<Map>()) {
@@ -812,19 +975,41 @@ class _Draft {
   /// Panier en attente (suspendu) : conservé, hors du panier courant.
   bool suspended = false;
 
+  /// Contrat 2.1 : remise globale (montant et saisie), livraison, note.
+  int globalDiscount = 0;
+  DiscountEntry? globalEntry;
+  int delivery = 0;
+  String? note;
+
   _Draft copy() => _Draft(uuid)
     ..revision = revision
     ..lines.addAll([
-      for (final l in lines) _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, quantity: l.quantity, discount: l.discount),
+      for (final l in lines)
+        _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, quantity: l.quantity, discount: l.discount, entry: l.entry),
     ])
     ..payments.addAll(payments)
-    ..suspended = suspended;
+    ..suspended = suspended
+    ..globalDiscount = globalDiscount
+    ..globalEntry = globalEntry
+    ..delivery = delivery
+    ..note = note;
 
   Map<String, dynamic> toJson() => {
     'lignes': [
       for (final l in lines)
-        {'id': l.id, 'produit_id': l.productId, 'conditionnement_id': l.packagingId, 'quantite': formatMicros(l.quantity), 'remise': l.discount},
+        {
+          'id': l.id,
+          'produit_id': l.productId,
+          'conditionnement_id': l.packagingId,
+          'quantite': formatMicros(l.quantity),
+          'remise': l.discount,
+          if (l.entry != null) 'remise_saisie': l.entry!.toJson(),
+        },
     ],
+    if (globalDiscount != 0) 'remise_globale': globalDiscount,
+    if (globalEntry != null) 'remise_globale_saisie': globalEntry!.toJson(),
+    if (delivery != 0) 'livraison': delivery,
+    if (note != null) 'note': note,
     'paiements': [
       for (final p in payments) {'moyen': p.methodCode, 'montant': p.amount, 'recu': p.received, 'reference': p.reference},
     ],
@@ -833,7 +1018,10 @@ class _Draft {
 }
 
 class _DraftLine {
-  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0});
+  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0, this.entry});
+
+  /// Saisie de la remise (montant ou pourcentage) ; un pourcentage est recalculé à chaque changement du panier.
+  DiscountEntry? entry;
 
   final String id;
   final int productId;
@@ -849,7 +1037,7 @@ class _DraftLine {
     if (product == null) return null;
     final packaging = packagingId == null ? null : product.packaging(packagingId);
     if (packagingId != null && packaging == null) return null;
-    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount);
+    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry);
   }
 }
 

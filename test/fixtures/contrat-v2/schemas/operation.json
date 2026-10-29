@@ -1,164 +1,563 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "operation.json",
-  "title": "Opération v2 émise par un terminal. Chaque opération est validée seule : une opération invalide n'empêche pas les autres du lot.",
-  "description": "L'empreinte couvre l'opération entière sauf le champ empreinte (SK-JCS-1). Même UUID et même empreinte : renvoi identique. Même UUID, autre empreinte : conflit, l'original reste intact.",
-  "oneOf": [
-    { "$ref": "#/$defs/vente" },
-    { "$ref": "#/$defs/ouverture_session" }
-  ],
-  "$defs": {
-    "appareil": {
-      "type": "object",
-      "required": ["uuid", "epoque"],
-      "additionalProperties": false,
-      "properties": {
-        "uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "epoque": { "type": "integer", "minimum": 1 }
-      }
-    },
-    "versions": {
-      "description": "Versions des règles réellement appliquées au calcul de l'opération.",
-      "type": "object",
-      "required": ["politiques", "calcul", "curseur_catalogue"],
-      "additionalProperties": false,
-      "properties": {
-        "politiques": { "$ref": "commun.json#/$defs/version" },
-        "calcul": { "$ref": "commun.json#/$defs/version" },
-        "curseur_catalogue": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/curseur" }] }
-      }
-    },
-    "sequence": { "type": "integer", "minimum": 1, "maximum": 2147483647 },
-    "vente": {
-      "type": "object",
-      "required": ["uuid", "type", "appareil", "sequence", "cree_le", "operateur_id", "versions", "empreinte", "contenu"],
-      "additionalProperties": false,
-      "properties": {
-        "uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "type": { "const": "vente" },
-        "appareil": { "$ref": "#/$defs/appareil" },
-        "sequence": { "$ref": "#/$defs/sequence" },
-        "cree_le": { "$ref": "commun.json#/$defs/horodatage", "description": "Heure du terminal, informative ; l'heure de réception serveur est tenue à part." },
-        "operateur_id": { "$ref": "commun.json#/$defs/identifiant_serveur" },
-        "versions": { "$ref": "#/$defs/versions" },
-        "empreinte": { "$ref": "commun.json#/$defs/empreinte" },
-        "contenu": { "$ref": "#/$defs/contenu_vente" }
-      }
-    },
-    "contenu_vente": {
-      "type": "object",
-      "required": ["numero_local", "brouillon_uuid", "session_uuid", "client_uuid", "tva", "lignes", "remise_globale", "livraison", "totaux", "paiements", "mouvements", "autorisations"],
-      "additionalProperties": false,
-      "properties": {
-        "numero_local": { "type": "string", "pattern": "^[A-Z0-9][A-Z0-9-]{0,29}$" },
-        "brouillon_uuid": { "$ref": "commun.json#/$defs/uuid", "description": "Brouillon consommé : une seule vente par brouillon." },
-        "session_uuid": { "$ref": "commun.json#/$defs/uuid", "description": "Session serveur connue, ou UUID de l'opération ouverture_session locale dont la vente dépend." },
-        "client_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
-        "tva": {
-          "type": "object",
-          "required": ["taux", "incluse"],
-          "additionalProperties": false,
-          "properties": {
-            "taux": { "$ref": "commun.json#/$defs/taux" },
-            "incluse": { "type": "boolean" }
-          }
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "operation.json",
+    "title": "Opération v2 émise par un terminal. Chaque opération est validée seule : une opération invalide n'empêche pas les autres du lot.",
+    "description": "L'empreinte couvre l'opération entière sauf le champ empreinte (SK-JCS-1). Même UUID et même empreinte : renvoi identique. Même UUID, autre empreinte : conflit, l'original reste intact.",
+    "oneOf": [
+        {
+            "$ref": "#/$defs/vente"
         },
-        "lignes": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "$ref": "#/$defs/ligne" } },
-        "remise_globale": { "$ref": "commun.json#/$defs/montant" },
-        "livraison": { "$ref": "commun.json#/$defs/montant" },
-        "totaux": {
-          "type": "object",
-          "required": ["brut", "remises", "base_ht", "tva", "a_payer"],
-          "additionalProperties": false,
-          "properties": {
-            "brut": { "$ref": "commun.json#/$defs/montant" },
-            "remises": { "$ref": "commun.json#/$defs/montant" },
-            "base_ht": { "$ref": "commun.json#/$defs/montant" },
-            "tva": { "$ref": "commun.json#/$defs/montant" },
-            "a_payer": { "$ref": "commun.json#/$defs/montant" }
-          }
-        },
-        "paiements": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/paiement" } },
-        "mouvements": { "type": "array", "minItems": 0, "maxItems": 400, "items": { "$ref": "#/$defs/mouvement" } },
-        "autorisations": { "type": "array", "minItems": 0, "maxItems": 10, "items": { "$ref": "#/$defs/autorisation" } }
-      }
-    },
-    "ligne": {
-      "description": "Ligne figée au moment de la vente : libellé, conversion et prix ne sont jamais relus d'un catalogue modifié depuis.",
-      "type": "object",
-      "required": ["ligne_uuid", "produit_uuid", "conditionnement_uuid", "libelle", "quantite", "coefficient", "quantite_base", "prix_unitaire", "remise", "total", "revision_prix"],
-      "additionalProperties": false,
-      "properties": {
-        "ligne_uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "produit_uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "conditionnement_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
-        "libelle": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "quantite": { "$ref": "commun.json#/$defs/quantite" },
-        "coefficient": { "$ref": "commun.json#/$defs/quantite", "description": "Unités de base par unité vendue (1.000000 sans conditionnement)." },
-        "quantite_base": { "$ref": "commun.json#/$defs/quantite" },
-        "prix_unitaire": { "$ref": "commun.json#/$defs/montant" },
-        "remise": { "$ref": "commun.json#/$defs/montant" },
-        "total": { "$ref": "commun.json#/$defs/montant" },
-        "revision_prix": { "$ref": "commun.json#/$defs/version" }
-      }
-    },
-    "paiement": {
-      "type": "object",
-      "required": ["tentative_uuid", "moyen", "montant", "recu", "reference"],
-      "additionalProperties": false,
-      "properties": {
-        "tentative_uuid": { "$ref": "commun.json#/$defs/uuid", "description": "Tentative de paiement ; stable entre renvois, distincte des tentatives réseau." },
-        "moyen": { "$ref": "commun.json#/$defs/code" },
-        "montant": { "$ref": "commun.json#/$defs/montant" },
-        "recu": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant" }], "description": "Espèces seulement : somme remise par le client." },
-        "reference": { "type": ["string", "null"], "maxLength": 120 }
-      }
-    },
-    "mouvement": {
-      "description": "Mouvement de stock local identifié : la couverture par le serveur se suit mouvement par mouvement.",
-      "type": "object",
-      "required": ["mouvement_uuid", "produit_uuid", "lot_uuid", "variation"],
-      "additionalProperties": false,
-      "properties": {
-        "mouvement_uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "produit_uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "lot_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
-        "variation": { "$ref": "commun.json#/$defs/quantite_signee" }
-      }
-    },
-    "autorisation": {
-      "type": "object",
-      "required": ["type", "approbateur_id", "motif", "preuve"],
-      "additionalProperties": false,
-      "properties": {
-        "type": { "enum": ["remise", "survente", "prix_manuel"] },
-        "approbateur_id": { "$ref": "commun.json#/$defs/identifiant_serveur" },
-        "motif": { "type": "string", "minLength": 1, "maxLength": 500 },
-        "preuve": { "type": "string", "maxLength": 500, "description": "Preuve locale de l'autorisation (jamais un PIN ni son empreinte)." }
-      }
-    },
-    "ouverture_session": {
-      "type": "object",
-      "required": ["uuid", "type", "appareil", "sequence", "cree_le", "operateur_id", "versions", "empreinte", "contenu"],
-      "additionalProperties": false,
-      "properties": {
-        "uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "type": { "const": "ouverture_session" },
-        "appareil": { "$ref": "#/$defs/appareil" },
-        "sequence": { "$ref": "#/$defs/sequence" },
-        "cree_le": { "$ref": "commun.json#/$defs/horodatage" },
-        "operateur_id": { "$ref": "commun.json#/$defs/identifiant_serveur" },
-        "versions": { "$ref": "#/$defs/versions" },
-        "empreinte": { "$ref": "commun.json#/$defs/empreinte" },
-        "contenu": {
-          "type": "object",
-          "required": ["fond"],
-          "additionalProperties": false,
-          "properties": {
-            "fond": { "$ref": "commun.json#/$defs/montant" }
-          }
+        {
+            "$ref": "#/$defs/ouverture_session"
         }
-      }
+    ],
+    "$defs": {
+        "appareil": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "epoque"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "epoque": {
+                    "type": "integer",
+                    "minimum": 1
+                }
+            }
+        },
+        "versions": {
+            "description": "Versions des règles réellement appliquées au calcul de l'opération.",
+            "type": "object",
+            "required": [
+                "politiques",
+                "calcul",
+                "curseur_catalogue"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "politiques": {
+                    "$ref": "commun.json#/$defs/version"
+                },
+                "calcul": {
+                    "$ref": "commun.json#/$defs/version"
+                },
+                "curseur_catalogue": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/curseur"
+                        }
+                    ]
+                }
+            }
+        },
+        "sequence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 2147483647
+        },
+        "vente": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "vente"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage",
+                    "description": "Heure du terminal, informative ; l'heure de réception serveur est tenue à part."
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_vente"
+                }
+            }
+        },
+        "contenu_vente": {
+            "type": "object",
+            "required": [
+                "numero_local",
+                "brouillon_uuid",
+                "session_uuid",
+                "client_uuid",
+                "tva",
+                "lignes",
+                "remise_globale",
+                "livraison",
+                "totaux",
+                "paiements",
+                "mouvements",
+                "autorisations"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "numero_local": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9][A-Z0-9-]{0,29}$"
+                },
+                "brouillon_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Brouillon consommé : une seule vente par brouillon."
+                },
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Session serveur connue, ou UUID de l'opération ouverture_session locale dont la vente dépend."
+                },
+                "client_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "tva": {
+                    "type": "object",
+                    "required": [
+                        "taux",
+                        "incluse"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "taux": {
+                            "$ref": "commun.json#/$defs/taux"
+                        },
+                        "incluse": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/ligne"
+                    }
+                },
+                "remise_globale": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "livraison": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "totaux": {
+                    "type": "object",
+                    "required": [
+                        "brut",
+                        "remises",
+                        "base_ht",
+                        "tva",
+                        "a_payer"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "brut": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "remises": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "base_ht": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "tva": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "a_payer": {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    }
+                },
+                "paiements": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 20,
+                    "items": {
+                        "$ref": "#/$defs/paiement"
+                    },
+                    "description": "Au moins un paiement dès que a_payer > 0 (recoupé par le serveur) ; aucun pour une vente à 0 F."
+                },
+                "mouvements": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 400,
+                    "items": {
+                        "$ref": "#/$defs/mouvement"
+                    }
+                },
+                "autorisations": {
+                    "type": "array",
+                    "minItems": 0,
+                    "maxItems": 10,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "remise_globale_saisie": {
+                    "description": "Révision 2.1 : remise telle que saisie ; le montant (remise) en découle selon boutique.regles.remise_pourcentage_arrondi (pourcentage) ou lui est égal (montant).",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "type",
+                                "valeur"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "type": {
+                                    "enum": [
+                                        "montant",
+                                        "pourcentage"
+                                    ]
+                                },
+                                "valeur": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]{1,19}(\\.[0-9]{1,2})?$"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 2000,
+                    "description": "Révision 2.1 : note du ticket (commentaire de la vente)."
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros",
+                        "gros_quantite"
+                    ],
+                    "description": "Révision 2.1 : gros = bascule manuelle du panier (droit boutique.regles.gros.droit) ; gros_quantite = seuil atteint sur au moins une ligne."
+                },
+                "client_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 200
+                }
+            }
+        },
+        "ligne": {
+            "description": "Ligne figée au moment de la vente : libellé, conversion et prix ne sont jamais relus d'un catalogue modifié depuis.",
+            "type": "object",
+            "required": [
+                "ligne_uuid",
+                "produit_uuid",
+                "conditionnement_uuid",
+                "libelle",
+                "quantite",
+                "coefficient",
+                "quantite_base",
+                "prix_unitaire",
+                "remise",
+                "total",
+                "revision_prix"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "ligne_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "conditionnement_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "libelle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                },
+                "quantite": {
+                    "$ref": "commun.json#/$defs/quantite"
+                },
+                "coefficient": {
+                    "$ref": "commun.json#/$defs/quantite",
+                    "description": "Unités de base par unité vendue (1.000000 sans conditionnement)."
+                },
+                "quantite_base": {
+                    "$ref": "commun.json#/$defs/quantite"
+                },
+                "prix_unitaire": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "remise": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "total": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "revision_prix": {
+                    "$ref": "commun.json#/$defs/version"
+                },
+                "remise_saisie": {
+                    "description": "Révision 2.1 : remise telle que saisie ; le montant (remise) en découle selon boutique.regles.remise_pourcentage_arrondi (pourcentage) ou lui est égal (montant).",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "type",
+                                "valeur"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "type": {
+                                    "enum": [
+                                        "montant",
+                                        "pourcentage"
+                                    ]
+                                },
+                                "valeur": {
+                                    "type": "string",
+                                    "pattern": "^[0-9]{1,19}(\\.[0-9]{1,2})?$"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros"
+                    ],
+                    "description": "Révision 2.1 : prix appliqué (gros = prix_gros du produit ou du conditionnement)."
+                }
+            }
+        },
+        "paiement": {
+            "type": "object",
+            "required": [
+                "tentative_uuid",
+                "moyen",
+                "montant",
+                "recu",
+                "reference"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "tentative_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Tentative de paiement ; stable entre renvois, distincte des tentatives réseau."
+                },
+                "moyen": {
+                    "$ref": "commun.json#/$defs/code"
+                },
+                "montant": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "recu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ],
+                    "description": "Espèces seulement : somme remise par le client."
+                },
+                "reference": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "monnaie": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ],
+                    "description": "Révision 2.1 (versions.calcul = \"2\") : monnaie rendue sur cette ligne d'espèces."
+                },
+                "ecart_arrondi": {
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": -1000000,
+                    "maximum": 1000000,
+                    "description": "Révision 2.1 : arrondi de caisse des espèces = montant encaissé au tiroir − montant (exact). montant reste la part exacte de la vente ; écart = arrondi_especes appliqué au montant − montant."
+                }
+            }
+        },
+        "mouvement": {
+            "description": "Mouvement de stock local identifié : la couverture par le serveur se suit mouvement par mouvement.",
+            "type": "object",
+            "required": [
+                "mouvement_uuid",
+                "produit_uuid",
+                "lot_uuid",
+                "variation"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "mouvement_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "lot_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "variation": {
+                    "$ref": "commun.json#/$defs/quantite_signee"
+                }
+            }
+        },
+        "autorisation": {
+            "type": "object",
+            "required": [
+                "type",
+                "approbateur_id",
+                "motif",
+                "preuve"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "type": {
+                    "enum": [
+                        "remise",
+                        "survente",
+                        "prix_manuel"
+                    ]
+                },
+                "approbateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "motif": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                },
+                "preuve": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Preuve locale de l'autorisation (jamais un PIN ni son empreinte)."
+                }
+            }
+        },
+        "ouverture_session": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "ouverture_session"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "fond"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "fond": {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    }
+                }
+            }
+        }
     }
-  }
 }
