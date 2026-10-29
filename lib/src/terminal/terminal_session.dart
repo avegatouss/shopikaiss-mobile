@@ -1,5 +1,6 @@
 import 'package:flutter/widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:sqflite/sqflite.dart' show databaseFactory;
 
 import '../app_settings.dart';
 import '../offline/api.dart';
@@ -40,7 +41,7 @@ class TerminalSession extends ChangeNotifier {
     final settings = await AppSettings.load();
     final package = await PackageInfo.fromPlatform();
     final offline = OfflineEngine(
-      store: await SqfliteOfflineStore.open(),
+      store: await SqfliteOfflineStore.open(factory: databaseFactory),
       transport: HttpRegisterTransport(appVersion: package.version),
     );
     if (settings.configured) await offline.load(settings.origin);

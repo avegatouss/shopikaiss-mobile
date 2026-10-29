@@ -16,7 +16,8 @@ class Snapshot {
       fingerprint = (raw['empreinte'] ?? '') as String,
       methods = [for (final m in (raw['moyens'] as List? ?? const [])) PaymentMethodInfo(Map<String, dynamic>.from(m as Map))],
       operators = [for (final o in (raw['caissiers'] as List? ?? const [])) Operator(Map<String, dynamic>.from(o as Map))],
-      products = [for (final p in (raw['produits'] as List? ?? const [])) Product(Map<String, dynamic>.from(p as Map))] {
+      products = [for (final p in (raw['produits'] as List? ?? const [])) Product(Map<String, dynamic>.from(p as Map))],
+      coverage = raw['couverture_stock'] is Map ? StockCoverage(Map<String, dynamic>.from(raw['couverture_stock'] as Map)) : null {
     for (final product in products) {
       for (final code in product.codes) {
         _byCode[code.code] = (product, code.packagingId);
@@ -25,6 +26,9 @@ class Snapshot {
   }
 
   final Map<String, dynamic> raw;
+
+  /// Couverture du stock transmise avec ce référentiel (B-REQ-002), ou null pour un serveur qui ne la fournit pas.
+  final StockCoverage? coverage;
   final bool available;
   final String? reason;
   final StoreInfo store;
@@ -114,7 +118,8 @@ class OfflineRules {
       refreshMinutes = (m['rafraichissement_minutes'] as num?)?.toInt() ?? 30,
       probeSeconds = (m['sondage_secondes'] as num?)?.toInt() ?? 20,
       automaticSwitch = (m['bascule'] ?? 'automatique') == 'automatique',
-      exclusivity = (m['exclusivite'] ?? 'session') as String;
+      exclusivity = (m['exclusivite'] ?? 'session') as String,
+      permanentLocal = m['vente_locale_permanente'] == true;
 
   final int maxHours;
   final int maxSales;
@@ -126,6 +131,10 @@ class OfflineRules {
   final int probeSeconds;
   final bool automaticSwitch;
   final String exclusivity;
+
+  /// Terminal pilote de la vente locale permanente (palier « vente locale v1 ») : la caisse vend localement même
+  /// connectée et synchronise en arrière-plan. Faux par défaut, et pour un serveur qui ne connaît pas ce réglage.
+  final bool permanentLocal;
 
   bool get pinRequired => operatorMode == 'pin';
 }
@@ -252,6 +261,62 @@ class OperationStatus {
   static const refused = 'refusee';
 }
 
+/// Mouvement de stock local d'une opération, en unité de base du produit (millionièmes, négatif pour une vente).
+///
+/// La conversion du conditionnement est figée à l'encaissement : un coefficient modifié ensuite au catalogue ne change
+/// pas ce mouvement. Il reste « non couvert » tant qu'aucun catalogue reçu du serveur ne le reflète ; le stock estimé
+/// est le stock du catalogue plus les mouvements non couverts.
+class StockMovement {
+  const StockMovement({required this.uuid, required this.operationUuid, required this.productId, required this.quantityMicros, this.coveredAt});
+
+  final String uuid;
+  final String operationUuid;
+  final int productId;
+  final int quantityMicros;
+  final DateTime? coveredAt;
+}
+
+/// Ventes de ce terminal classées par le serveur dans la même transaction que le stock du référentiel (B-REQ-002).
+///
+/// Une vente de [integrated] est déjà déduite du stock transmis ; une vente de [arbitration] ou absente des listes ne
+/// l'est pas. [dismissed] : écartée par la boutique, sans mouvement serveur.
+class StockCoverage {
+  StockCoverage(Map<String, dynamic> m)
+    : sinceSequence = (m['depuis_sequence'] as num?)?.toInt(),
+      integrated = {for (final u in (m['integrees'] as List? ?? const [])) '$u'},
+      arbitration = {for (final u in (m['a_arbitrer'] as List? ?? const [])) '$u'},
+      dismissed = {for (final u in (m['ecartees'] as List? ?? const [])) '$u'},
+      truncated = m['tronque'] == true;
+
+  final int? sinceSequence;
+  final Set<String> integrated;
+  final Set<String> arbitration;
+  final Set<String> dismissed;
+  final bool truncated;
+}
+
+/// Compteurs de la file, lus sans charger les opérations.
+class QueueCounts {
+  const QueueCounts({this.pending = 0, this.pendingSales = 0, this.refused = 0, this.arbitration = 0});
+
+  final int pending;
+  final int pendingSales;
+  final int refused;
+
+  /// Reçues par le serveur mais à arbitrer par la boutique (dernier état connu du terminal).
+  final int arbitration;
+}
+
+/// Le brouillon (panier) a déjà donné lieu à une vente : un second encaissement du même panier est refusé.
+class DraftAlreadyConsumed implements Exception {
+  const DraftAlreadyConsumed(this.operationUuid);
+
+  final String operationUuid;
+
+  @override
+  String toString() => 'Ce panier a déjà été encaissé (opération $operationUuid).';
+}
+
 /// Opération faite hors ligne, conservée sur le terminal jusqu'à sa réception par le serveur.
 class OfflineOperation {
   OfflineOperation({
@@ -266,6 +331,7 @@ class OfflineOperation {
     this.serverStatus,
     this.serverNumber,
     this.message,
+    this.resolvedAt,
   });
 
   final String uuid;
@@ -284,7 +350,14 @@ class OfflineOperation {
   String? serverNumber;
   String? message;
 
+  /// Moment où le serveur a donné à l'opération un sort définitif (`integree` ou `ecartee`). Le stock d'un catalogue
+  /// demandé APRÈS ce moment reflète l'opération : sa consommation locale est alors couverte.
+  DateTime? resolvedAt;
+
   bool get isSale => type == 'vente';
+
+  /// Sort définitif côté serveur : plus rien à attendre de la boutique pour cette opération.
+  static bool isFinalServerStatus(String? status) => status == 'integree' || status == 'ecartee';
   int get total => (content['total'] as num?)?.toInt() ?? 0;
 
   Map<String, dynamic> toPayload() => {

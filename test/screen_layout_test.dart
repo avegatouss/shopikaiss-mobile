@@ -23,9 +23,11 @@ class _Offline implements RegisterTransport {
   @override
   Future<ApiResponse> status(String a, String t) async => _off;
   @override
-  Future<ApiResponse> snapshot(String a, String t) async => _off;
+  Future<ApiResponse> snapshot(String a, String t, {int? sinceSequence}) async => _off;
   @override
   Future<ApiResponse> synchronize(String a, String t, List<Map<String, dynamic>> o) async => _off;
+  @override
+  Future<ApiResponse> operationStates(String a, String t, List<String> u) async => _off;
 }
 
 Map<String, dynamic> _snapshot() => {
@@ -63,12 +65,14 @@ class _FullStore extends MemoryOfflineStore {
   Future<void> append(OfflineOperation operation) async => throw StateError('disque plein');
 }
 
-Future<TerminalSession> _session({required double inches, String layout = 'auto', MemoryOfflineStore? memory}) async {
+Future<TerminalSession> _session({required double inches, String layout = 'auto', MemoryOfflineStore? memory, bool permanent = false}) async {
+  final snapshot = _snapshot();
+  if (permanent) (snapshot['reglages'] as Map)['vente_locale_permanente'] = true;
   final store = (memory ?? MemoryOfflineStore())
     ..values.addAll({
       StoreKeys.apiBase: 'https://boutique.exemple.ci/api/caisse/v1',
       StoreKeys.token: 'abcdefabcdef.secret',
-      StoreKeys.snapshot: jsonEncode(_snapshot()),
+      StoreKeys.snapshot: jsonEncode(snapshot),
       StoreKeys.snapshotAt: DateTime.now().toUtc().toIso8601String(),
       StoreKeys.lastContact: DateTime.now().toUtc().toIso8601String(),
     });
@@ -177,6 +181,20 @@ void main() {
         expect(find.byKey(const ValueKey('compact-checkout-bar')), findsNothing);
         expect(find.text('Panier (0)'), findsOneWidget);
         expect(find.text('Reconnecter'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    for (final (label, size, inches, banner) in [
+      ('téléphone 4 pouces', const Size(320, 568), 4.0, 'Connexion interrompue'),
+      ('terminal 14 pouces', const Size(1366, 768), 14.0, 'Connexion interrompue — vente locale disponible'),
+    ]) {
+      testWidgets('vente locale permanente, $label : état réseau dit, accès à la caisse web, aucun débordement', (tester) async {
+        final session = await _session(inches: inches, permanent: true);
+        await _pump(tester, size, session);
+        expect(find.textContaining(banner), findsOneWidget);
+        expect(find.textContaining('Caisse hors ligne'), findsNothing);
+        if (inches > 6) expect(find.text('Caisse web'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
     }
