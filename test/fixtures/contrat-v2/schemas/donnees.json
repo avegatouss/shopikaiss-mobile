@@ -59,7 +59,7 @@
       "properties": {
         "operateur_id": { "$ref": "commun.json#/$defs/identifiant_serveur" },
         "nom": { "type": "string", "minLength": 1, "maxLength": 120 },
-        "pin_empreinte": { "type": ["string", "null"], "maxLength": 100 },
+        "pin_empreinte": { "type": ["string", "null"], "maxLength": 100, "description": "null quand la politique demande un PIN : l’opérateur n’a pas défini de PIN ; le refuser avec le motif « PIN non défini », sans compter d’échec." },
         "droits": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } }
       }
     },

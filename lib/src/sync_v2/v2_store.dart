@@ -63,6 +63,13 @@ class V2Keys {
   static const serverState = 'v2.etat_serveur';
   static const blocked = 'v2.blocage';
   static const revoked = 'v2.revocation';
+  static const origin = 'v2.origine';
+  static const nextLocalId = 'v2.id_suivant';
+
+  /// Ouverture de session locale (UUID de l'opération `ouverture_session`) en attente de la session du serveur.
+  static const localSession = 'v2.session_locale';
+  static const lastContact = 'v2.dernier_contact';
+  static const snapshotAt = 'v2.catalogue_le';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
@@ -253,6 +260,52 @@ class V2Store {
     return V2Vat(rate: shop['tva_taux'] as String, included: shop['tva_incluse'] as bool);
   }
 
+  /// Révisions en vigueur d'un type (pour `revision_prix` des lignes figées), indexées par clé.
+  Future<Map<String, String>> revisions(String type) async {
+    final rows = await db.query('v2_entites', columns: ['cle', 'revision'], where: 'type = ? AND donnees IS NOT NULL', whereArgs: [type]);
+    return {for (final r in rows) r['cle'] as String: r['revision'] as String};
+  }
+
+  /// Identifiants entiers locaux des UUID (produits, conditionnements) : attribués une fois, jamais réutilisés ni
+  /// renumérotés, pour les écrans et le protocole de l'hôte Windows qui désignent un article par un entier.
+  Future<Map<String, int>> localIds(Iterable<String> uuids) => db.transaction((txn) async {
+    final ids = <String, int>{};
+    for (final r in await txn.rawQuery("SELECT cle, valeur FROM kv WHERE cle LIKE 'v2.id.%'")) {
+      ids[(r['cle'] as String).substring(6)] = int.parse(r['valeur'] as String);
+    }
+    var next = int.parse(await read(V2Keys.nextLocalId, txn) ?? '1');
+    final start = next;
+    for (final uuid in uuids) {
+      if (ids.containsKey(uuid)) continue;
+      ids[uuid] = next;
+      await write('v2.id.$uuid', '${next++}', txn);
+    }
+    if (next != start) await write(V2Keys.nextLocalId, '$next', txn);
+    return ids;
+  });
+
+  /// Opérations du terminal, plus récentes d'abord (historique, réimpression).
+  Future<List<Map<String, dynamic>>> operationRows({int? limit}) async {
+    final rows = await db.query('v2_operations', orderBy: 'epoque DESC, sequence DESC', limit: limit);
+    return [for (final r in rows) _operationRow(r)];
+  }
+
+  Map<String, dynamic> _operationRow(Map<String, Object?> r) => {
+    'operation': jsonDecode(r['operation'] as String),
+    'etat': r['etat'],
+    'version_etat': r['version_etat'],
+    'raison': r['raison'] == null ? null : jsonDecode(r['raison'] as String),
+    'numero_serveur': r['numero_serveur'],
+    'couverture_curseur': r['couverture_curseur'],
+    'maj_le': r['maj_le'],
+  };
+
+  /// Nombre d'opérations par (type, état local).
+  Future<Map<(String, String), int>> stateCounts() async {
+    final rows = await db.rawQuery('SELECT type, etat, COUNT(*) AS n FROM v2_operations GROUP BY type, etat');
+    return {for (final r in rows) (r['type'] as String, r['etat'] as String): r['n'] as int};
+  }
+
   Future<Map<String, int>> counts() async {
     final rows = await db.rawQuery('SELECT type, COUNT(*) AS n FROM v2_entites WHERE donnees IS NOT NULL GROUP BY type');
     return {for (final r in rows) r['type'] as String: r['n'] as int};
@@ -269,6 +322,12 @@ class V2Store {
       out[r['cle'] as String] = (out[r['cle'] as String] ?? 0) + (r['v'] as int);
     }
     return out;
+  }
+
+  /// Mouvements locaux non couverts, cumulés par clé de stock (micro-unités, négatif pour une vente).
+  Future<Map<String, int>> uncoveredStock() async {
+    final rows = await db.rawQuery('SELECT cle, SUM(variation_micros) AS v FROM v2_mouvements WHERE couvert_le IS NULL GROUP BY cle');
+    return {for (final r in rows) r['cle'] as String: r['v'] as int};
   }
 
   // ---------------------------------------------------------------- file
@@ -395,16 +454,7 @@ class V2Store {
 
   Future<Map<String, dynamic>?> operation(String uuid) async {
     final rows = await db.query('v2_operations', where: 'uuid = ?', whereArgs: [uuid], limit: 1);
-    if (rows.isEmpty) return null;
-    final r = rows.first;
-    return {
-      'operation': jsonDecode(r['operation'] as String),
-      'etat': r['etat'],
-      'version_etat': r['version_etat'],
-      'raison': r['raison'] == null ? null : jsonDecode(r['raison'] as String),
-      'numero_serveur': r['numero_serveur'],
-      'couverture_curseur': r['couverture_curseur'],
-    };
+    return rows.isEmpty ? null : _operationRow(rows.first);
   }
 
   Future<List<Map<String, Object?>>> movements(String operationUuid) =>

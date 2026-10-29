@@ -21,7 +21,7 @@ const _offline = Color(0xFFB45309);
 class OfflineRegisterPage extends StatefulWidget {
   const OfflineRegisterPage({super.key, required this.engine, required this.session, required this.onBackOnline});
 
-  final OfflineEngine engine;
+  final CaisseEngine engine;
   final TerminalSession session;
   final VoidCallback onBackOnline;
 
@@ -46,7 +46,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Disposition compacte (téléphone de moins de 6 pouces) : onglet affiché, 0 = articles, 1 = panier.
   int _compactTab = 0;
 
-  OfflineEngine get _engine => widget.engine;
+  CaisseEngine get _engine => widget.engine;
 
   /// Petit téléphone : bandeau resserré, articles et panier en onglets, paiement en plein écran. Les terminaux et
   /// tablettes (6 à 8 pouces, 14 pouces) gardent la disposition standard.
@@ -802,7 +802,7 @@ class _Blocked extends StatelessWidget {
 class _OperatorLogin extends StatefulWidget {
   const _OperatorLogin({required this.engine, required this.onLogged});
 
-  final OfflineEngine engine;
+  final CaisseEngine engine;
   final ValueChanged<Operator> onLogged;
 
   @override
@@ -897,6 +897,9 @@ class _OperatorLoginState extends State<_OperatorLogin> {
       if (_pin.length < 6) setState(() => _pin += key);
       return;
     }
+    if (!widget.engine.pinDefined(_selected!)) {
+      return setState(() => (_pin = '', _error = 'PIN non défini pour ce caissier : définissez-le dans ShopiKaiss.'));
+    }
     // Blocage après 3 échecs, gardé par le moteur sur le terminal (un redémarrage ne l'efface pas).
     final locked = await widget.engine.pinLockedFor(_selected!);
     if (!mounted) return;
@@ -921,7 +924,7 @@ class _OperatorLoginState extends State<_OperatorLogin> {
 class _SessionOpening extends StatefulWidget {
   const _SessionOpening({required this.engine, required this.operator, required this.onOpened});
 
-  final OfflineEngine engine;
+  final CaisseEngine engine;
   final Operator operator;
   final VoidCallback onOpened;
 

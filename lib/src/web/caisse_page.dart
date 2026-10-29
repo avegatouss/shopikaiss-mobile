@@ -53,7 +53,7 @@ class _CaissePageState extends State<CaissePage> {
 
   TerminalSession get _session => widget.session;
   AppSettings get _settings => _session.settings;
-  OfflineEngine get _offline => _session.offline;
+  CaisseEngine get _offline => _session.offline;
 
   @override
   void initState() {

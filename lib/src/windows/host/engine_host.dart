@@ -4,9 +4,10 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common/sqlite_api.dart';
 
-import '../../offline/api.dart';
-import '../../offline/engine.dart';
+import '../../offline/caisse_engine.dart';
 import '../../offline/store.dart';
+import '../../sync_v2/v2_engine.dart';
+import '../../sync_v2/v2_transport.dart';
 import '../../register/register_adapter.dart';
 import '../ipc/b_engine_adapter.dart';
 import '../ipc/host_server.dart';
@@ -37,7 +38,7 @@ class EngineHost {
   final String directory;
   final RandomAccessFile _lock;
   final SqfliteOfflineStore store;
-  final OfflineEngine engine;
+  final CaisseEngine engine;
   final LocalRegisterAdapter adapter;
   Timer? _timer;
   bool _closed = false;
@@ -56,7 +57,9 @@ class EngineHost {
     required String directory,
     required String appVersion,
     required DatabaseFactory factory,
-    RegisterTransport? transport,
+    V2Transport? transport,
+    String Function()? newUuid,
+    Future<bool> Function(String pin, String hash)? pinVerifier,
     int paperWidth = 80,
     Duration? syncEvery = const Duration(minutes: 1),
   }) async {
@@ -71,12 +74,16 @@ class EngineHost {
     }
     try {
       final store = await SqfliteOfflineStore.open(name: p.join(directory, databaseName), factory: factory);
-      final engine = OfflineEngine(store: store, transport: transport ?? HttpRegisterTransport(appVersion: appVersion));
-      final storedBase = await store.read(StoreKeys.apiBase);
-      if (storedBase != null) {
-        final suffix = OfflineEngine.apiBaseFor('');
-        await engine.load(storedBase.endsWith(suffix) ? storedBase.substring(0, storedBase.length - suffix.length) : storedBase);
-      }
+      final engine = V2Engine.onStore(
+        store,
+        transport: transport ?? HttpV2Transport(),
+        appVersion: appVersion,
+        platform: 'windows',
+        newUuid: newUuid,
+        pinVerifier: pinVerifier,
+      );
+      final origin = await engine.storedOrigin();
+      if (origin != null) await engine.load(origin);
       final adapter = LocalRegisterAdapter(engine, paperWidth: paperWidth);
       await adapter.start();
       final host = EngineHost._(directory, lock, store, engine, adapter);

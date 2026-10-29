@@ -34,7 +34,7 @@ class AdapterFailure implements Exception {
 class LocalRegisterAdapter {
   LocalRegisterAdapter(this.engine, {this.paperWidth = 80, String Function()? newUuid}) : _newUuid = newUuid ?? (() => const Uuid().v4());
 
-  final OfflineEngine engine;
+  final CaisseEngine engine;
   final int paperWidth;
   final String Function() _newUuid;
   final StreamController<Map<String, dynamic>> _changes = StreamController.broadcast();
@@ -90,6 +90,14 @@ class LocalRegisterAdapter {
         return _pair(args);
       case 'login':
         return _login(args);
+      case 'logout':
+        // Verrouillage ou changement de caissier : le panier reste ; un encaissement incertain se vérifie toujours
+        // par saleStatus avec le même identifiant.
+        _operator = null;
+        _emit('caissier');
+        return _status();
+      case 'openSession':
+        return _openSession(args);
       case 'view':
         return _view();
       case 'search':
@@ -147,7 +155,36 @@ class LocalRegisterAdapter {
     'arbitration': engine.localArbitrationCount,
     'permanent_local': engine.permanentLocal,
     'reachable': engine.reachable,
+    'session': _sessionView(),
+    'capabilities': _capabilities(),
   };
+
+  Map<String, dynamic>? _sessionView() {
+    final session = engine.snapshot?.session;
+    if (session == null) return null;
+    return {'id': session['session_uuid'], 'local': session['locale'] == true};
+  }
+
+  /// Ce que l'écran peut proposer maintenant, avec le motif d'un refus. Contrôles répétés à l'exécution par le moteur.
+  Map<String, dynamic> _capabilities() {
+    final reason = engine.blockReason;
+    final rules = engine.snapshot?.rules;
+    Map<String, dynamic> cap(String? refusal, {bool network = false}) => {'allowed': refusal == null, 'reason': refusal, 'network_required': network};
+    return {
+      'sell': cap(reason ??
+          (_operator == null ? 'Identifiez le caissier.' : (engine.sessionOpen ? null : 'Aucune session de caisse ouverte sur ce terminal.'))),
+      'open_session': cap(reason ??
+          (_operator == null
+              ? 'Identifiez le caissier.'
+              : engine.sessionOpen
+              ? 'Une session est déjà ouverte sur ce terminal.'
+              : (rules?.sessionOpening ?? false)
+              ? null
+              : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
+      'pair': cap(null, network: true),
+      'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
+    };
+  }
 
   Future<Map<String, dynamic>> _view() async {
     final snapshot = engine.snapshot;
@@ -172,6 +209,26 @@ class LocalRegisterAdapter {
       'total_label': totals == null ? '' : formatFcfa(totals.payable, currency),
       'payment_label': payment == null ? '' : '${payment.methodCode} ${formatFcfa(payment.amount, currency)}',
       'payment_valid': paymentValid,
+      // Détail calculé par le moteur, rendu en libellés : l'écran ne refait aucun calcul financier.
+      'totals': totals == null
+          ? null
+          : {
+              'gross_label': formatFcfa(totals.gross, currency),
+              'base_ht_label': formatFcfa(totals.baseHt, currency),
+              'vat_label': formatFcfa(totals.vat, currency),
+              'vat_rate': snapshot!.store.vatRate,
+              'vat_included': snapshot.store.vatIncluded,
+              'payable_label': formatFcfa(totals.payable, currency),
+            },
+      'payment': payment == null || totals == null
+          ? null
+          : {
+              'method': payment.methodCode,
+              'amount_label': formatFcfa(payment.amount, currency),
+              'received_label': payment.received == null ? null : formatFcfa(payment.received!, currency),
+              'change_label': payment.received == null ? null : formatFcfa(payment.received! - payment.amount, currency),
+              'remaining_label': formatFcfa(totals.payable - payment.amount, currency),
+            },
       'query': _query,
       'products': [
         if (snapshot != null)
@@ -190,6 +247,9 @@ class LocalRegisterAdapter {
             'id': line.id,
             'name': cart?.label ?? 'Article n° ${line.productId} (retiré du catalogue)',
             'quantity_label': formatMicros(line.quantity),
+            'quantity': formatMicros(line.quantity),
+            'unit_price_label': cart == null ? '' : formatFcfa(cart.unitPrice, currency),
+            'discount_label': cart == null || cart.discount == 0 ? '' : formatFcfa(cart.discount, currency),
             'total_label': cart == null ? '' : formatFcfa(cart.total, currency),
             'available': cart != null,
           },
@@ -238,12 +298,26 @@ class LocalRegisterAdapter {
     final operator = snapshot.operatorById(_int(args, 'operator_id'));
     if (operator == null) throw const AdapterFailure('caissier_inconnu', 'Caissier inconnu sur ce terminal.');
     if (snapshot.rules.pinRequired) {
+      if (!engine.pinDefined(operator)) throw const AdapterFailure('pin_non_defini', 'PIN non défini pour ce caissier : définissez-le dans ShopiKaiss.');
       final locked = await engine.pinLockedFor(operator);
       if (locked != null) throw AdapterFailure('pin_bloque', 'PIN bloqué : réessayez dans ${locked.inSeconds} s.');
       if (!await engine.checkPin(operator, _text(args, 'pin', max: 6))) throw const AdapterFailure('pin_refuse', 'PIN incorrect.');
     }
     _operator = operator;
     _emit('caissier');
+    return _status();
+  }
+
+  /// Ouverture de session locale par le caissier identifié ([float] : fond de caisse compté, en francs).
+  Future<Map<String, dynamic>> _openSession(Map<String, dynamic> args) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant d’ouvrir la session.');
+    try {
+      await engine.openSession(_int(args, 'float'), operator);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('session_refusee', e.message);
+    }
+    _emit('session');
     return _status();
   }
 

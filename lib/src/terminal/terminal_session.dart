@@ -4,8 +4,10 @@ import 'package:sqflite/sqflite.dart' show databaseFactory;
 
 import '../app_settings.dart';
 import '../offline/api.dart';
-import '../offline/engine.dart';
+import '../offline/caisse_engine.dart';
 import '../offline/store.dart';
+import '../sync_v2/v2_engine.dart';
+import '../sync_v2/v2_transport.dart';
 import '../ui/screen_profile.dart';
 import 'terminal_channel.dart';
 
@@ -19,8 +21,8 @@ class TerminalSession extends ChangeNotifier {
 
   final AppSettings settings;
 
-  /// Caisse hors ligne de ce terminal (ADR-421) : appairage, catalogue, file des ventes.
-  final OfflineEngine offline;
+  /// Caisse locale de ce terminal (protocole v2, décision du 2026-10-29) : appairage, catalogue, file des ventes.
+  final CaisseEngine offline;
   TerminalInfo info;
   final String appVersion;
 
@@ -40,9 +42,12 @@ class TerminalSession extends ChangeNotifier {
   static Future<TerminalSession> start() async {
     final settings = await AppSettings.load();
     final package = await PackageInfo.fromPlatform();
-    final offline = OfflineEngine(
-      store: await SqfliteOfflineStore.open(factory: databaseFactory),
-      transport: HttpRegisterTransport(appVersion: package.version),
+    final offline = V2Engine.onStore(
+      await SqfliteOfflineStore.open(factory: databaseFactory),
+      transport: HttpV2Transport(),
+      appVersion: package.version,
+      platform: 'android',
+      legacyTransport: HttpRegisterTransport(appVersion: package.version),
     );
     if (settings.configured) await offline.load(settings.origin);
     final session = TerminalSession._(settings, TerminalInfo.unsupported, package.version, offline);
