@@ -2,7 +2,7 @@
 
 Base : `c5f9483`. Branche : `feat/caisse-autonome-windows`.
 Worktree : `C:/laragon/www/shopikaiss-windows` ; checkout mobile laissé intact.
-Spécification : documents locaux du 29 octobre 2026 dans le dépôt serveur, encore non commités au démarrage.
+Spécification : commit serveur `2221327e`, confirmé dans le worktree de la session A.
 
 ## Demandes à B (intégration en attente)
 
@@ -14,6 +14,14 @@ Spécification : documents locaux du 29 octobre 2026 dans le dépôt serveur, en
 ## Environnement
 
 Flutter 3.47.7 / Dart 3.13.5. Visual Studio 2026 installé, mais `flutter doctor -v` signale CMake et SDK Windows manquants. Pas d’installation système ni changement de signature Android effectués.
+
+### Mise à jour après autorisation d’installation
+
+Le 29 octobre 2026, installation autorisée et validation UAC effectuée : composants C++ Desktop, MSVC, CMake et SDK 10.0.26100 installés via Visual Studio Installer (code final 0). Mode développeur activé pour les symlinks. Flutter ajouté au PATH utilisateur. `flutter doctor -v` ne signale plus aucun problème.
+
+NuGet CLI 7.9.0.83 ajouté dans `C:/dev/nuget` et au PATH utilisateur, téléchargé depuis dist.nuget.org avec signature Authenticode valide. Les versions pubspec/lock restent inchangées. `flutter pub get` réussit et génère les fichiers de plugins Windows. Redémarrer les terminaux ouverts pour récupérer le nouveau PATH.
+
+La compilation de contrôle a été relancée après installation de NuGet. Ces installations lèvent les prérequis machine ; elles ne lèvent pas les limites fonctionnelles et portes de production ci-dessous. Aucun redémarrage automatique ni changement de clé Android effectué.
 
 ## Premier lot remis
 
@@ -41,8 +49,26 @@ Le script de test a été exécuté via `powershell.exe -NoProfile -ExecutionPol
 1. Contrat B accepté et adaptateur/hôte réel, bootstrap, persistance des brouillons/résultats incertains et preuve d’idempotence après redémarrage.
 2. Supervision/reconnexion du processus, vie en arrière-plan et intégration de l’activation v2 ; aucune de ces capacités n’est simulée dans le point d’entrée actuel.
 3. Édition complète quantité/remises/moyens de paiement, PIN/appairage et historique selon le modèle de B. L’écran initial n’est pas une caisse complète.
-4. Outillage Windows (symlinks, CMake, SDK), compilation C++, essais DPAPI/mono-instance et tests sur machine installée.
+4. Finaliser la compilation Flutter/C++ et la recette de l'application installée. Outillage installé ; tests natifs DPAPI/mono-instance réussis le 29 octobre (voir mise à jour ci-dessous).
 5. Spouleur/USB, périphériques clients, gestion des jobs, installateur signé et mises à jour. Aucun installateur prêt à distribuer à ce stade.
 6. Validation du commit intégré par B sur Android et Windows, scénario serveur réel isolé et portes P0–P8 applicables.
 
 P0 : périmètre isolé vérifié ; P3 : preuves partielles transport/UI seulement ; P5/P6/P8 : non satisfaites. **Livraison production bloquée**. Aucun push main, déploiement, changement de signature, migration ou base client touchés.
+
+## Point de coordination et vérification native — 29 octobre 2026
+
+Lecture directe des worktrees, sans modification des périmètres A/B :
+
+- A : `feat/caisse-autonome-serveur` à `bc30a87e`. Réponse tardive >15 s désormais testée en navigateur (WEB-03). Protection étendue au paiement restaurant, délai limité aux composants caisse/restaurant. Profil paiement : 140–230 ms localement et environ 120 Ko par frappe ; optimisation encore ouverte. L1 et ses fixtures non livrés.
+- B : HEAD `c5f9483`, incrément de stockage schéma 2 encore non commité. Son suivi annonce 47 tests réussis (non réexécutés par C). Renvoi automatique des ventes à arbitrer retiré après le test A : il peut relancer leur intégration. B-REQ-004 demande une consultation sans effet de bord. Brouillon durable et extraction du moteur partagé encore dans les prochaines étapes.
+- Les sept améliorations transmises précédemment restent des propositions. Aucun basculement du plan vers un pilote v1 permanent décidé ici.
+
+Travail C effectué :
+
+- Extraction de la protection DPAPI dans un composant C++ utilisé par le canal Flutter et par les tests natifs. Correction de la limite : un secret de 64 Kio produit une enveloppe supérieure à 64 Kio, qui doit pouvoir être déchiffrée. Limites distinctes, rejet des enveloppes altérées, effacement du tampon de sortie précédent.
+- Verrou mono-instance non copiable ; acquisitions répétées refusées sans fuite de handle ; un échec sur une instance existante ferme son handle immédiatement.
+- `tool/windows/Test-Native.ps1` compile le vrai code C++ avec MSVC et exécute CTest : aller-retour DPAPI binaire et 64 Kio, rejet altération/vide/dépassement, deuxième processus refusé, acquisition possible après fermeture du propriétaire. **1/1 scénario natif réussi**, assertions actives en Release. Aucun secret réel utilisé. Ne prouve ni le fonctionnement entre comptes Windows ni la protection d'une sauvegarde portable.
+- Analyse Dart sans anomalie et **13/13 tests Windows réussis à nouveau**.
+- La compilation Flutter a révélé STL1011 dans le plugin WebView épinglé, qui utilise les coroutines expérimentales. Option de compatibilité MSVC explicitement limitée à ce plugin dans `windows/CMakeLists.txt`, sans changement pubspec/lock ni modification de source tierce. Remplacement à prévoir lors de la mise à niveau du plugin par B.
+
+Le contrat d'adaptateur précise désormais que `saleStatus` ne doit jamais soumettre à nouveau une vente réseau pour en connaître l'état. Les quatre demandes C à B restent ouvertes ; ne pas fabriquer de moteur release en attendant.

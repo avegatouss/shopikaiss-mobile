@@ -1,4 +1,5 @@
 #include "platform_channel.h"
+#include "secret_protection.h"
 #include <windows.h>
 #include <shlobj.h>
 #include <wincrypt.h>
@@ -46,25 +47,17 @@ CreatePlatformChannel(flutter::BinaryMessenger* messenger) {
     if (call.method_name() == "protect" || call.method_name() == "unprotect") {
       const auto* bytes = call.arguments() == nullptr ? nullptr
           : std::get_if<std::vector<uint8_t>>(call.arguments());
-      if (bytes == nullptr || bytes->empty() || bytes->size() > 65536) {
+      if (bytes == nullptr) {
         result->Error("invalid_secret", "Donnees de protection invalides.");
         return;
       }
-      DATA_BLOB input{static_cast<DWORD>(bytes->size()),
-                      const_cast<BYTE*>(bytes->data())};
-      DATA_BLOB output{};
-      const BOOL ok = call.method_name() == "protect"
-          ? CryptProtectData(&input, L"Shopikaiss", nullptr, nullptr, nullptr,
-                             CRYPTPROTECT_UI_FORBIDDEN, &output)
-          : CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr,
-                               CRYPTPROTECT_UI_FORBIDDEN, &output);
+      std::vector<uint8_t> value;
+      const bool ok = ProtectLocalSecret(*bytes, value,
+                                         call.method_name() == "unprotect");
       if (!ok) {
         result->Error("secret_protection", "Protection utilisateur indisponible.");
         return;
       }
-      std::vector<uint8_t> value(output.pbData, output.pbData + output.cbData);
-      SecureZeroMemory(output.pbData, output.cbData);
-      LocalFree(output.pbData);
       result->Success(flutter::EncodableValue(value));
       SecureZeroMemory(value.data(), value.size());
       return;

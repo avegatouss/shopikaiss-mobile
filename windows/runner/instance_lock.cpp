@@ -4,6 +4,7 @@
 #include <vector>
 
 bool InstanceLock::Acquire() {
+  if (handle_) return false;
   HANDLE token = nullptr;
   if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return false;
   DWORD size = 0;
@@ -26,5 +27,9 @@ bool InstanceLock::Acquire() {
   handle_ = CreateMutexW(&attributes, FALSE, name.c_str());
   const DWORD error = GetLastError();
   LocalFree(descriptor);
-  return handle_ != nullptr && error != ERROR_ALREADY_EXISTS;
+  if (handle_ != nullptr && error == ERROR_ALREADY_EXISTS) {
+    CloseHandle(handle_);
+    handle_ = nullptr;
+  }
+  return handle_ != nullptr;
 }

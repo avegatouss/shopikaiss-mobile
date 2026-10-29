@@ -10,6 +10,7 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
   "platform_channel.cpp"
+  "secret_protection.cpp"
   "instance_lock.cpp"
   "utils.cpp"
   "win32_window.cpp"

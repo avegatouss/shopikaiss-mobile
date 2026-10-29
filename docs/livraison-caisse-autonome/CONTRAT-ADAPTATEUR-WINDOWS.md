@@ -23,6 +23,8 @@ Commandes proposées : `status`, `view`, `search`, `scan`, `changeQuantity`, `re
 
 ## Encaissement et reprise
 
+Point de coordination vérifié le 29 octobre 2026 : en réseau v1, renvoyer une vente `a_arbitrer` peut relancer son intégration (test A `RenvoiIdentiqueV1Test`, commit `bc30a87e`). L'adaptateur ne doit donc jamais implémenter `saleStatus` par une nouvelle soumission réseau. Lire le journal local ; pour le sort serveur des arbitrages, attendre une lecture sans effet de bord (demande B-REQ-004 / contrat v2). Une demande de vérification de l'utilisateur ne constitue pas une autorisation de rejouer un arbitrage.
+
 `commitSale` reçoit UUID stable, identifiant et révision du brouillon. B doit lier durablement le brouillon consommé à l’opération dans sa transaction de vente. Résultat : `state=committed`, `operation_id`, `number` après COMMIT uniquement.
 
 Une erreur prouvant absence de COMMIT peut déclarer `not_committed:true`. Toute erreur inattendue, timeout ou rupture est un résultat inconnu. La présentation bloque un nouvel encaissement et interroge `saleStatus` avec le même UUID. `not_found` seul ne déverrouille pas une vente : une commande peut encore être en train de terminer. Le moteur doit fournir une résolution définitive si un rejet est certain ; le déverrouillage de ce cas est à convenir avec B.
@@ -31,7 +33,7 @@ Après redémarrage UI, B doit restaurer le brouillon et la vente potentiellemen
 
 ## Adaptateurs natifs et limites
 
-Le canal `ci.khoga.shopikaiss/windows` fournit chemin LocalAppData et protection DPAPI utilisateur de blocs de secrets (pas chiffrement automatique de toute la base). Code C++ présent, compilation/exécution à vérifier lorsque SDK/CMake et symlinks sont disponibles. Mono-instance UI par SID/session Windows ; le verrou SQLite/moteur reste indispensable, notamment pour plusieurs sessions Windows.
+Le canal `ci.khoga.shopikaiss/windows` fournit chemin LocalAppData et protection DPAPI utilisateur de blocs de secrets (pas chiffrement automatique de toute la base). Le code C++ de protection et de verrou est compilé et testé nativement le 29 octobre 2026 ; la recette du canal Flutter dans l'application installée reste à effectuer. Mono-instance UI par SID/session Windows ; le verrou SQLite/moteur reste indispensable, notamment pour plusieurs sessions Windows. DPAPI est lié au compte Windows et ne remplace pas un chiffrement de sauvegarde récupérable sur une autre machine.
 
 L’adaptateur réseau ESC/POS transmet uniquement les octets du ticket déjà enregistré. Succès = transmis, pas preuve de papier sorti. Aucune répétition automatique ni impulsion de tiroir ajoutée par le transport. USB/spouleur Windows, matériel réel et sélection des périphériques restent à réaliser.
 
@@ -41,9 +43,10 @@ Depuis ce worktree, après résolution des dépendances existantes :
 
 ```powershell
 ./tool/windows/Test-Windows.ps1 -FlutterRoot C:/dev/flutter
+./tool/windows/Test-Native.ps1
 ./tool/windows/Build-Integration.ps1 -FlutterRoot C:/dev/flutter
 ```
 
 Si la politique locale interdit les scripts, une exécution explicitement limitée au processus est possible avec `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool/windows/Test-Windows.ps1 -FlutterRoot C:/dev/flutter`, après lecture du script. Ne pas changer la politique globale pour ces tests.
 
-La seconde commande construit uniquement une version de revue fermée aux ventes, jamais un installateur production. Les prérequis Windows manquants doivent être résolus avant une recette native ; ne pas substituer des tests Flutter au contrôle de l’exécutable installé.
+La dernière commande construit uniquement une version de revue fermée aux ventes, jamais un installateur production. Ne pas substituer des tests Flutter ou CTest au contrôle de l'exécutable installé.
