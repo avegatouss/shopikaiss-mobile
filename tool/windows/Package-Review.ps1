@@ -38,4 +38,4 @@ $extracted = Join-Path $repoRoot ('build/windows-review/check-' + $id)
 & (Join-Path $PSScriptRoot 'Verify-Package.ps1') -Directory $extracted
 (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash | Set-Content -LiteralPath ($archive + '.sha256') -Encoding ASCII
 Write-Output ('Paquet de revue : ' + $archive)
-Write-Output 'Non signe, sans installation ni mise a jour automatique. Moteur metier non raccorde.'
+Write-Output 'Non signe, sans installation ni mise a jour automatique. Recette uniquement.'

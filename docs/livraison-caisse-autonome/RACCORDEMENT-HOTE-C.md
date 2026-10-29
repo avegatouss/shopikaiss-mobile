@@ -21,7 +21,11 @@ Le premier passage a relevé une différence CRLF/LF dans la comparaison des sch
 
 Les tests supposent `SHOPIKAISS_DART_EXECUTABLE=C:/dev/flutter/bin/cache/dart-sdk/bin/dart.exe`, configuré par Test-Windows.ps1. NuGet doit être sur le PATH pour la compilation native (sur ce poste : `C:/dev/nuget`). Ne pas lancer la reconstruction du moteur pendant le test de son exécutable.
 
+Build Release raccordé réussi sur le commit propre `3ce238f`. Test-Launch : création de fenêtre et fermeture normale code 0. LOCALAPPDATA remplacé pour cet essai par un dossier temporaire sous build : la base SQLite a effectivement été créée par le moteur lancé depuis l'interface. Après fermeture de l'interface, un nouvel hôte a repris cette même base puis s'est arrêté avec code 0, confirmant la libération du verrou. Les quatre tests EngineHost ont été rejoués avec le binaire final : 4/4. Aucun appairage serveur réel ni vente client lors du contrôle natif ; le lancement masqué n'est pas une recette visuelle.
+
 ## Limites de recette / coordination B
+
+Paquet de cette recette : `dist/windows-review/shopikaiss-windows-review-f8ad9b7fa4f54bd4a511ff7daae5cb80.zip`, accompagné de son SHA-256. Les 27 fichiers ont été vérifiés avant compression et après extraction. Il contient le build propre `3ce238f`, sans signature, installateur ni mise à jour automatique.
 
 L'hôte livré par B utilise encore le moteur v1. Le client v2 est présent et testé, mais n'est pas activé par ce raccordement. La demande TVA B-REQ-005 et l'essai serveur v2 restent à A/B.
 
