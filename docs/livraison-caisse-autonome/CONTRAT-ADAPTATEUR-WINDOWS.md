@@ -12,6 +12,12 @@ L’hôte doit héberger le moteur commun réel, son verrou d’écriture et son
 
 ## Vue consommée par l’interface (schéma proposé 1)
 
+### Supervision de transport disponible côté C
+
+`SupervisedWindowsHost` conserve une instance stable pour le contrôleur et propose `connect()` pour une connexion/reconnexion explicite. La fabrique retourne un `WindowsHost` réel (typiquement `ProcessWindowsHost.start`) après contrôle du chemin et de l'identité du binaire par le bootstrap. Les appels de connexion simultanés partagent le même lancement. Une reconnexion ferme l'ancien hôte et attend sa sortie avant d'en créer un autre ; un délai dépassé bloque le remplacement. Aucune commande métier n'est rejouée. Les événements `connected`/`disconnected` décrivent le transport, pas la disponibilité métier ou la synchronisation serveur.
+
+Après `connect()`, le bootstrap doit recharger la vue autoritaire et réconcilier les ventes incertaines depuis le journal B avant d'autoriser un nouveau paiement. Le superviseur ne remplace ni la reprise durable B ni le verrou de base. `close()` doit prouver la sortie du processus ; `ProcessWindowsHost` conserve désormais sa promesse d'arrêt après timeout et une seconde fermeture ne renvoie plus un faux succès. Aucune destruction forcée d'un moteur susceptible d'écrire. Pas encore de service Windows, de zone de notification ou de redémarrage automatique.
+
 `schema:1`, `revision` entière monotone de la vue, `ready`, `can_pay`, `draft_id`, `store_name`, `sync_label`, `total_label`, `payment_label`, `payment_valid`.
 
 `products`: liste bornée/paginée d’objets avec `id`, `name`, `price_label`, `stock_label`.
@@ -46,6 +52,8 @@ Depuis ce worktree, après résolution des dépendances existantes :
 ./tool/windows/Test-Native.ps1
 ./tool/windows/Build-Integration.ps1 -FlutterRoot C:/dev/flutter
 ./tool/windows/Test-Launch.ps1
+./tool/windows/Test-Package.ps1
+./tool/windows/Package-Review.ps1
 ```
 
 Si la politique locale interdit les scripts, une exécution explicitement limitée au processus est possible avec `powershell.exe -NoProfile -ExecutionPolicy Bypass -File tool/windows/Test-Windows.ps1 -FlutterRoot C:/dev/flutter`, après lecture du script. Ne pas changer la politique globale pour ces tests.
@@ -53,3 +61,5 @@ Si la politique locale interdit les scripts, une exécution explicitement limit�
 La commande Build-Integration construit uniquement une version de revue fermée aux ventes, jamais un installateur production. Test-Launch vérifie de manière masquée la création de fenêtre et la fermeture normale du processus ; il ne valide ni le rendu visuel ni le moteur métier. Ne pas substituer ces tests au contrôle de l'application installée chez le pilote.
 
 Le runner est dédié à `lib/src/windows/main_windows.dart`. Il initialise les plugins permissions, impression et liens externes via `RegisterCashierPlugins`, pas le plugin WebView de l'ancien point d'entrée mobile. Ce dernier provoquait une erreur de fermeture Windows `coremessaging.dll / 0xc0000602` même sans WebView affichée. Les dépendances partagées restent inchangées. B doit conserver cet enregistrement explicite lors du raccordement, ou qualifier tout changement de plugins sur Windows.
+
+`Package-Review.ps1` copie le dossier Release complet, exige le manifeste `production_ready:false` et l'empreinte attendue de l'exécutable, inventorie chaque fichier puis produit un ZIP sous `dist/windows-review`. Le ZIP est réextrait et contrôlé avant remise. `Verify-Package.ps1 -Directory <dossier extrait>` refuse fichier modifié, absent, ajouté, chemin sortant ou lien/jonction. Les empreintes détectent une altération par rapport au manifeste mais ne prouvent pas l'identité de l'éditeur : paquet non signé, sans installateur, sans mise à jour automatique. Les dossiers de staging sous `build/windows-review` sont des artefacts de revue, sans données métier.

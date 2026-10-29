@@ -41,4 +41,7 @@ Future<void> main(List<String> args) async {
       }),
     );
   }
+  if (args.contains('slow-shutdown')) {
+    await Future<void>.delayed(const Duration(seconds: 7));
+  }
 }

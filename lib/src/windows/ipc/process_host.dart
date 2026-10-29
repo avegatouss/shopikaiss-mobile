@@ -58,7 +58,7 @@ class ProcessWindowsHost implements WindowsHost {
   late final StreamSubscription<List<int>> _errors;
   int _sequence = 0;
   bool _disconnected = false;
-  bool _closed = false;
+  Future<void>? _shutdown;
 
   @override
   Stream<Map<String, dynamic>> get events => _events.stream;
@@ -182,15 +182,24 @@ class ProcessWindowsHost implements WindowsHost {
 
   @override
   Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
     _disconnect();
+    // Keep the shutdown future after a timeout. A supervisor must never treat
+    // a second close as proof of exit while the old writer is still running.
+    _shutdown ??= _finishShutdown();
+    await _shutdown!.timeout(timeout);
+  }
+
+  Future<void> _finishShutdown() async {
     // EOF asks the host to finish accepted local commands, then shut down.
     // Do not kill it halfway through a durable write.
     // Drain output until exit: cancelling a process pipe before sending EOF can
     // deadlock on Windows while the child is waiting for more input.
-    await _process.stdin.close().timeout(timeout);
-    await _process.exitCode.timeout(timeout);
+    try {
+      await _process.stdin.close();
+    } catch (_) {
+      // Broken stdin is not proof of process exit; still wait for the owner.
+    }
+    await _process.exitCode;
     await _output.cancel();
     await _errors.cancel();
     await _events.close();

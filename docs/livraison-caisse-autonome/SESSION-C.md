@@ -47,7 +47,7 @@ Le script de test a été exécuté via `powershell.exe -NoProfile -ExecutionPol
 ## Reste à livrer avant toute production
 
 1. Contrat B accepté et adaptateur/hôte réel, bootstrap, persistance des brouillons/résultats incertains et preuve d’idempotence après redémarrage.
-2. Supervision/reconnexion du processus, vie en arrière-plan et intégration de l’activation v2 ; aucune de ces capacités n’est simulée dans le point d’entrée actuel.
+2. Raccordement du superviseur de transport testé (voir lot ci-dessous), vie en arrière-plan et intégration de l’activation ; aucune de ces capacités n’est simulée dans le point d’entrée actuel.
 3. Édition complète quantité/remises/moyens de paiement, PIN/appairage et historique selon le modèle de B. L’écran initial n’est pas une caisse complète.
 4. Finaliser la compilation Flutter/C++ et la recette de l'application installée. Outillage installé ; tests natifs DPAPI/mono-instance réussis le 29 octobre (voir mise à jour ci-dessous).
 5. Spouleur/USB, périphériques clients, gestion des jobs, installateur signé et mises à jour. Aucun installateur prêt à distribuer à ce stade.
@@ -92,3 +92,15 @@ B reste au HEAD `c5f9483`, avec ses incréments v1 et les primitives v2 non comm
 Travail indépendant effectué côté C : correction d'un blocage IPC réel. Une réponse d'erreur dont `code` ou `message` avait un type invalide provoquait une exception après retrait de la promesse de la liste des appels en attente ; ni la déconnexion ni le délai maximal ne pouvaient ensuite terminer cet appel. Les champs d'erreur sont maintenant validés avant conversion ; une réponse invalide termine l'appel, déconnecte le transport et conserve un résultat d'encaissement inconnu, même si elle prétend `not_committed:true`.
 
 Trois tests avec véritable sous-processus couvrent code invalide, message invalide et preuve `not_committed` invalide. Ils vérifient la fin bornée de l'appel, le résultat inconnu et le refus de nouveaux appels sur le transport déconnecté. **16 tests Windows réussis**, analyse Dart sans anomalie. Aucun code moteur mobile, dépendance partagée, API serveur ou fichier Android modifié. Le build Release de revue précédemment produit n'a pas été renouvelé pour ce lot de transport ; il reste sans moteur de vente raccordé.
+
+## Lots indépendants : supervision et paquet de revue — 29 octobre 2026
+
+À la nouvelle vérification, B reste au HEAD `c5f9483`, moteur partagé non livré. Travail effectué uniquement dans le périmètre Windows :
+
+- `SupervisedWindowsHost` : connexion/reconnexion explicite, un seul lancement pour les demandes concurrentes, attente de la sortie de l'ancien moteur avant remplacement, aucune commande rejouée. Une fermeture concurrente à un démarrage récupère puis ferme le processus créé. Le superviseur est prêt au raccordement, pas activé avec un faux moteur dans l'application. La vue et la reprise durable restent à B ; pas de heartbeat, service ou zone de notification livrés.
+- Correction de `ProcessWindowsHost.close()` : après un timeout, la vraie promesse d'arrêt est conservée. Une seconde fermeture ne peut plus annoncer un succès alors que le processus reste vivant. Aucun arrêt forcé pendant une éventuelle écriture métier.
+- Tests : quatre scénarios de superviseur (connexions concurrentes, arrêt bloqué, vente incertaine sans rejeu, nouvelle tentative de fermeture) et un vrai sous-processus dont l'arrêt attend sept secondes. **21 tests Windows réussis**, analyse Dart sans anomalie.
+- `Package-Review.ps1`, `Verify-Package.ps1`, `Test-Package.ps1` : ZIP du dossier Release complet, manifeste des empreintes, contrôle après réextraction. Les tests vérifient paquet valide et refus de fichier altéré, fichier ajouté et chemin sortant. L'empreinte n'est pas une signature d'éditeur. Aucun installateur ni mécanisme de mise à jour automatique livré.
+- Compilation Release renouvelée : réussie. `Test-Launch.ps1` : fenêtre native créée, stabilité durant l'essai masqué, fermeture normale code 0.
+
+Artefact produit : `dist/windows-review/shopikaiss-windows-review-9b50bf75bff84223bcf4e2dec34c35f7.zip` et fichier `.sha256`. **24 fichiers contrôlés** avant compression et après réextraction. Le manifeste garde le commit et l'état modifié réels au moment du build ; ne pas le présenter comme un build de production signé ou comme une caisse raccordée. Les ventes restent désactivées. Aucune modification des projets A/B, d'Android ou des dépendances communes, aucun push main ni déploiement.

@@ -93,6 +93,22 @@ void main() {
   );
 
   final dart = Platform.environment['SHOPIKAISS_DART_EXECUTABLE'];
+  test(
+    'repeated close never reports success while child is still alive',
+    () async {
+      expect(dart, isNotNull);
+      final host = await ProcessWindowsHost.start(
+        dart!,
+        arguments: ['test/windows/fixtures/host_process.dart', 'slow-shutdown'],
+        timeout: const Duration(seconds: 3),
+      );
+      addTearDown(host.close);
+      await host.call(HostCommand.status);
+      await expectLater(host.close(), throwsA(isA<TimeoutException>()));
+      await expectLater(host.close(), throwsA(isA<TimeoutException>()));
+      await host.close();
+    },
+  );
   test('private child process responds without network listener', () async {
     expect(
       dart,
