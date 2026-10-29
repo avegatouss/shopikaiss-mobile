@@ -123,12 +123,14 @@ Caisse 2, vente V-20261029-0016.
   (politique absente = 0 = aucune remise). Contrôlée par l'adaptateur, puis **de nouveau par le moteur à
   l'encaissement** (droit retiré, politique abaissée, quantité réduite : `can_pay` faux avec `pay_reason`).
 - **Paiements multiples** : jusqu'à 10 lignes, une seule d'espèces (reçu et monnaie portent sur elle). Les moyens
-  proposés sont ceux du catalogue local. En v2 2.0, le serveur n'annonce que `vente.especes` : seules les espèces
-  sont proposées tant que A n'ouvre pas `vente.paiement_declare` (demande B-REQ-011).
+  proposés sont ceux du catalogue local : espèces, et moyens **déclarés** (Wave, Orange Money…) hors connexion comme
+  les espèces dès que le serveur rend `vente.paiement_declare` (feu vert A du 29/10, `f82a33c3`) et que la boutique les
+  a ajoutés à `paiements.moyens_locaux`. `reference` facultative, figée dans la vente ; un moyen déclaré n'est jamais
+  une confirmation de paiement. Android et l'hôte Windows annoncent la capacité.
 
 ## Limites actuelles
 
-- Moyens non espèces, clôture de session, client, note, tarif gros, remise globale, frais, marque/fournisseur/images,
+- Clôture de session, client, note, tarif gros, remise globale, frais, marque/fournisseur/images,
   retours, bons/points/crédit, survente : contrat A requis (demandes B-REQ-007 à B-REQ-015 du 29/10).
 - Les commandes du lot 2 ne sont pas encore dans l'énumération IPC `HostCommand` (périmètre C) : à ajouter par C,
   comme `logout` et `openSession`.

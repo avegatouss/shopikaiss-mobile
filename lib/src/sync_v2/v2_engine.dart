@@ -41,8 +41,8 @@ class V2Engine extends CaisseEngine {
   }) : _newUuid = newUuid ?? (() => const Uuid().v4());
 
   /// Annonce `vente.paiement_declare` : les moyens déclarés (mobile money…) publiés pour la vente locale deviennent
-  /// utilisables hors connexion comme les espèces, SI le serveur rend aussi cette capacité. Désactivé tant que A ne
-  /// l'a pas ouverte côté serveur.
+  /// utilisables hors connexion comme les espèces, SI le serveur rend aussi cette capacité (ouverte par A le 29/10,
+  /// lot 0 de la 2.1). Activé par Android et l'hôte Windows.
   final bool declaredPayments;
 
   /// Transport v1, pour vider seulement la file d'une installation 1.1.5 mise à jour (routes v1 gardées par le

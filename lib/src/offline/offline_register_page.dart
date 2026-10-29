@@ -1010,6 +1010,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   late PaymentMethodInfo _method = widget.snapshot.methods.first;
   final _amount = TextEditingController();
   final _received = TextEditingController();
+  final _reference = TextEditingController();
   String? _error;
 
   int get _remaining => widget.payable - _payments.fold<int>(0, (sum, p) => sum + p.amount);
@@ -1023,6 +1024,7 @@ class _PaymentDialogState extends State<_PaymentDialog> {
   void _reset() {
     _amount.text = '$_remaining';
     _received.text = '';
+    _reference.text = '';
   }
 
   @override
@@ -1039,7 +1041,9 @@ class _PaymentDialogState extends State<_PaymentDialog> {
           ListTile(
             dense: true,
             title: Text(p.method.name),
-            subtitle: p.change > 0 ? Text('reçu ${formatFcfa(p.received!)} · monnaie ${formatFcfa(p.change)}') : null,
+            subtitle: p.change > 0
+                ? Text('reçu ${formatFcfa(p.received!)} · monnaie ${formatFcfa(p.change)}')
+                : (p.reference != null ? Text('réf. ${p.reference}') : null),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1081,6 +1085,13 @@ class _PaymentDialogState extends State<_PaymentDialog> {
                 helperText: received != null && received > amount ? 'Monnaie : ${formatFcfa(received - amount)}' : null,
               ),
               onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _addPayment(),
+            ),
+          if (!cash)
+            TextField(
+              controller: _reference,
+              maxLength: 100,
+              decoration: const InputDecoration(labelText: 'Référence de la transaction (facultative)', counterText: ''),
               onSubmitted: (_) => _addPayment(),
             ),
           if (cash)
@@ -1149,13 +1160,18 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       setState(() => _error = 'Montant entre 1 et ${formatFcfa(_remaining)}.');
       return false;
     }
+    if (_method.isCash && _payments.any((p) => p.method.isCash)) {
+      setState(() => _error = 'Une seule ligne d’espèces par vente : retirez la précédente pour la modifier.');
+      return false;
+    }
     final received = _method.isCash ? (int.tryParse(_received.text) ?? amount) : null;
     if (received != null && received < amount) {
       setState(() => _error = 'Espèces reçues inférieures au montant.');
       return false;
     }
     setState(() {
-      _payments.add(CartPayment(method: _method, amount: amount, received: received));
+      final reference = _reference.text.trim();
+      _payments.add(CartPayment(method: _method, amount: amount, received: received, reference: _method.isCash || reference.isEmpty ? null : reference));
       _error = null;
       _reset();
     });
