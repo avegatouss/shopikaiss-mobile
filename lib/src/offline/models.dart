@@ -128,6 +128,7 @@ class OfflineRules {
       maxSales = (m['ventes_max'] as num?)?.toInt() ?? 500,
       maxSaleAmount = (m['montant_max_vente'] as num?)?.toInt(),
       maxLineDiscountPercent = (m['remise_ligne_max_pourcent'] as num?)?.toInt() ?? 0,
+      maxGlobalDiscountPercent = (m['remise_globale_max_pourcent'] as num?)?.toInt() ?? 0,
       sessionOpening = m['ouverture_session'] != false,
       operatorMode = (m['mode_caissier'] ?? 'pin') as String,
       refreshMinutes = (m['rafraichissement_minutes'] as num?)?.toInt() ?? 30,
@@ -140,6 +141,9 @@ class OfflineRules {
   final int maxSales;
   final int? maxSaleAmount;
   final int maxLineDiscountPercent;
+
+  /// Politique `remises.globale_max_pourcent` (0 : aucune remise globale hors ligne).
+  final int maxGlobalDiscountPercent;
   final bool sessionOpening;
   final String operatorMode;
   final int refreshMinutes;

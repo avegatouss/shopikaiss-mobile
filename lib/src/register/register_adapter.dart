@@ -219,11 +219,20 @@ class LocalRegisterAdapter {
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
-      'global_discount': cap(_extrasRefusal() ?? _discountRefusal()),
+      'global_discount': {...cap(_extrasRefusal() ?? _globalDiscountRefusal()), 'max_percent': rules?.maxGlobalDiscountPercent ?? 0},
       'delivery': cap(_extrasRefusal() ?? _deliveryRefusal()),
       'note': cap(_extrasRefusal()),
       'suspend': cap(_draft.lines.isEmpty ? 'Le panier est vide.' : null),
     };
+  }
+
+  /// Motif qui empêche le caissier courant d'accorder une remise globale (droit, politique de la boutique), ou null.
+  String? _globalDiscountRefusal() {
+    final operator = _operator;
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!engine.hasRight(operator, 'remise')) return '${operator.name} n’a pas le droit d’accorder une remise.';
+    if ((engine.snapshot?.rules.maxGlobalDiscountPercent ?? 0) <= 0) return 'Remise globale non autorisée hors ligne dans cette boutique.';
+    return null;
   }
 
   /// Remise globale, livraison et note exigent la vente 2.1 (serveur à jour).
@@ -378,7 +387,7 @@ class LocalRegisterAdapter {
     final subtotal = resolved.fold<int>(0, (sum, r) => sum + (r.$2 == null ? 0 : r.$2!.base - r.$2!.discount));
     if (_draft.globalDiscount > 0) {
       if (!engine.hasRight(_operator!, 'remise')) return '${_operator!.name} n’a pas le droit d’accorder une remise : retirez la remise globale.';
-      final max = engine.maxLineDiscountFor(_operator!, subtotal);
+      final max = engine.maxGlobalDiscountFor(_operator!, subtotal);
       if (_draft.globalDiscount > max) return 'Remise globale au-delà du maximum (${formatFcfa(max)}) : corrigez-la.';
     }
     if (_draft.delivery > 0 && _deliveryRefusal() != null) return _deliveryRefusal();
@@ -555,7 +564,7 @@ class LocalRegisterAdapter {
     if (unavailable != null) throw AdapterFailure('fonction_indisponible', unavailable);
     var amount = 0;
     if (entry != null) {
-      final refusal = _discountRefusal();
+      final refusal = _globalDiscountRefusal();
       if (refusal != null) throw AdapterFailure('remise_refusee', refusal);
       final subtotal = _subtotal(_snapshot());
       try {
@@ -563,7 +572,7 @@ class LocalRegisterAdapter {
       } on WebRuleRefusal {
         throw const AdapterFailure('remise_refusee', 'La remise globale dépasse le montant du panier.');
       }
-      final max = engine.maxLineDiscountFor(_operator!, subtotal);
+      final max = engine.maxGlobalDiscountFor(_operator!, subtotal);
       if (amount > max) throw AdapterFailure('remise_refusee', 'Remise globale au-delà du maximum autorisé (${formatFcfa(max)}).');
       final saleCap = engine.maxSaleDiscountFor(_operator!);
       final lines = _draft.lines.fold<int>(0, (sum, l) => sum + l.discount);
