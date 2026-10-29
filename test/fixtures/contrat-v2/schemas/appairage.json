@@ -38,7 +38,8 @@
             "derniere_sequence": { "type": "integer", "minimum": 0 }
           }
         },
-        "capacites_serveur": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } }
+        "capacites_serveur": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } },
+        "cle_web": { "type": "string", "pattern": "^[A-Za-z0-9]{48}$", "description": "Révision 2.0.2 (B-REQ-006) : clé web de l'appareil, rendue une seule fois. La vue web de la caisse dans l'application la pose en cookie sk_appareil ; elle seule ouvre un terminal réservé à l'application (exclusivité « appareil »). À garder dans le coffre comme le jeton." }
       }
     }
   }

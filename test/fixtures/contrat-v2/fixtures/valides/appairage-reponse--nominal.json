@@ -13,5 +13,6 @@
     "capacites_serveur": [
         "vente.especes",
         "stock.couverture"
-    ]
+    ],
+    "cle_web": "ExempleDeCleWebNonSecrete0123456789abcdefABCDEFG"
 }

@@ -897,6 +897,9 @@ class _OperatorLoginState extends State<_OperatorLogin> {
       if (_pin.length < 6) setState(() => _pin += key);
       return;
     }
+    if (!widget.engine.pinDefined(_selected!)) {
+      return setState(() => (_pin = '', _error = 'PIN non défini pour ce caissier : définissez-le dans ShopiKaiss.'));
+    }
     // Blocage après 3 échecs, gardé par le moteur sur le terminal (un redémarrage ne l'efface pas).
     final locked = await widget.engine.pinLockedFor(_selected!);
     if (!mounted) return;

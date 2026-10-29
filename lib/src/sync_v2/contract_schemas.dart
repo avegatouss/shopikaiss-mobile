@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.0.1) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.0.2) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -72,7 +72,8 @@ const contractV2Schemas = <String, String>{
             "derniere_sequence": { "type": "integer", "minimum": 0 }
           }
         },
-        "capacites_serveur": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } }
+        "capacites_serveur": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } },
+        "cle_web": { "type": "string", "pattern": "^[A-Za-z0-9]{48}$", "description": "Révision 2.0.2 (B-REQ-006) : clé web de l'appareil, rendue une seule fois. La vue web de la caisse dans l'application la pose en cookie sk_appareil ; elle seule ouvre un terminal réservé à l'application (exclusivité « appareil »). À garder dans le coffre comme le jeton." }
       }
     }
   }
@@ -279,7 +280,7 @@ const contractV2Schemas = <String, String>{
       "properties": {
         "operateur_id": { "$ref": "commun.json#/$defs/identifiant_serveur" },
         "nom": { "type": "string", "minLength": 1, "maxLength": 120 },
-        "pin_empreinte": { "type": ["string", "null"], "maxLength": 100 },
+        "pin_empreinte": { "type": ["string", "null"], "maxLength": 100, "description": "null quand la politique demande un PIN : l’opérateur n’a pas défini de PIN ; le refuser avec le motif « PIN non défini », sans compter d’échec." },
         "droits": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } }
       }
     },
@@ -457,7 +458,7 @@ const contractV2Schemas = <String, String>{
       "required": ["politiques", "calcul", "schema_instantane"],
       "additionalProperties": false,
       "properties": {
-        "politiques": { "$ref": "commun.json#/$defs/version" },
+        "politiques": { "$ref": "commun.json#/$defs/version", "description": "Numéro du journal où les politiques effectives actuelles sont publiées (0 avant la première publication). Ne change qu’à la publication d’une politique, pas à chaque vente ; à renvoyer dans version_politiques_appliquee une fois appliquées." },
         "calcul": { "$ref": "commun.json#/$defs/version" },
         "schema_instantane": { "$ref": "commun.json#/$defs/version" }
       }

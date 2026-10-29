@@ -53,9 +53,11 @@ class BEngineAdapter implements WindowsEngineAdapter {
 
 | Commande | Arguments | Résultat |
 |---|---|---|
-| `status` | — | `version`, `ready`, `block_reason`, `paired`, `operator`, `operators[]`, `pin_required`, `session_open`, `pending`, `arbitration`, `permanent_local`, `reachable` |
+| `status` | — | `version`, `ready`, `block_reason`, `paired`, `operator`, `operators[]`, `pin_required`, `session_open`, `pending`, `arbitration`, `permanent_local`, `reachable`, `session` (`id`, `local`) ou null, `capabilities` (ci-dessous) |
 | `pair` | `origin`, `code`, `model`, `app_version` | `status` ; exige le réseau |
-| `login` | `operator_id`, `pin` | `status` ; PIN bloqué durablement après 3 échecs (progression serveur) |
+| `login` | `operator_id`, `pin` | `status` ; PIN bloqué durablement après 3 échecs (progression serveur) ; `pin_non_defini` (aucun échec compté) si le caissier n'a pas de PIN |
+| `logout` | — | `status` ; verrouillage ou changement de caissier : le panier reste, `saleStatus` reste possible |
+| `openSession` | `float` (fond, entier en francs) | `status` ; caissier identifié requis ; refus `session_refusee` (session déjà ouverte, politique, droit) |
 | `view` | — | vue schéma 1 (ci-dessous) |
 | `search` | `query` (≤ 100) | vue filtrée (60 produits au plus) ; le filtre est gardé par la vue |
 | `addProduct` | `product_id`, `packaging_id?` | vue |
@@ -72,8 +74,24 @@ class BEngineAdapter implements WindowsEngineAdapter {
 
 Vue schéma 1 : `schema`, `revision` (croissante dans le processus), `ready`, `block_reason`, `can_pay`, `draft_id`,
 `store_name`, `sync_label`, `total_label`, `payment_label`, `payment_valid`, `query`, `products[]` (`id`, `name`,
-`price_label`, `stock_label`, `packagings[]`), `lines[]` (`id`, `name`, `quantity_label`, `total_label`, `available`).
+`price_label`, `stock_label`, `packagings[]`), `lines[]` (`id`, `name`, `quantity_label`, `quantity` (canonique, 6
+décimales), `unit_price_label`, `discount_label`, `total_label`, `available`), `totals` (`gross_label`, `base_ht_label`,
+`vat_label`, `vat_rate`, `vat_included`, `payable_label`) ou null, `payment` (`method`, `amount_label`,
+`received_label`, `change_label`, `remaining_label`) ou null.
 Montants et libellés calculés par le moteur ; Windows n'en recalcule aucun.
+
+`capabilities` (C-REQ-005 §2) : `sell`, `open_session`, `pair`, `synchronize`, chacune `{allowed, reason,
+network_required}`. Indication pour l'écran seulement : le moteur refait chaque contrôle à l'exécution.
+
+## Protocole v2 (décision du 2026-10-29)
+
+Depuis `9b0a5dd`, l'hôte et Android utilisent `V2Engine` (`lib/src/sync_v2/v2_engine.dart`) : mêmes commandes, mêmes
+identifiants entiers (attribués localement, stables, rattachés aux UUID du contrat). Différences visibles :
+paiement unique en espèces (capacité `vente.especes`) ; numéro local `HL2-<époque>-<séquence>` ; session = celle du
+terminal publiée par le serveur, ou l'ouverture locale (`openSession`) tant que le serveur ne l'a pas intégrée ;
+`history[].server_status` peut valoir `recue` ou `resolue` en plus de `integree`/`a_arbitrer` ; vente locale refusée
+avec motif si l'autorisation du serveur est retirée ou expirée. Essai réel : 29/10, exécutable de l'hôte contre la démo,
+Caisse 2, vente V-20261029-0016.
 
 ## Garanties (C-REQ-004)
 
@@ -87,11 +105,13 @@ Montants et libellés calculés par le moteur ; Windows n'en recalcule aucun.
   autre erreur d'un `commitSale` = résultat inconnu → `saleStatus` avec le même identifiant.
 - Une erreur d'un abonné d'écran n'interrompt jamais le moteur (`EngineNotifier`).
 
-## Limites de la version 1
+## Limites actuelles
 
-- Paiement unique par vente (espèces avec monnaie, ou un moyen autorisé) ; multi-paiement : version suivante.
-- Remises de ligne non exposées (le moteur les sait valider) ; ouverture de session hors ligne non exposée
-  (`engine.openSession`) : à ajouter si Windows doit ouvrir sa session hors ligne.
+- Paiement unique en espèces par vente (v2 2.0) ; multi-paiement, moyens électroniques déclarés : contrat A requis.
+- Remises de ligne non exposées (le moteur les sait valider) ; clôture de session : contrat A requis (pas d'opération
+  `cloture_session` en v2 2.0).
+- C-REQ-005 §3–7 restants (catégories/marque/fournisseur, brouillons multiples, client, note, tarif gros, retours,
+  bons) : lots suivants, certains après contrat A.
 - Hôte exécutable livré (voir ci-dessous) ; l'interface Windows ne le lance pas encore (bootstrap de C).
 
 ## Hôte exécutable (livré sur le commit intégré)

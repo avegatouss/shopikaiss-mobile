@@ -38,6 +38,9 @@ class FakeV2Server implements V2Transport {
   int? failStatus;
   String failCode = 'indisponible';
 
+  /// Clé web rendue à l'appairage (révision 2.0.2) ; null : serveur 2.0.1.
+  String? webKey = 'ClefWeb0123456789abcdefghijklmnopqrstuvwxyzABCDE';
+
   /// Autorisation de vente locale rendue par `/etat`.
   bool authorized = true;
   String authorizationExpires = '2026-10-30T08:00:00Z';
@@ -119,6 +122,7 @@ class FakeV2Server implements V2Transport {
           'epoque': 3,
           'appareil': {'uuid': fakeDevice, 'nom': 'Poste', 'terminal_uuid': fakeTerminal, 'terminal_nom': 'Caisse 2', 'boutique_uuid': fakeShop, 'boutique_nom': 'Boutique', 'derniere_sequence': 0},
           'capacites_serveur': ['instantane.v1', 'stock.couverture', 'vente.especes'],
+          'cle_web': ?webKey,
         }, 'appairage.json#/\$defs/reponse');
       case ('GET', '/etat'):
         return _ok({

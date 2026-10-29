@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
+import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_store.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -148,11 +149,27 @@ void main() {
     expect(e.sessionOpen, isFalse);
   });
 
-  test('PIN : vérifié contre l’empreinte reçue, échecs gardés', () async {
+  test('PIN : vérifié contre l’empreinte reçue ; PIN non défini refusé sans compter d’échec', () async {
     final e = await paired();
     final operator = e.snapshot!.operators.single;
     expect(await e.checkPin(operator, '0000'), isFalse);
     expect(await e.checkPin(operator, '1234'), isTrue);
+    final noPin = Operator({'id': 9, 'nom': 'Sans PIN', 'pin': null});
+    expect(e.pinDefined(noPin), isFalse);
+    for (var i = 0; i < 5; i++) {
+      expect(await e.checkPin(noPin, '1234'), isFalse);
+    }
+    expect(await e.pinLockedFor(noPin), isNull, reason: 'aucun échec compté');
+  });
+
+  test('clé web (2.0.2) rangée pour la caisse web ; serveur 2.0.1 sans clé toléré', () async {
+    final e = await paired();
+    expect(e.webToken, server.webKey);
+    expect(await base.read(StoreKeys.webToken), server.webKey);
+    server.webKey = null;
+    final again = await engine();
+    expect(await again.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    expect(again.webToken, isNull);
   });
 
   test('installation 1.1.5 mise à jour : l’ancienne file v1 est envoyée par ses routes, puis plus rien en v1', () async {
@@ -171,5 +188,45 @@ void main() {
     expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
     expect((await base.counts()).pending, 0, reason: 'ancienne file vidée par la v1');
     expect(e.pendingCount, 0);
+  });
+
+  test('adaptateur Windows sur v2 (C-REQ-005) : capacités, ouverture de session, détail des montants, verrouillage', () async {
+    server.entities.remove('session|session:$fakeTerminal');
+    final e = await paired();
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    var status = await adapter.execute('status', {}, null);
+    expect((status['capabilities'] as Map)['sell']['allowed'], isFalse);
+    expect((status['capabilities'] as Map)['sell']['reason'], 'Identifiez le caissier.');
+
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    status = await adapter.execute('status', {}, null);
+    expect((status['capabilities'] as Map)['sell']['reason'], contains('Aucune session'));
+    expect((status['capabilities'] as Map)['open_session']['allowed'], isTrue);
+
+    status = await adapter.execute('openSession', {'float': 5000}, null);
+    expect(status['session_open'], isTrue);
+    expect((status['session'] as Map)['local'], isTrue);
+    expect((status['capabilities'] as Map)['sell']['allowed'], isTrue);
+    await expectLater(adapter.execute('openSession', {'float': 0}, null), throwsA(isA<AdapterFailure>()));
+
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    final view = await adapter.execute('setPayment', {'method': 'especes', 'received': 1000}, null);
+    final totals = view['totals'] as Map;
+    expect(totals['payable_label'], '500 F');
+    expect(totals['vat_label'], '76 F', reason: 'TVA 18 % incluse dans 500 F, calculée par le moteur');
+    expect(totals['base_ht_label'], '424 F');
+    expect((view['payment'] as Map)['change_label'], '500 F');
+    expect(((view['lines'] as List).single as Map)['unit_price_label'], '500 F');
+
+    final sale = await adapter.execute('commitSale', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001');
+    expect(sale['state'], 'committed');
+
+    status = await adapter.execute('logout', {}, null);
+    expect(status['operator'], isNull);
+    expect((status['capabilities'] as Map)['sell']['allowed'], isFalse);
+    expect((await adapter.execute('saleStatus', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001'))['state'], 'committed',
+        reason: 'un encaissement se vérifie toujours, même verrouillé');
+    await adapter.close();
   });
 }

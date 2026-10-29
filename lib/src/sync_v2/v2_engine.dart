@@ -150,7 +150,10 @@ class V2Engine extends CaisseEngine {
       return 'Des ventes locales attendent encore l’ancienne boutique : reconnectez-la pour les envoyer avant d’appairer celle-ci.';
     }
     try {
-      await sync.pair(code, platform: platform, model: model, newUuid: _newUuid);
+      final pairing = await sync.pair(code, platform: platform, model: model, newUuid: _newUuid);
+      // Clé web rendue une seule fois (2.0.2) : même rangement que celle de la v1, lue par la vue web de la caisse.
+      webToken = pairing.webKey;
+      await store.write(StoreKeys.webToken, webToken);
     } on V2Failure catch (e) {
       return e.code == 'reseau' ? 'Boutique injoignable : l’appairage exige une connexion.' : e.message;
     }

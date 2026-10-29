@@ -55,7 +55,7 @@
       "required": ["politiques", "calcul", "schema_instantane"],
       "additionalProperties": false,
       "properties": {
-        "politiques": { "$ref": "commun.json#/$defs/version" },
+        "politiques": { "$ref": "commun.json#/$defs/version", "description": "Numéro du journal où les politiques effectives actuelles sont publiées (0 avant la première publication). Ne change qu’à la publication d’une politique, pas à chaque vente ; à renvoyer dans version_politiques_appliquee une fois appliquées." },
         "calcul": { "$ref": "commun.json#/$defs/version" },
         "schema_instantane": { "$ref": "commun.json#/$defs/version" }
       }

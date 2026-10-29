@@ -53,9 +53,12 @@ class V2Failure implements Exception {
 
 /// Identité rendue par l'appairage v2 ; le jeton se range dans le coffre de la plateforme.
 class V2Pairing {
-  const V2Pairing({required this.token, required this.epoch, required this.device, required this.capabilities});
+  const V2Pairing({required this.token, required this.epoch, required this.device, required this.capabilities, this.webKey});
 
   final String token;
+
+  /// Clé web de l'appareil (révision 2.0.2, B-REQ-006), à poser en cookie `sk_appareil` ; absente d'un serveur 2.0.1.
+  final String? webKey;
   final int epoch;
 
   /// `appareil` tel que rendu (uuid, nom, terminal_uuid, terminal_nom, boutique_uuid, boutique_nom, derniere_sequence).
@@ -67,7 +70,7 @@ class V2Pairing {
   int get lastSequence => device['derniere_sequence'] as int;
 }
 
-/// Client de l'API `/api/caisse/v2`, révision 2.0.0-l1 : en-têtes obligatoires, erreurs typées, réponses validées contre
+/// Client de l'API `/api/caisse/v2`, révision 2.0.2 : en-têtes obligatoires, erreurs typées, réponses validées contre
 /// les schémas embarqués (une réponse non conforme n'est jamais appliquée : elle vaut « résultat inconnu »).
 class CaisseV2Client {
   CaisseV2Client({
@@ -123,6 +126,7 @@ class CaisseV2Client {
       epoch: json['epoque'] as int,
       device: Map<String, dynamic>.from(json['appareil'] as Map),
       capabilities: List<String>.from(json['capacites_serveur'] as List),
+      webKey: json['cle_web'] as String?,
     );
     token = pairing.token;
     return pairing;

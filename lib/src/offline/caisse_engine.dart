@@ -161,10 +161,13 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Vérifie un PIN hors ligne. Les échecs sont gardés sur le terminal (redémarrer l'application ne les efface pas) :
   /// même progression que le serveur (PinService) — 3 essais, puis 30 s doublées à chaque nouvel échec, 15 min au plus.
+  ///
+  /// Opérateur sans PIN défini (empreinte nulle) : refusé sans compter d'échec (contrat v2 2.0.2) — voir [pinDefined].
   Future<bool> checkPin(Operator operator, String pin) async {
+    if (!pinDefined(operator)) return false;
     if (await pinLockedFor(operator) != null) return false;
-    final hash = operator.pinHash;
-    final ok = hash != null && hash.isNotEmpty && RegExp(r'^\d{4,6}$').hasMatch(pin) && await _verifyPin(pin, hash);
+    final hash = operator.pinHash!;
+    final ok = RegExp(r'^\d{4,6}$').hasMatch(pin) && await _verifyPin(pin, hash);
     final key = '${StoreKeys.pinFailures}${operator.id}';
     if (ok) {
       await store.write(key, null);
@@ -175,6 +178,9 @@ abstract class CaisseEngine extends EngineNotifier {
     await store.write(key, '$failures|${lockedUntil?.toUtc().toIso8601String() ?? ''}');
     return false;
   }
+
+  /// L'opérateur a-t-il un PIN défini côté boutique ? Sinon : motif « PIN non défini », jamais un échec compté.
+  bool pinDefined(Operator operator) => operator.pinHash != null && operator.pinHash!.isNotEmpty;
 
   /// Attente restante avant un nouvel essai de PIN pour ce caissier, ou null.
   Future<Duration?> pinLockedFor(Operator operator) async {
