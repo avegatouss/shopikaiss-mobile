@@ -341,12 +341,17 @@ class V2Engine extends CaisseEngine {
   bool hasRight(Operator operator, String right) => (_rights[operator.id] ?? const []).contains(right);
 
   @override
-  int maxLineDiscountFor(Operator operator, int base) {
-    final terminal = super.maxLineDiscountFor(operator, base);
+  int maxLineDiscountFor(Operator operator, int base) => _withRoleCap(operator, base, super.maxLineDiscountFor(operator, base));
+
+  @override
+  int maxGlobalDiscountFor(Operator operator, int subtotal) => _withRoleCap(operator, subtotal, super.maxGlobalDiscountFor(operator, subtotal));
+
+  /// Plafond du rôle (`remise_max_pourcent`) appliqué en plus de celui de la boutique : le plus petit des deux.
+  int _withRoleCap(Operator operator, int base, int shop) {
     final percent = _discountCaps[operator.id]?.$1;
-    if (percent == null) return terminal;
+    if (percent == null) return shop;
     final role = (BigInt.from(base) * percent ~/ BigInt.from(100000000)).toInt();
-    return role < terminal ? role : terminal;
+    return role < shop ? role : shop;
   }
 
   @override
@@ -421,7 +426,9 @@ class V2Engine extends CaisseEngine {
           if (entry != null && _entered(entry, l.base) != l.discount) throw OfflineRefusal('Remise sur « ${l.label} » différente de sa saisie.');
         }
         final subtotal = lines.fold<int>(0, (sum, l) => sum + l.base - l.discount);
-        if (extras.globalDiscount > maxLineDiscountFor(operator, subtotal)) throw OfflineRefusal('Remise globale au-delà du plafond de ${operator.name}.');
+        if (extras.globalDiscount > maxGlobalDiscountFor(operator, subtotal)) {
+          throw OfflineRefusal('Remise globale au-delà du maximum autorisé hors ligne pour ${operator.name}.');
+        }
         if (extras.globalEntry != null && _entered(extras.globalEntry!, subtotal) != extras.globalDiscount) {
           throw const OfflineRefusal('Remise globale différente de sa saisie.');
         }
@@ -666,6 +673,7 @@ class V2Engine extends CaisseEngine {
         'ventes_max': policies['autonomie.ventes_max_non_recues'] ?? 500,
         'montant_max_vente': policies['autonomie.montant_max_vente'],
         'remise_ligne_max_pourcent': policies['remises.ligne_max_pourcent'] ?? 0,
+        'remise_globale_max_pourcent': policies['remises.globale_max_pourcent'] ?? 0,
         'ouverture_session': policies['session.ouverture_locale'] == true,
         'mode_caissier': policies['droits.identification'] ?? 'pin',
         'rafraichissement_minutes': (changesSeconds / 60).ceil().clamp(1, 60),

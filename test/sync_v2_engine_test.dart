@@ -500,6 +500,7 @@ void main() {
         throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'fonction_indisponible')));
     await legacyAdapter.close();
 
+
     // Boutique en 2.1 : TVA 18 % ajoutée, pourcentages au franc inférieur, espèces arrondies à 25 F au plus proche.
     serve21(server, vatIncluded: false, rules: {'remise_pourcentage_arrondi': 'down', 'arrondi_especes': {'pas': 25, 'mode': 'nearest'}});
     server.cashRounding = (step: 25, mode: 'nearest');
@@ -508,6 +509,7 @@ void main() {
     await e.load('https://boutique.exemple.ci');
     await e.sync();
     expect(e.saleExtrasSupported, isTrue);
+    expect(e.snapshot!.rules.maxGlobalDiscountPercent, 5);
 
     final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
     await adapter.start();
@@ -522,6 +524,9 @@ void main() {
     await adapter.execute('changeQuantity', {'line_id': serviceLine, 'quantity': '5'}, null);
     view = await adapter.execute('setLineDiscount', {'line_id': serviceLine, 'percent': '10'}, null);
     expect((view['lines'] as List).firstWhere((l) => l['id'] == serviceLine)['discount'], 50);
+    // Plafond global = politique remises.globale_max_pourcent (5 %), pas celle des lignes (10 %).
+    await expectLater(adapter.execute('setGlobalDiscount', {'percent': '6'}, null),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'remise_refusee')));
     await adapter.execute('setGlobalDiscount', {'percent': '5,0'}, null);
     await adapter.execute('setDelivery', {'amount': 300}, null);
     view = await adapter.execute('setNote', {'text': 'Livrer à Cocody'}, null);
@@ -561,12 +566,23 @@ void main() {
     // Le serveur (recoupement de CoherenceVente 4bb14454) l'intègre.
     await e.sync();
     expect((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!.serverStatus, 'integree');
+
+    // Politique remises.globale_max_pourcent ramenée à 0 : remise globale grisée avec le motif de A.
+    server.publish([
+      {
+        'type': 'politique', 'critique': false, 'cle': 'remises.globale_max_pourcent', 'revision': '2', 'action': 'upsert',
+        'donnees': {'cle_politique': 'remises.globale_max_pourcent', 'valeur': 0, 'source': 'boutique', 'verrouillee': false},
+      },
+    ]);
+    await e.sync();
+    final caps = (await adapter.execute('status', {}, null))['capabilities'] as Map;
+    expect(caps['global_discount']['reason'], 'Remise globale non autorisée hors ligne dans cette boutique.');
     await adapter.close();
   });
 }
 
 /// Catalogue de la boutique d'essai en forme 2.1 (lot 1a), règles commerciales [rules] fusionnées aux défauts.
-void serve21(FakeV2Server server, {bool vatIncluded = true, Map<String, dynamic> rules = const {}}) {
+void serve21(FakeV2Server server, {bool vatIncluded = true, Map<String, dynamic> rules = const {}, int globalMaxPercent = 5}) {
   Map<String, dynamic> product(String nom, String? ref, int prix, bool illimite) => {
     'nom': nom, 'reference': ref, 'categorie': null, 'prix': prix, 'stock_illimite': illimite, 'actif': true, 'vente_locale': true,
     'categorie_uuid': null, 'marque': null, 'fournisseur': null, 'unite': null,
@@ -591,6 +607,7 @@ void serve21(FakeV2Server server, {bool vatIncluded = true, Map<String, dynamic>
     ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
     ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
     ..put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 10, 'source': 'boutique', 'verrouillee': false})
+    ..put('politique', 'remises.globale_max_pourcent', {'cle_politique': 'remises.globale_max_pourcent', 'valeur': globalMaxPercent, 'source': 'boutique', 'verrouillee': false})
     ..put('operateur', 'operateur:7', {
       'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'remise', 'vente'],
       'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,

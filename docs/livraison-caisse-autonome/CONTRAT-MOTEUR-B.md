@@ -65,7 +65,7 @@ class BEngineAdapter implements WindowsEngineAdapter {
 | `changeQuantity` | `line_id`, `quantity` (chaîne, 6 décimales au plus, > 0) | vue |
 | `removeLine` / `clear` | `line_id` / — | vue |
 | `setLineDiscount` | `line_id`, `amount` (francs, 0 = retirer) **ou** `percent` (« 12,5 », 2 décimales, ≤ 100) | vue ; `remise_refusee` (sans droit `remise`, au-delà du plafond du rôle ou du terminal, au-delà de la base), `remise_invalide` ; un pourcentage est recalculé à chaque changement du panier |
-| `setGlobalDiscount` | `amount` **ou** `percent` (0 = retirer) | vue ; sur le sous-total (après remises de ligne) ; mêmes droits et plafonds ; `fonction_indisponible` avant la 2.1 |
+| `setGlobalDiscount` | `amount` **ou** `percent` (0 = retirer) | vue ; sur le sous-total (après remises de ligne) ; droit `remise`, plafond = min(`remises.globale_max_pourcent`, rôle) — politique à 0 : « Remise globale non autorisée hors ligne dans cette boutique. » ; `fonction_indisponible` avant la 2.1 |
 | `setDelivery` | `amount` (francs, 0 = retirer) | vue ; hors TVA, ajoutée au montant à payer ; droit `boutique.regles.livraison_droit` s'il est défini |
 | `setNote` | `text` (≤ 2 000, vide = retirer) | vue ; note du ticket |
 | `suspendDraft` | — | vue (panier vide, `suspended_count`) ; `panier_vide` si rien à mettre en attente |
