@@ -30,7 +30,11 @@ class _Host implements WindowsHost {
     'store_name': 'Boutique de test',
     'total_label': '2 000 F',
     'products': [
-      {'id': 'p1', 'name': 'Produit de test', 'price_label': '2 000 F'},
+      <String, dynamic>{
+        'id': 'p1',
+        'name': 'Produit de test',
+        'price_label': '2 000 F',
+      },
     ],
     'lines': [
       {
@@ -86,6 +90,7 @@ class _Host implements WindowsHost {
     if (command == HostCommand.setPayment) {
       state['payment_valid'] = true;
       state['payment_label'] = 'Espèces 2 000 F';
+      return {'change': 3000};
     }
     if (command == HostCommand.commitSale) {
       committedId = operationId;
@@ -118,6 +123,108 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets('search Enter never scans and packaging choice reaches engine', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final host = _Host();
+    (host.state['products'] as List).first['packagings'] = [
+      {'id': 7, 'name': 'Carton', 'price_label': '12 000 F'},
+    ];
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Rechercher un produit'),
+      'riz',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.search], {'query': 'riz'});
+    expect(host.calls, isNot(contains(HostCommand.scan)));
+    await tester.tap(find.text('Compacte'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Produit de test'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Carton · 12 000 F'));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.addProduct], {
+      'product_id': 'p1',
+      'packaging_id': 7,
+    });
+  });
+
+  testWidgets(
+    'cash edits invalidate confirmation until engine validates received amount',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Encaisser · F4'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Espèces'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Montant reçu (F CFA)'),
+        '5000',
+      );
+      await tester.pump();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Confirmer le paiement'),
+            )
+            .onPressed,
+        isNull,
+      );
+      await tester.tap(find.text('Vérifier le montant reçu'));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.setPayment], {
+        'method': 'especes',
+        'received': 5000,
+      });
+      expect(find.text('Monnaie à rendre : 3000 F CFA'), findsOneWidget);
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Confirmer le paiement'),
+            )
+            .onPressed,
+        isNotNull,
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Montant reçu (F CFA)'),
+        '-5',
+      );
+      await tester.tap(find.text('Vérifier le montant reçu'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.widgetWithText(FilledButton, 'Confirmer le paiement'),
+            )
+            .onPressed,
+        isNull,
+      );
+      expect(host.calls, isNot(contains(HostCommand.commitSale)));
+    },
+  );
   testWidgets(
     'history and duplicate never resubmit or edit the current basket',
     (tester) async {

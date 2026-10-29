@@ -64,6 +64,7 @@ class WindowsRegisterController extends ChangeNotifier {
   String? receipt;
   String? _checkoutId;
   List<Map<String, dynamic>> paymentMethods = const [];
+  int? paymentChange;
 
   List<Map<String, dynamic>> get products => _rows('products');
   List<Map<String, dynamic>> get lines => _rows('lines');
@@ -125,10 +126,18 @@ class WindowsRegisterController extends ChangeNotifier {
     if (_journalBlocked || !ready || busy || uncertainOperation != null) return;
     busy = true;
     message = null;
-    if (command == HostCommand.preparePayment) paymentMethods = const [];
+    if (command == HostCommand.preparePayment) {
+      paymentMethods = const [];
+      paymentChange = null;
+    }
     notifyListeners();
     try {
       final result = await host.call(command, arguments: arguments);
+      if (command == HostCommand.setPayment) {
+        paymentChange = result['change'] is int
+            ? result['change'] as int
+            : null;
+      }
       if (command == HostCommand.preparePayment) {
         paymentMethods = (result['methods'] as List? ?? const [])
             .whereType<Map<String, dynamic>>()

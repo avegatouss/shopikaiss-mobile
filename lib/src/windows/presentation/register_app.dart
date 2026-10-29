@@ -79,6 +79,8 @@ class _Register extends StatefulWidget {
 
 class _RegisterState extends State<_Register> {
   final _search = TextEditingController();
+  final _scan = TextEditingController();
+  bool _compact = false;
   final _scanFocus = FocusNode();
   WindowsRegisterController get c => widget.controller;
   @override
@@ -90,6 +92,7 @@ class _RegisterState extends State<_Register> {
   @override
   void dispose() {
     _search.dispose();
+    _scan.dispose();
     _scanFocus.dispose();
     super.dispose();
   }
@@ -103,6 +106,49 @@ class _RegisterState extends State<_Register> {
       barrierDismissible: false,
       builder: (_) => _Payment(c),
     );
+  }
+
+  bool get _canEdit => c.ready && !c.busy && c.uncertainOperation == null;
+
+  Future<void> _submitScan() async {
+    if (!_canEdit || _scan.text.trim().isEmpty) return;
+    await c.command(HostCommand.scan, {'code': _scan.text.trim()});
+    if (!mounted) return;
+    if (c.message == null) _scan.clear();
+    _scanFocus.requestFocus();
+  }
+
+  Future<void> _addProduct(Map<String, dynamic> product) async {
+    if (!_canEdit) return;
+    final packagings = (product['packagings'] as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    Object? packaging;
+    if (packagings.isNotEmpty) {
+      final choice = await showDialog<Map<String, dynamic>>(
+        context: context,
+        builder: (context) => SimpleDialog(
+          title: Text(product['name'] as String),
+          children: [
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, <String, dynamic>{}),
+              child: Text('Unité · ${product['price_label']}'),
+            ),
+            for (final item in packagings)
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, item),
+                child: Text('${item['name']} · ${item['price_label']}'),
+              ),
+          ],
+        ),
+      );
+      if (!mounted || choice == null || !_canEdit) return;
+      packaging = choice['id'];
+    }
+    await c.command(HostCommand.addProduct, {
+      'product_id': product['id'],
+      'packaging_id': ?packaging,
+    });
   }
 
   Future<void> _quantity(Map<String, dynamic> line) async {
@@ -166,9 +212,13 @@ class _RegisterState extends State<_Register> {
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: c,
     builder: (context, _) => CallbackShortcuts(
-      bindings: {const SingleActivator(LogicalKeyboardKey.f4): _payment},
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.f4): _payment,
+        const SingleActivator(LogicalKeyboardKey.f2): _scanFocus.requestFocus,
+      },
       child: Scaffold(
         appBar: AppBar(
+          toolbarHeight: 48,
           title: Text(c.view['store_name'] as String? ?? 'Shopikaiss'),
           actions: [
             IconButton(
@@ -208,6 +258,47 @@ class _RegisterState extends State<_Register> {
         ),
         body: Column(
           children: [
+            Material(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
+                child: Row(
+                  children: [
+                    SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment(
+                          value: false,
+                          icon: Icon(Icons.grid_view),
+                          label: Text('Visuelle'),
+                        ),
+                        ButtonSegment(
+                          value: true,
+                          icon: Icon(Icons.view_list),
+                          label: Text('Compacte'),
+                        ),
+                      ],
+                      selected: {_compact},
+                      onSelectionChanged: (value) =>
+                          setState(() => _compact = value.single),
+                    ),
+                    const SizedBox(width: 12),
+                    TextButton.icon(
+                      onPressed: c.ready && !c.busy
+                          ? () => showDialog<void>(
+                              context: context,
+                              builder: (_) => SalesHistoryDialog(host: c.host),
+                            )
+                          : null,
+                      icon: const Icon(Icons.history),
+                      label: const Text('Ventes récentes'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             if (c.message != null)
               MaterialBanner(
                 content: Text(c.message!),
@@ -235,8 +326,8 @@ class _RegisterState extends State<_Register> {
                     ? Row(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          Expanded(flex: 3, child: _catalogue()),
-                          Expanded(flex: 2, child: _cart()),
+                          Expanded(flex: 58, child: _catalogue()),
+                          Expanded(flex: 42, child: _cart()),
                         ],
                       )
                     : DefaultTabController(
@@ -266,54 +357,95 @@ class _RegisterState extends State<_Register> {
   );
 
   Widget _catalogue() => Padding(
-    padding: const EdgeInsets.all(16),
+    padding: const EdgeInsets.all(8),
     child: Column(
       children: [
-        TextField(
-          controller: _search,
-          focusNode: _scanFocus,
-          enabled: c.ready && !c.busy && c.uncertainOperation == null,
-          decoration: InputDecoration(
-            labelText: 'Scanner un code ou rechercher un produit',
-            prefixIcon: const Icon(Icons.search),
-            suffixIcon: IconButton(
-              tooltip: 'Rechercher',
-              icon: const Icon(Icons.arrow_forward),
-              onPressed: c.ready && !c.busy
-                  ? () => c.command(HostCommand.search, {'query': _search.text})
-                  : null,
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _scan,
+                focusNode: _scanFocus,
+                autofocus: true,
+                enabled: c.ready && !c.busy && c.uncertainOperation == null,
+                decoration: InputDecoration(
+                  isDense: true,
+                  labelText: 'Scanner (F2) puis Entrée',
+                  prefixIcon: const Icon(Icons.barcode_reader),
+                  suffixIcon: IconButton(
+                    tooltip: 'Ajouter le code scanné',
+                    icon: const Icon(Icons.arrow_forward),
+                    onPressed: _canEdit ? _submitScan : null,
+                  ),
+                ),
+                onSubmitted: (_) => _submitScan(),
+              ),
             ),
-          ),
-          onSubmitted: (code) async {
-            await c.command(HostCommand.scan, {'code': code});
-            if (mounted && c.message == null) _search.clear();
-            if (mounted) _scanFocus.requestFocus();
-          },
+            const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _search,
+                enabled: _canEdit,
+                decoration: InputDecoration(
+                  isDense: true,
+                  labelText: 'Rechercher un produit',
+                  suffixIcon: IconButton(
+                    tooltip: 'Rechercher',
+                    onPressed: _canEdit
+                        ? () => c.command(HostCommand.search, {
+                            'query': _search.text,
+                          })
+                        : null,
+                    icon: const Icon(Icons.search),
+                  ),
+                ),
+                onSubmitted: (query) =>
+                    c.command(HostCommand.search, {'query': query}),
+              ),
+            ),
+          ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
         Expanded(
           child: c.products.isEmpty
               ? const Center(child: Text('Aucun article à afficher.'))
+              : _compact
+              ? ListView.separated(
+                  itemCount: c.products.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final p = c.products[index];
+                    return ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.inventory_2_outlined),
+                      title: Text(p['name'] as String? ?? ''),
+                      subtitle: Text(
+                        'Stock : ${p['stock_label'] ?? "à vérifier"}',
+                      ),
+                      trailing: Text(p['price_label'] as String? ?? '—'),
+                      onTap: _canEdit ? () => _addProduct(p) : null,
+                    );
+                  },
+                )
               : GridView.builder(
                   gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 240,
-                    mainAxisExtent: 150,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
+                    maxCrossAxisExtent: 185,
+                    mainAxisExtent: 130,
+                    crossAxisSpacing: 4,
+                    mainAxisSpacing: 4,
                   ),
                   itemCount: c.products.length,
                   itemBuilder: (context, index) {
                     final p = c.products[index];
                     return Card(
+                      color: const Color(0xffe4f1e9),
                       child: InkWell(
                         onTap:
                             c.ready && !c.busy && c.uncertainOperation == null
-                            ? () => c.command(HostCommand.addProduct, {
-                                'product_id': p['id'],
-                              })
+                            ? () => _addProduct(p)
                             : null,
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(10),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -324,13 +456,14 @@ class _RegisterState extends State<_Register> {
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w600,
+                                    fontSize: 13,
                                   ),
                                 ),
                               ),
                               Text(
                                 p['price_label'] as String? ?? '—',
                                 style: const TextStyle(
-                                  fontSize: 20,
+                                  fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -354,9 +487,9 @@ class _RegisterState extends State<_Register> {
   );
 
   Widget _cart() => Card(
-    margin: const EdgeInsets.all(16),
+    margin: const EdgeInsets.all(8),
     child: Padding(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -427,13 +560,59 @@ class _RegisterState extends State<_Register> {
   );
 }
 
-class _Payment extends StatelessWidget {
+class _Payment extends StatefulWidget {
   const _Payment(this.c);
   final WindowsRegisterController c;
+  @override
+  State<_Payment> createState() => _PaymentState();
+}
+
+class _PaymentState extends State<_Payment> {
+  WindowsRegisterController get c => widget.c;
+  final _received = TextEditingController();
+  String? _method;
+  bool _cash = false;
+  bool _accepted = false;
+  String? _inputError;
+
+  @override
+  void dispose() {
+    _received.dispose();
+    super.dispose();
+  }
+
+  Future<void> _apply() async {
+    if (_method == null || !c.canPay) return;
+    final text = _received.text.trim();
+    final value = text.isEmpty ? null : int.tryParse(text);
+    setState(() {
+      _accepted = false;
+      _inputError = null;
+    });
+    if (_cash &&
+        text.isNotEmpty &&
+        (value == null || value < 0 || !RegExp(r'^\d+$').hasMatch(text))) {
+      setState(
+        () => _inputError = 'Saisissez un montant entier positif en F CFA.',
+      );
+      return;
+    }
+    await c.command(HostCommand.setPayment, {
+      'method': _method,
+      if (_cash && value != null) 'received': value,
+    });
+    if (mounted) {
+      setState(
+        () => _accepted = c.message == null && c.view['payment_valid'] == true,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: c,
     builder: (context, _) => AlertDialog(
+      scrollable: true,
       title: const Text('Paiement'),
       content: SizedBox(
         width: 420,
@@ -458,15 +637,41 @@ class _Payment extends StatelessWidget {
                           : Icons.account_balance_wallet_outlined,
                     ),
                     onPressed: c.canPay
-                        ? () => c.command(HostCommand.setPayment, {
-                            'method': method['code'],
-                          })
+                        ? () {
+                            setState(() {
+                              _method = method['code'] as String;
+                              _cash = method['cash'] == true;
+                              _accepted = false;
+                              _received.clear();
+                            });
+                            _apply();
+                          }
                         : null,
                     label: Text(method['name'] as String),
                   ),
               ],
             ),
             const SizedBox(height: 12),
+            if (_cash) ...[
+              TextField(
+                controller: _received,
+                enabled: c.canPay,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Montant reçu (F CFA)',
+                  helperText: 'Laisser vide pour le montant exact.',
+                  errorText: _inputError,
+                ),
+                onChanged: (_) => setState(() => _accepted = false),
+                onSubmitted: (_) => _apply(),
+              ),
+              TextButton(
+                onPressed: c.canPay ? _apply : null,
+                child: const Text('Vérifier le montant reçu'),
+              ),
+              if (_accepted && c.paymentChange != null)
+                Text('Monnaie à rendre : ${c.paymentChange} F CFA'),
+            ],
             Text(
               c.view['payment_label'] as String? ??
                   'Choisissez un moyen autorisé dans le moteur local.',
@@ -490,7 +695,7 @@ class _Payment extends StatelessWidget {
           child: const Text('Retour au panier'),
         ),
         FilledButton(
-          onPressed: c.canPay && c.view['payment_valid'] == true
+          onPressed: c.canPay && _accepted && c.view['payment_valid'] == true
               ? () async {
                   await c.commitSale();
                   if (context.mounted &&
