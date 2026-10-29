@@ -1,0 +1,17 @@
+{
+    "jeton": "ab12cd34.ZXhlbXBsZS1kZS1qZXRvbi1ub24tc2VjcmV0",
+    "epoque": 2,
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "nom": "Caisse 1",
+        "terminal_uuid": "11111111-2222-4333-8444-555555555555",
+        "terminal_nom": "Comptoir",
+        "boutique_uuid": "66666666-7777-4888-9999-aaaaaaaaaaaa",
+        "boutique_nom": "River Center",
+        "derniere_sequence": 41
+    },
+    "capacites_serveur": [
+        "vente.especes",
+        "stock.couverture"
+    ]
+}

@@ -1,0 +1,82 @@
+{
+    "version": 2,
+    "curseur_suivant": "c-000118",
+    "suite": false,
+    "groupes": [
+        {
+            "uuid": "9a000000-0000-4000-8000-000000000001",
+            "changements": [
+                {
+                    "type": "stock.projection",
+                    "critique": false,
+                    "cle": "c0000000-0000-4000-8000-000000000001",
+                    "revision": "87",
+                    "action": "upsert",
+                    "donnees": {
+                        "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                        "lot_uuid": null,
+                        "quantite": "7.000000"
+                    },
+                    "operations_couvertes": [
+                        "a0000000-0000-4000-8000-000000000001"
+                    ]
+                },
+                {
+                    "type": "operation_etat",
+                    "critique": false,
+                    "cle": "a0000000-0000-4000-8000-000000000001",
+                    "revision": "2",
+                    "action": "upsert",
+                    "donnees": {
+                        "operation_uuid": "a0000000-0000-4000-8000-000000000001",
+                        "etat": "integree",
+                        "version_etat": "2",
+                        "raison": null
+                    }
+                }
+            ]
+        },
+        {
+            "uuid": "9a000000-0000-4000-8000-000000000002",
+            "changements": [
+                {
+                    "type": "produit",
+                    "critique": false,
+                    "cle": "c0000000-0000-4000-8000-000000000002",
+                    "revision": "9",
+                    "action": "upsert",
+                    "donnees": {
+                        "nom": "Eau minérale 1,5 L",
+                        "reference": "EAU15",
+                        "categorie": "Boissons",
+                        "prix": 450,
+                        "stock_illimite": false,
+                        "actif": true,
+                        "vente_locale": true
+                    }
+                },
+                {
+                    "type": "code_barre",
+                    "critique": false,
+                    "cle": "d1000000-0000-4000-8000-000000000001",
+                    "revision": "4",
+                    "action": "suppression",
+                    "donnees": null
+                },
+                {
+                    "type": "politique",
+                    "critique": true,
+                    "cle": "stock.rupture",
+                    "revision": "13",
+                    "action": "upsert",
+                    "donnees": {
+                        "cle_politique": "stock.rupture",
+                        "valeur": "autoriser_signaler",
+                        "source": "entreprise",
+                        "verrouillee": false
+                    }
+                }
+            ]
+        }
+    ]
+}

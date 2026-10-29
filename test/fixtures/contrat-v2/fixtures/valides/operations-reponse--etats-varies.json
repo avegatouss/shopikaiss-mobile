@@ -1,0 +1,47 @@
+{
+    "recu_le": "2026-10-29T10:25:01Z",
+    "resultats": [
+        {
+            "uuid": "a0000000-0000-4000-8000-000000000003",
+            "etat": "integree",
+            "version_etat": "2",
+            "raison": null,
+            "vente": null,
+            "mouvements": [],
+            "couverture": {
+                "curseur": null
+            }
+        },
+        {
+            "uuid": "a0000000-0000-4000-8000-000000000001",
+            "etat": "integree",
+            "version_etat": "2",
+            "raison": null,
+            "vente": {
+                "uuid": "2a000000-0000-4000-8000-000000000001",
+                "numero": "V-20261029-0042"
+            },
+            "mouvements": [
+                "f0000000-0000-4000-8000-000000000001"
+            ],
+            "couverture": {
+                "curseur": "c-000118"
+            }
+        },
+        {
+            "uuid": "a0000000-0000-4000-8000-000000000002",
+            "etat": "a_arbitrer",
+            "version_etat": "1",
+            "raison": {
+                "code": "stock.negatif",
+                "message": "Stock du riz négatif après la vente : écart à arbitrer.",
+                "details": null
+            },
+            "vente": null,
+            "mouvements": [],
+            "couverture": {
+                "curseur": null
+            }
+        }
+    ]
+}

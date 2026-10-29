@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "appairage.json",
+  "title": "POST /appairage : code à usage unique → identité, jeton et capacités compatibles.",
+  "$defs": {
+    "demande": {
+      "type": "object",
+      "required": ["code", "installation_uuid", "plateforme", "version_application", "schema_local", "capacites"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "minLength": 6, "maxLength": 20 },
+        "installation_uuid": { "$ref": "commun.json#/$defs/uuid", "description": "Identité stable de l'installation ; jamais copiée d'un autre appareil." },
+        "plateforme": { "enum": ["android", "windows"] },
+        "modele": { "type": ["string", "null"], "maxLength": 120 },
+        "version_application": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "schema_local": { "$ref": "commun.json#/$defs/version" },
+        "capacites": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } }
+      }
+    },
+    "reponse": {
+      "type": "object",
+      "required": ["jeton", "appareil", "epoque", "capacites_serveur"],
+      "additionalProperties": false,
+      "properties": {
+        "jeton": { "type": "string", "minLength": 20, "maxLength": 200, "description": "Rendu une seule fois ; à stocker dans le coffre de la plateforme." },
+        "epoque": { "type": "integer", "minimum": 1, "description": "Époque d'appairage : la séquence des opérations repart dans cette époque, sans recouvrir la précédente." },
+        "appareil": {
+          "type": "object",
+          "required": ["uuid", "nom", "terminal_uuid", "terminal_nom", "boutique_uuid", "boutique_nom", "derniere_sequence"],
+          "additionalProperties": false,
+          "properties": {
+            "uuid": { "$ref": "commun.json#/$defs/uuid" },
+            "nom": { "type": "string", "maxLength": 120 },
+            "terminal_uuid": { "$ref": "commun.json#/$defs/uuid" },
+            "terminal_nom": { "type": "string", "maxLength": 120 },
+            "boutique_uuid": { "$ref": "commun.json#/$defs/uuid" },
+            "boutique_nom": { "type": "string", "maxLength": 120 },
+            "derniere_sequence": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "capacites_serveur": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } }
+      }
+    }
+  }
+}

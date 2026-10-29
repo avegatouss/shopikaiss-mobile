@@ -1,0 +1,121 @@
+{
+    "profil": "SK-JCS-1",
+    "note": "entree = texte JSON re\u00e7u ; canonique = octets UTF-8 attendus ; sha256 = empreinte de ces octets.",
+    "vecteurs": [
+        {
+            "nom": "ordre_des_cles",
+            "entree": "{\"b\":2,\"a\":1}",
+            "canonique": "{\"a\":1,\"b\":2}",
+            "sha256": "43258cff783fe7036d8a43033f830adfc60ec037382473548ac742b888292777"
+        },
+        {
+            "nom": "espaces_supprimes",
+            "entree": " {\n  \"a\" : [ 1 , 2 ] ,\t\"b\" : { } } ",
+            "canonique": "{\"a\":[1,2],\"b\":{}}",
+            "sha256": "8c547cce7ccb1b89359479c0b71a0a4b62acfc54a2b2780fd34aaeb75f9e44b7"
+        },
+        {
+            "nom": "imbrication",
+            "entree": "{\"z\":[3,{\"y\":true,\"x\":null}],\"a\":\"\u00e9\"}",
+            "canonique": "{\"a\":\"\u00e9\",\"z\":[3,{\"x\":null,\"y\":true}]}",
+            "sha256": "ae6f7d0e71681ed70b56b00b81227a2652d8c164b63749b3a708299742730837"
+        },
+        {
+            "nom": "objet_vide_et_tableau_vide",
+            "entree": "{\"o\":{},\"l\":[]}",
+            "canonique": "{\"l\":[],\"o\":{}}",
+            "sha256": "111c683c055d4f0a50ce55366e2dfc66644f79266248039a271dd7e25cd5b104"
+        },
+        {
+            "nom": "echappements_courts",
+            "entree": "{\"s\":\"a\\nb\\tc\\\"d\\\\e/f\\r\\b\\f\"}",
+            "canonique": "{\"s\":\"a\\nb\\tc\\\"d\\\\e/f\\r\\b\\f\"}",
+            "sha256": "8f0c758506f7389fb0228b9b46a323dd6b317b2015d72804ce7a6ce651c39aad"
+        },
+        {
+            "nom": "controle_en_minuscules",
+            "entree": "{\"s\":\"\\u001F\\u0000\"}",
+            "canonique": "{\"s\":\"\\u001f\\u0000\"}",
+            "sha256": "46f3babd6bc68e6d0d28944c68d568cb2df47da081998ba38ef17df5de29d79e"
+        },
+        {
+            "nom": "unicode_echappe_devient_litteral",
+            "entree": "{\"s\":\"\u00e9t\u00e9\"}",
+            "canonique": "{\"s\":\"\u00e9t\u00e9\"}",
+            "sha256": "f6a73ab9919b979b15fd47d3d904a0b99c09e213f91a394d87bd359f30442797"
+        },
+        {
+            "nom": "separateur_de_ligne_litteral",
+            "entree": "{\"s\":\"\u2028\u2029\"}",
+            "canonique": "{\"s\":\"\u2028\u2029\"}",
+            "sha256": "37291683554efe5b232ef434c7f2ed8b3f39ce37f4a2d8db100eb4224e48edcd"
+        },
+        {
+            "nom": "cles_non_ascii_ordre_utf16",
+            "entree": "{\"\u00e9\":1,\"z\":2,\"A\":3,\"_\":4}",
+            "canonique": "{\"A\":3,\"_\":4,\"z\":2,\"\u00e9\":1}",
+            "sha256": "9f6a34c8698c0f4b0de07ce7e8ca9de7cccbfa8e1b4737158f9b526a6e29084f"
+        },
+        {
+            "nom": "emoji_avant_fffd_ordre_utf16",
+            "entree": "{\"\ufffd\":1,\"\ud83d\ude00\":2}",
+            "canonique": "{\"\ud83d\ude00\":2,\"\ufffd\":1}",
+            "sha256": "ee25c27251f38d1794ae1ce44d35d4e801cd43fb05e12f1b34aff3de57a69848"
+        },
+        {
+            "nom": "pas_de_normalisation_nfc",
+            "entree": "{\"n\":\"e\u0301\"}",
+            "canonique": "{\"n\":\"e\u0301\"}",
+            "sha256": "b6366f0d634afe549d3039313154f8e78529a9fd92396fc35a8e52cb6e9bcf09"
+        },
+        {
+            "nom": "precompose_distinct",
+            "entree": "{\"n\":\"\u00e9\"}",
+            "canonique": "{\"n\":\"\u00e9\"}",
+            "sha256": "cda516738eb07e9a1701275e8ba725b8604fc9d27185454a98f81478abb790cf"
+        },
+        {
+            "nom": "entiers_limites",
+            "entree": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"zero\":-0}",
+            "canonique": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"zero\":0}",
+            "sha256": "b7b2401ddca2165824e98c61890c0aaec470258d3119dd265d02be9438bf47e6"
+        },
+        {
+            "nom": "montant_et_quantite",
+            "entree": "{\"quantite\":\"2.000000\",\"prix_unitaire\":1000}",
+            "canonique": "{\"prix_unitaire\":1000,\"quantite\":\"2.000000\"}",
+            "sha256": "6783eaae14df6a40bf98f4ee7f04fdcfb48af5912fc0e5b3e07df580647be134"
+        },
+        {
+            "nom": "tableau_racine",
+            "entree": "[{\"b\":1,\"a\":2},\"x\",false]",
+            "canonique": "[{\"a\":2,\"b\":1},\"x\",false]",
+            "sha256": "10b972e460f898bbcd08d5f53878b6b415147c7d0ee0a38a4f84acf2b32f4d21"
+        },
+        {
+            "nom": "flottant",
+            "entree": "{\"montant\":1.5}",
+            "refuse": true
+        },
+        {
+            "nom": "flottant_entier_apparent",
+            "entree": "{\"montant\":1.0}",
+            "refuse": true
+        },
+        {
+            "nom": "exposant",
+            "entree": "{\"montant\":1e2}",
+            "refuse": true
+        },
+        {
+            "nom": "entier_trop_grand",
+            "entree": "{\"n\":9007199254740992}",
+            "refuse": true
+        },
+        {
+            "nom": "entier_trop_petit",
+            "entree": "{\"n\":-9007199254740992}",
+            "refuse": true
+        }
+    ]
+}

@@ -1,0 +1,8 @@
+{
+    "produit_uuid": "c0000000-0000-4000-8000-000000000002",
+    "nom": "Carton de 12",
+    "coefficient": "12.000000",
+    "prix": 4800,
+    "defaut": false,
+    "actif": true
+}

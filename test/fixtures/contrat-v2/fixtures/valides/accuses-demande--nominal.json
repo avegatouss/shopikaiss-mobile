@@ -1,0 +1,10 @@
+{
+    "curseur_applique": "c-000118",
+    "version_politiques_appliquee": "12",
+    "file": {
+        "non_envoyees": 0,
+        "envoyees_non_reconciliees": 1,
+        "a_arbitrer": 1,
+        "plus_ancienne_non_envoyee_le": null
+    }
+}

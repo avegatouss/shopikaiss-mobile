@@ -1,0 +1,8 @@
+{
+    "erreur": {
+        "code": "trop_de_requetes",
+        "message": "Trop de requêtes.",
+        "reessayer_apres_secondes": 30,
+        "details": null
+    }
+}

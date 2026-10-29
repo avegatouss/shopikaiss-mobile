@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "changements.json",
+  "title": "GET /changements : page ordonnée du journal, par groupes atomiques, avec le curseur suivant.",
+  "$defs": {
+    "page": {
+      "type": "object",
+      "required": ["version", "curseur_suivant", "suite", "groupes"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": 2 },
+        "curseur_suivant": { "$ref": "commun.json#/$defs/curseur", "description": "À enregistrer dans la MÊME transaction locale que l'application des groupes de la page." },
+        "suite": { "type": "boolean", "description": "Vrai : d'autres changements sont déjà disponibles, redemander immédiatement." },
+        "groupes": { "type": "array", "minItems": 0, "maxItems": 500, "items": { "$ref": "#/$defs/groupe" } }
+      }
+    },
+    "groupe": {
+      "description": "Changements produits par une même transaction serveur : appliqués tous ou aucun. Un groupe n'est jamais coupé entre deux pages.",
+      "type": "object",
+      "required": ["uuid", "changements"],
+      "additionalProperties": false,
+      "properties": {
+        "uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "changements": { "type": "array", "minItems": 1, "maxItems": 1000, "items": { "$ref": "#/$defs/changement" } }
+      }
+    },
+    "changement": {
+      "description": "Enveloppe commune ; donnees est validé selon type (donnees.json). Type inconnu : si critique, arrêter l'avancement sur ce groupe et demander une mise à jour ; sinon l'ignorer.",
+      "type": "object",
+      "required": ["type", "critique", "cle", "revision", "action", "donnees"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "$ref": "commun.json#/$defs/code" },
+        "critique": { "type": "boolean" },
+        "cle": {
+          "description": "Clé de l'entité : son UUID, ou une clé composée (« <produit_uuid>:<lot_uuid> » pour un stock par lot, « operateur:<id> »).",
+          "type": "string", "minLength": 1, "maxLength": 120, "pattern": "^[A-Za-z0-9:._-]+$"
+        },
+        "revision": { "$ref": "commun.json#/$defs/version", "description": "Révision de l'entité : ignorer un changement de révision inférieure ou égale à celle appliquée." },
+        "action": { "enum": ["upsert", "suppression"] },
+        "donnees": { "type": ["object", "null"], "description": "null pour une suppression (tombstone)." },
+        "operations_couvertes": {
+          "description": "stock.projection : opérations du terminal dont TOUS les mouvements pour cette clé sont inclus dans la projection.",
+          "type": "array", "maxItems": 2000, "uniqueItems": true, "items": { "$ref": "commun.json#/$defs/uuid" }
+        },
+        "mouvements_couverts": {
+          "description": "stock.projection : mouvements individuels inclus, quand une opération n'est couverte qu'en partie pour cette clé.",
+          "type": "array", "maxItems": 2000, "uniqueItems": true, "items": { "$ref": "commun.json#/$defs/uuid" }
+        }
+      }
+    }
+  }
+}

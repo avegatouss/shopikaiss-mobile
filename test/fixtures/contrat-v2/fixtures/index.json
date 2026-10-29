@@ -1,0 +1,271 @@
+{
+    "profil_schemas": "SK-SCHEMA-1",
+    "profil_canonique": "SK-JCS-1",
+    "fixtures": [
+        {
+            "fichier": "invalides/appairage-demande--plateforme-ios.json",
+            "schema": "appairage.json#/$defs/demande",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "invalides/changements-page--curseur-avec-espace.json",
+            "schema": "changements.json#/$defs/page",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/changements-page--groupe-vide.json",
+            "schema": "changements.json#/$defs/page",
+            "valide": false,
+            "erreur_attendue": "au moins 1"
+        },
+        {
+            "fichier": "invalides/changements-page--version-1.json",
+            "schema": "changements.json#/$defs/page",
+            "valide": false,
+            "erreur_attendue": "valeur attendue 2"
+        },
+        {
+            "fichier": "invalides/donnees--politique-cle-sans-domaine.json",
+            "schema": "donnees.json#/$defs/politique",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/donnees--stock-quantite-nombre.json",
+            "schema": "donnees.json#/$defs/stock.projection",
+            "valide": false,
+            "erreur_attendue": "type attendu string"
+        },
+        {
+            "fichier": "invalides/erreur--code-inconnu.json",
+            "schema": "erreur.json",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "invalides/instantane-manifeste--sans-couverture.json",
+            "schema": "instantanes.json#/$defs/manifeste",
+            "valide": false,
+            "erreur_attendue": "couverture : obligatoire"
+        },
+        {
+            "fichier": "invalides/instantane-page--empreinte-ne-correspond-pas.json",
+            "schema": "instantanes.json#/$defs/page",
+            "valide": false,
+            "controle": "empreinte_page"
+        },
+        {
+            "fichier": "invalides/operation--empreinte-ne-correspond-pas.json",
+            "schema": "operation.json",
+            "valide": false,
+            "controle": "empreinte"
+        },
+        {
+            "fichier": "invalides/operation--heure-sans-fuseau.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/operation--montant-negatif.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "minimum 0"
+        },
+        {
+            "fichier": "invalides/operation--operateur-numerique.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "type attendu string"
+        },
+        {
+            "fichier": "invalides/operation--propriete-inconnue.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "propriété inconnue"
+        },
+        {
+            "fichier": "invalides/operation--quantite-sans-six-decimales.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/operation--type-reserve-retour.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "exactement une variante"
+        },
+        {
+            "fichier": "invalides/operation--uuid-majuscules.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/operation--vente-sans-paiement.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "au moins 1"
+        },
+        {
+            "fichier": "invalides/operations-demande--lot-de-51.json",
+            "schema": "operations.json#/$defs/demande",
+            "valide": false,
+            "erreur_attendue": "au plus 50"
+        },
+        {
+            "fichier": "invalides/operations-demande-etats--uuid-en-double.json",
+            "schema": "operations.json#/$defs/demande_etats",
+            "valide": false,
+            "erreur_attendue": "éléments en double"
+        },
+        {
+            "fichier": "valides/accuses-demande--nominal.json",
+            "schema": "accuses.json#/$defs/demande",
+            "valide": true
+        },
+        {
+            "fichier": "valides/appairage-demande--android.json",
+            "schema": "appairage.json#/$defs/demande",
+            "valide": true
+        },
+        {
+            "fichier": "valides/appairage-reponse--nominal.json",
+            "schema": "appairage.json#/$defs/reponse",
+            "valide": true
+        },
+        {
+            "fichier": "valides/changements-page--stock-couverture-et-catalogue.json",
+            "schema": "changements.json#/$defs/page",
+            "valide": true
+        },
+        {
+            "fichier": "valides/changements-page--vide.json",
+            "schema": "changements.json#/$defs/page",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--autorisation.json",
+            "schema": "donnees.json#/$defs/autorisation",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--code_barre.json",
+            "schema": "donnees.json#/$defs/code_barre",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--conditionnement.json",
+            "schema": "donnees.json#/$defs/conditionnement",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--moyen_paiement.json",
+            "schema": "donnees.json#/$defs/moyen_paiement",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--operateur.json",
+            "schema": "donnees.json#/$defs/operateur",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--operation_etat.json",
+            "schema": "donnees.json#/$defs/operation_etat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--politique.json",
+            "schema": "donnees.json#/$defs/politique",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--produit.json",
+            "schema": "donnees.json#/$defs/produit",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--revocation.json",
+            "schema": "donnees.json#/$defs/revocation",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--session.json",
+            "schema": "donnees.json#/$defs/session",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--stock.projection.json",
+            "schema": "donnees.json#/$defs/stock.projection",
+            "valide": true
+        },
+        {
+            "fichier": "valides/erreur--curseur-expire.json",
+            "schema": "erreur.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/erreur--trop-de-requetes.json",
+            "schema": "erreur.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/etat--nominal.json",
+            "schema": "etat.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/instantane-demande--premier-demarrage.json",
+            "schema": "instantanes.json#/$defs/demande",
+            "valide": true
+        },
+        {
+            "fichier": "valides/instantane-manifeste--une-page.json",
+            "schema": "instantanes.json#/$defs/manifeste",
+            "valide": true
+        },
+        {
+            "fichier": "valides/instantane-page--1.json",
+            "schema": "instantanes.json#/$defs/page",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--ouverture-session.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--vente-conditionnement-remise-mixte.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--vente-especes.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-demande--lot.json",
+            "schema": "operations.json#/$defs/demande",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-demande-etats--nominal.json",
+            "schema": "operations.json#/$defs/demande_etats",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-reponse--etats-varies.json",
+            "schema": "operations.json#/$defs/reponse",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-reponse-etats--inconnue.json",
+            "schema": "operations.json#/$defs/reponse_etats",
+            "valide": true
+        }
+    ]
+}
