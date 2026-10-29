@@ -8,15 +8,23 @@ import '../ipc/protocol.dart';
 /// Presentation only. The engine owns totals, permissions and durable drafts.
 class WindowsRegisterController extends ChangeNotifier {
   WindowsRegisterController(this.host) {
-    _subscription = host.events.listen((event) {
-      if (event['name'] == 'disconnected') {
-        ready = false;
-        message = 'Le moteur local est arrêté. Les ventes restent à vérifier.';
-        notifyListeners();
-      } else if (event['name'] == 'committed') {
-        unawaited(refresh());
-      }
-    });
+    _subscription = host.events.listen(
+      (event) {
+        if (_disposed) return;
+        if (event['name'] == 'disconnected') {
+          _markDisconnected();
+        } else if (event['name'] == 'connected') {
+          _transportAvailable = true;
+          ready = false;
+          if (uncertainOperation == null) message = null;
+          unawaited(refresh());
+        } else if (event['name'] == 'committed') {
+          unawaited(refresh());
+        }
+      },
+      onError: (Object _) => _markDisconnected(),
+      onDone: _markDisconnected,
+    );
   }
   final WindowsHost host;
   late final StreamSubscription<Map<String, dynamic>> _subscription;
@@ -24,6 +32,7 @@ class WindowsRegisterController extends ChangeNotifier {
   bool ready = false;
   bool busy = false;
   bool _disposed = false;
+  bool _transportAvailable = true;
   int _refreshGeneration = 0;
   String? message;
   String? uncertainOperation;
@@ -37,6 +46,8 @@ class WindowsRegisterController extends ChangeNotifier {
           .whereType<Map<String, dynamic>>()
           .toList();
   bool get canPay =>
+      !_disposed &&
+      _transportAvailable &&
       ready &&
       !busy &&
       uncertainOperation == null &&
@@ -44,6 +55,7 @@ class WindowsRegisterController extends ChangeNotifier {
       view['can_pay'] == true;
 
   Future<void> refresh() async {
+    if (_disposed || !_transportAvailable) return;
     final generation = ++_refreshGeneration;
     try {
       final next = await host.call(HostCommand.view);
@@ -67,6 +79,15 @@ class WindowsRegisterController extends ChangeNotifier {
       message = 'Le moteur local doit être vérifié.';
     }
     if (!_disposed) notifyListeners();
+  }
+
+  void _markDisconnected() {
+    if (_disposed) return;
+    _transportAvailable = false;
+    ++_refreshGeneration;
+    ready = false;
+    message = 'Le moteur local est arrêté. Les ventes restent à vérifier.';
+    notifyListeners();
   }
 
   Future<void> command(

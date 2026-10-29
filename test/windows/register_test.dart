@@ -12,6 +12,7 @@ class _Host implements WindowsHost {
   String? committedId;
   bool loseReply = false;
   bool reconciled = false;
+  Completer<Map<String, dynamic>>? pendingView;
   final Map<String, dynamic> state = {
     'schema': 1,
     'revision': 1,
@@ -42,6 +43,9 @@ class _Host implements WindowsHost {
     String? operationId,
   }) async {
     calls.add(command);
+    if (command == HostCommand.view && pendingView != null) {
+      return pendingView!.future;
+    }
     if (command == HostCommand.commitSale) {
       committedId = operationId;
       if (loseReply) {
@@ -72,6 +76,65 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  test('late view after disconnection cannot enable payment', () async {
+    final host = _Host()..pendingView = Completer<Map<String, dynamic>>();
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    final pending = c.refresh();
+    host.changes.add({'name': 'disconnected'});
+    await Future<void>.delayed(Duration.zero);
+    host.pendingView!.complete(Map.of(host.state));
+    await pending;
+    expect(c.ready, false);
+    expect(c.canPay, false);
+    expect(c.view, isEmpty);
+    await c.commitSale();
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+    host.pendingView = null;
+    host.changes.add({'name': 'connected'});
+    await Future<void>.delayed(Duration.zero);
+    expect(c.ready, true);
+    expect(c.canPay, true);
+  });
+
+  test('reconnection reloads view but preserves an uncertain sale', () async {
+    final host = _Host()..loseReply = true;
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await c.refresh();
+    await c.commitSale();
+    final operation = c.uncertainOperation;
+    expect(operation, isNotNull);
+    host.changes.add({'name': 'disconnected'});
+    host.changes.add({'name': 'connected'});
+    await Future<void>.delayed(Duration.zero);
+    expect(c.ready, true);
+    expect(c.uncertainOperation, operation);
+    expect(c.canPay, false);
+    await c.commitSale();
+    expect(
+      host.calls.where((call) => call == HostCommand.commitSale).length,
+      1,
+    );
+  });
+
+  test('closed event stream disables payment', () async {
+    final host = _Host();
+    final c = WindowsRegisterController(host);
+    addTearDown(c.dispose);
+    await c.refresh();
+    expect(c.canPay, true);
+    await host.close();
+    expect(c.ready, false);
+    expect(c.canPay, false);
+  });
+
   test(
     'unknown sale locks further edits and only reconciles the same UUID',
     () async {

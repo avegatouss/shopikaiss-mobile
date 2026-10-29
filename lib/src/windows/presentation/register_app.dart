@@ -115,7 +115,9 @@ class _RegisterState extends State<_Register> {
                 size: 18,
               ),
               label: Text(
-                c.view['sync_label'] as String? ?? 'Moteur local indisponible',
+                c.ready
+                    ? c.view['sync_label'] as String? ?? 'Moteur local prêt'
+                    : 'Moteur local indisponible',
               ),
             ),
             const SizedBox(width: 16),

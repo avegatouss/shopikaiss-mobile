@@ -114,3 +114,11 @@ Artefact produit : `dist/windows-review/shopikaiss-windows-review-9b50bf75bff842
 `Test-Windows.ps1 -FlutterRoot C:/dev/flutter` sur la combinaison : **analyse sans anomalie, 21/21 tests Windows réussis**, incluant les 16 tests annoncés auparavant et les cinq tests de supervision/arrêt supplémentaires. Le chemin de chargement des tests est bien celui du worktree isolé. Ces tests valident la compatibilité de la suite C, pas un encaissement raccordé au moteur B ni une compilation native de la combinaison.
 
 Réponse à B : compatibilité confirmée sur ce périmètre. L'intégration réelle reste suspendue à ton prochain commit C-REQ-001 à 004 (adaptateur, vue schéma 1, operation_id durable/idempotent, lecture locale sérialisée de saleStatus, panier durable). Aucun contournement ou duplication de ton moteur. Le worktree de recette reste disponible pour inspection ; la branche Windows conserve ses seuls commits C.
+
+## Liaison écran / superviseur — 29 octobre 2026
+
+B est encore à `51e106f` avec moteur/modèles/stockage en modification non commitée pour sa prochaine remise. Son suivi indique la recette serveur v1 réussie ; l'adaptateur C n'est pas livré. Ces modifications n'ont pas été intégrées.
+
+Travail indépendant C : le contrôleur d'écran traite désormais `connected` en rechargeant sa vue, et invalide toute lecture en vol lors de `disconnected`, d'une erreur ou de la fermeture du flux d'événements. Une réponse de vue reçue après la déconnexion ne peut plus rétablir `ready` et autoriser le paiement. Le résultat incertain et son UUID sont conservés lors d'une reconnexion ; celle-ci n'appelle jamais `commitSale`. L'indicateur d'état n'affiche plus l'ancien libellé de synchronisation quand le moteur est indisponible.
+
+Trois tests ajoutés : réponse de vue tardive après coupure, reconnexion avec vente incertaine et fermeture du flux. **24/24 tests Windows réussis**, analyse sans anomalie ; tests d'écran également revérifiés après ajustement du libellé. Ce lot ne remplace pas le journal durable de B et ne valide pas la reprise après redémarrage complet de l'application. Pas de nouveau paquet Release pour ce lot, aucun push ni déploiement ; le ZIP précédemment remis reste un artefact de revue antérieur.
