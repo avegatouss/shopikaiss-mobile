@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "erreur.json",
+  "title": "Erreur de requête entière (v2). Les refus d'une opération isolée passent par son résultat, pas par cette erreur.",
+  "type": "object",
+  "required": ["erreur"],
+  "additionalProperties": false,
+  "properties": {
+    "erreur": {
+      "type": "object",
+      "required": ["code", "message"],
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "enum": [
+            "appareil_non_reconnu",
+            "appareil_revoque",
+            "protocole_non_supporte",
+            "politique_refusee",
+            "curseur_expire",
+            "instantane_expire",
+            "requete_invalide",
+            "corps_trop_grand",
+            "trop_de_requetes",
+            "indisponible"
+          ]
+        },
+        "message": { "$ref": "commun.json#/$defs/texte" },
+        "reessayer_apres_secondes": { "type": ["integer", "null"], "minimum": 1, "maximum": 86400 },
+        "details": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

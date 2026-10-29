@@ -3,16 +3,16 @@ import 'dart:convert';
 import 'dart:isolate';
 
 import 'package:bcrypt/bcrypt.dart';
-import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import 'api.dart';
 import 'models.dart';
 import 'money.dart';
+import 'notifier.dart';
 import 'store.dart';
 
 /// Vérifie un PIN contre l'empreinte bcrypt du serveur (Laravel écrit `$2y$`, équivalent de `$2a$`).
-Future<bool> verifyPinHash(String pin, String hash) => compute(_checkPin, [pin, hash]);
+Future<bool> verifyPinHash(String pin, String hash) => Isolate.run(() => _checkPin([pin, hash]));
 
 bool _checkPin(List<String> args) {
   final hash = args[1].startsWith(r'$2y$') ? '\$2a\$${args[1].substring(4)}' : args[1];
@@ -55,7 +55,7 @@ class OfflineRefusal implements Exception {
 /// Chaque terminal est autonome : son appairage, sa session de caisse, sa série de tickets (préfixe du terminal +
 /// séquence) et sa file. Plusieurs terminaux d'une même boutique peuvent donc vendre hors ligne en même temps sans se
 /// coordonner : le serveur intègre chaque vente telle qu'encaissée (stock négatif = anomalie à traiter, jamais un refus).
-class OfflineEngine extends ChangeNotifier {
+class OfflineEngine extends EngineNotifier {
   OfflineEngine({
     required this.store,
     required this.transport,
@@ -99,6 +99,10 @@ class OfflineEngine extends ChangeNotifier {
   bool _syncing = false;
 
   bool get paired => _token != null;
+
+  /// Terminal pilote de la vente locale permanente (activé côté serveur, terminal par terminal) : la caisse locale est
+  /// la caisse principale, connectée ou non ; la caisse web reste accessible à la demande.
+  bool get permanentLocal => paired && (snapshot?.rules.permanentLocal ?? false);
   bool get syncing => _syncing;
   DateTime get now => _clock();
 
@@ -204,23 +208,33 @@ class OfflineEngine extends ChangeNotifier {
   }
 
   /// Télécharge le référentiel. Renvoie le message d'erreur, ou null.
+  ///
+  /// Le stock du référentiel reflète les opérations intégrées AVANT sa demande : leurs mouvements locaux sont couverts
+  /// dans la même transaction que son enregistrement. Une vente intégrée après la demande, à arbitrer ou en attente
+  /// garde sa consommation locale (jamais de stock compté deux fois, ni remonté par un simple accusé de réception).
   Future<String?> refreshSnapshot() async {
     final base = apiBase;
     final token = _token;
     if (base == null || token == null) return 'Application non appairée.';
-    final response = await transport.snapshot(base, token);
+    final requestedAt = now;
+    final response = await transport.snapshot(base, token, sinceSequence: await store.oldestUncoveredSequence());
     _handleAuth(response);
     if (!response.ok) return response.message;
-    snapshot = Snapshot(response.body);
-    snapshotAt = now;
+    final body = response.body;
+    final json = body.length > 200 ? await Isolate.run(() => jsonEncode(body)) : jsonEncode(body);
+    final receivedAt = now;
+    final received = Snapshot(body);
+    // Serveur récent : couverture exacte, lue dans la même transaction que le stock (B-REQ-002). Sinon, ordre demande /
+    // sort définitif.
+    await store.saveSnapshot(json: json, at: receivedAt, coverResolvedBefore: requestedAt, coverage: received.coverage);
+    snapshot = received;
+    snapshotAt = receivedAt;
     // Le serveur dit si une session est ouverte : une ouverture hors ligne déjà intégrée y figure.
     if (snapshot!.sessionOpen || pendingCount == 0) {
       localSessionOpen = false;
       await store.write(StoreKeys.localSession, null);
     }
-    final body = response.body;
-    await store.write(StoreKeys.snapshot, body.length > 200 ? await Isolate.run(() => jsonEncode(body)) : jsonEncode(body));
-    await store.write(StoreKeys.snapshotAt, snapshotAt!.toUtc().toIso8601String());
+    await _count();
     await _contact();
     notifyListeners();
     return null;
@@ -279,6 +293,7 @@ class OfflineEngine extends ChangeNotifier {
           await store.update(operation);
         }
       }
+      await _checkArbitration(base, token);
       await store.purgeSent(const Duration(days: 30));
       return tally.report(
         message: tally.deferred > 0
@@ -298,6 +313,50 @@ class OfflineEngine extends ChangeNotifier {
 
   static bool _serverError(ApiResponse response) => !response.unreachable && response.status >= 500;
 
+  // Jamais de renvoi des ventes « à arbitrer » pour connaître leur sort : en v1, un renvoi identique RELANCE leur
+  // intégration (équivalent de « Rejouer », test serveur RenvoiIdentiqueV1Test). L'arbitrage reste une décision de la
+  // boutique ; le terminal lit seulement leur état (`POST /etats`, B-REQ-004).
+
+  /// Délai minimal entre deux lectures de l'état des ventes à arbitrer (la boutique arbitre à la main).
+  static const arbitrationCheckInterval = Duration(minutes: 5);
+  DateTime? _arbitrationCheckedAt;
+
+  /// Serveur antérieur sans `POST /etats` : pas de nouvelle tentative avant redémarrage.
+  bool _statesUnsupported = false;
+
+  /// Lit l'état des ventes à arbitrer (200 au plus), sans les soumettre. `inconnue` et tout autre statut sont ignorés :
+  /// une opération déjà reçue ne devient jamais « refusée » par cette lecture.
+  Future<void> _checkArbitration(String base, String token) async {
+    if (_statesUnsupported) return;
+    final last = _arbitrationCheckedAt;
+    if (last != null && now.difference(last) < arbitrationCheckInterval) return;
+    final waiting = await store.awaitingArbitration(limit: 200);
+    if (waiting.isEmpty) return;
+    _arbitrationCheckedAt = now;
+    final response = await transport.operationStates(base, token, [for (final o in waiting) o.uuid]);
+    _handleAuth(response);
+    if (response.status == 404 || response.status == 405) {
+      _statesUnsupported = true;
+      return;
+    }
+    if (!response.ok) return;
+    final states = <String, Map<String, dynamic>>{};
+    for (final r in (response.body['etats'] as List? ?? const [])) {
+      if (r is Map && r['uuid'] is String) states[r['uuid'] as String] = Map<String, dynamic>.from(r);
+    }
+    for (final operation in waiting) {
+      final state = states[operation.uuid];
+      final status = state?['statut'] as String?;
+      if (state == null || status == operation.serverStatus || !OfflineOperation.isFinalServerStatus(status)) continue;
+      operation
+        ..serverStatus = status
+        ..serverNumber = state['numero'] as String? ?? operation.serverNumber
+        ..message = state['message'] as String?
+        ..resolvedAt = now;
+      await store.update(operation);
+    }
+  }
+
   /// Applique les résultats d'un envoi. Faux si le serveur n'a répondu pour aucune opération du lot.
   Future<bool> _apply(List<OfflineOperation> batch, ApiResponse response, _Tally tally) async {
     final results = <String, Map<String, dynamic>>{};
@@ -315,9 +374,14 @@ class OfflineEngine extends ChangeNotifier {
         ..serverStatus = status
         ..serverNumber = result['numero'] as String?
         ..message = result['message'] as String?
-        ..status = status == 'refusee' ? OperationStatus.refused : OperationStatus.sent;
+        ..status = status == 'refusee' ? OperationStatus.refused : OperationStatus.sent
+        ..resolvedAt = OfflineOperation.isFinalServerStatus(status) ? now : null;
       if (status == 'integree') tally.integrated++;
-      if (status == 'a_arbitrer') tally.pending++;
+      if (status == 'a_arbitrer') {
+        tally.pending++;
+        // Elle vient d'être mise à arbitrer : sa première lecture d'état attend l'intervalle (arbitrage à la main).
+        _arbitrationCheckedAt = now;
+      }
       if (status == 'refusee') tally.refused++;
       await store.update(operation);
     }
@@ -424,20 +488,72 @@ class OfflineEngine extends ChangeNotifier {
   }
 
   /// Ouverture de session hors ligne (fond compté sur le terminal), rejouée par le serveur.
-  Future<OfflineOperation> openSession(int float, Operator operator) async {
+  Future<OfflineOperation> openSession(int float, Operator operator) => _serialized(() async {
     final s = _requireSelling(allowWithoutSession: true);
     if (!s.rules.sessionOpening) throw const OfflineRefusal('L’ouverture de session hors ligne n’est pas autorisée : ouvrez-la en ligne.');
     if (sessionOpen) throw const OfflineRefusal('Une session est déjà ouverte sur ce terminal.');
     if (float < 0) throw const OfflineRefusal('Fond de caisse invalide.');
-    final operation = await _append('ouverture_session', null, operator.id, {'fond': float});
+    final operation = await _append('ouverture_session', operator.id, {'fond': float});
     localSessionOpen = true;
     await store.write(StoreKeys.localSession, '1');
     notifyListeners();
     return operation;
-  }
+  });
 
   /// Enregistre une vente hors ligne (avant l'impression du ticket). Lève [OfflineRefusal] si une règle s'y oppose.
-  Future<OfflineOperation> recordSale(List<CartLine> lines, List<CartPayment> payments, Operator operator) async {
+  ///
+  /// Vente, mouvements de stock (conversion du conditionnement figée) et consommation du panier [draftUuid] sont écrits
+  /// dans une seule transaction, la séquence réservée dans cette transaction. Deux encaissements simultanés sont
+  /// exécutés l'un après l'autre ; un second encaissement du même panier lève [OfflineRefusal] sans rien écrire.
+  ///
+  /// [operationUuid] : identifiant stable choisi par l'écran AVANT l'encaissement. Rejouer la même commande (réponse
+  /// perdue, hôte redémarré) rend la vente déjà enregistrée, sans en créer une seconde.
+  Future<OfflineOperation> recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator, {
+    String? draftUuid,
+    String? operationUuid,
+  }) => _serialized(() async {
+    if (operationUuid != null) {
+      final existing = await store.operation(operationUuid);
+      if (existing != null) return _sameSale(existing);
+    }
+    try {
+      return await _recordSale(lines, payments, operator, draftUuid, operationUuid);
+    } on OperationAlreadyRecorded catch (e) {
+      // Rejeu de la MÊME commande (même identifiant d'opération) : la vente existe déjà, on la rend. Sans identifiant,
+      // ou avec un autre, c'est un second encaissement du panier : refusé (pas de second ticket « vente réussie »).
+      if (operationUuid != null && e.operation.uuid == operationUuid) return _sameSale(e.operation);
+      throw OfflineRefusal('Ce panier a déjà été encaissé (vente ${e.operation.number ?? e.operation.uuid}).');
+    }
+  });
+
+  OfflineOperation _sameSale(OfflineOperation existing) {
+    if (!existing.isSale) throw OfflineRefusal('Identifiant déjà utilisé par une autre opération (${existing.type}).');
+    return existing;
+  }
+
+  /// État local d'une vente, sans réseau ni renvoi. Exécuté dans la file d'écriture : un encaissement en cours est
+  /// terminé avant la lecture, donc « absente » est une réponse définitive pour ce moteur.
+  Future<OfflineOperation?> saleStatus(String operationUuid) => _serialized(() => store.operation(operationUuid));
+
+  /// Conserve le panier en cours (révision croissante). Faux si une révision plus récente est conservée ou si le
+  /// panier est déjà encaissé.
+  Future<bool> saveDraft(String uuid, int revision, Map<String, dynamic> content) =>
+      _serialized(() => store.saveDraft(uuid, revision, content));
+
+  Future<List<StoredDraft>> openDrafts() => store.openDrafts();
+
+  Future<void> deleteDraft(String uuid) => _serialized(() => store.deleteDraft(uuid));
+
+  Future<OfflineOperation> _recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator,
+    String? draftUuid,
+    String? operationUuid,
+  ) async {
     final s = _requireSelling();
     if (lines.isEmpty) throw const OfflineRefusal('Le panier est vide.');
     if (lines.length > 100) throw const OfflineRefusal('Au plus 100 lignes par vente.');
@@ -464,32 +580,36 @@ class OfflineEngine extends ChangeNotifier {
     if (paid != totals.payable) {
       throw OfflineRefusal('La somme des paiements (${formatFcfa(paid)}) ne correspond pas au montant à payer (${formatFcfa(totals.payable)}).');
     }
-    final sequence = await _nextSequence();
-    final number = '${s.terminal.ticketPrefix}-${sequence.toString().padLeft(6, '0')}';
-    return _append('vente', number, operator.id, {
+    // Coefficients des conditionnements tels qu'encaissés : le mouvement de stock ne relira jamais le catalogue.
+    final coefficients = <(int, int), BigInt>{
+      for (final l in lines)
+        if (l.packaging != null) (l.product.id, l.packaging!.id): parseMicros(l.packaging!.coefficient) ?? BigInt.from(1000000),
+    };
+    final content = {
       'lignes': [for (final l in lines) l.toPayload()],
       'paiements': [for (final p in payments) p.toPayload()],
       'total': totals.payable,
-    }, sequence: sequence);
+    };
+    try {
+      return await _append(
+        'vente',
+        operator.id,
+        content,
+        number: (sequence) => '${s.terminal.ticketPrefix}-${sequence.toString().padLeft(6, '0')}',
+        movements: (operation) => saleMovements(operation, (productId, packagingId) => packagingId == null ? null : coefficients[(productId, packagingId)]),
+        draftUuid: draftUuid,
+        uuid: operationUuid,
+      );
+    } on DraftAlreadyConsumed catch (e) {
+      throw OfflineRefusal('Ce panier a déjà été encaissé : retrouvez la vente dans les opérations hors ligne (${e.operationUuid}).');
+    }
   }
 
-  /// Quantité vendue hors ligne d'un produit depuis le référentiel (pour un stock indicatif à jour).
+  /// Quantité vendue hors ligne par produit, encore absente du stock du référentiel (pour un stock indicatif à jour) :
+  /// mouvements locaux non couverts, en unité de base, convertis comme à l'encaissement.
   Future<Map<int, BigInt>> soldSinceSnapshot() async {
-    final sold = <int, BigInt>{};
-    final s = snapshot;
-    if (s == null) return sold;
-    for (final operation in await store.operations(status: OperationStatus.pending)) {
-      if (!operation.isSale) continue;
-      for (final line in (operation.content['lignes'] as List)) {
-        final m = line as Map;
-        final product = s.products.where((p) => p.id == m['produit_id']).firstOrNull;
-        final coefficient = parseMicros(product?.packaging((m['conditionnement_id'] as num?)?.toInt())?.coefficient ?? '1') ?? BigInt.from(1000000);
-        final quantity = parseMicros(m['quantite'] as String) ?? BigInt.zero;
-        final id = (m['produit_id'] as num).toInt();
-        sold[id] = (sold[id] ?? BigInt.zero) + quantity * coefficient ~/ BigInt.from(1000000);
-      }
-    }
-    return sold;
+    final uncovered = await store.uncoveredStock();
+    return {for (final e in uncovered.entries) e.key: BigInt.from(-e.value)};
   }
 
   Future<List<OfflineOperation>> history() => store.operations();
@@ -501,23 +621,44 @@ class OfflineEngine extends ChangeNotifier {
     return snapshot!;
   }
 
-  Future<int> _nextSequence() async {
-    final stored = int.tryParse(await store.read(StoreKeys.lastSequence) ?? '') ?? 0;
-    final fromServer = snapshot?.lastSequence ?? 0;
-    return (stored > fromServer ? stored : fromServer) + 1;
+  /// File d'écriture locale : une commande d'encaissement à la fois (double clic, deux écrans), dans l'ordre d'arrivée.
+  Future<void> _writeQueue = Future.value();
+
+  Future<T> _serialized<T>(Future<T> Function() action) {
+    final result = _writeQueue.then((_) => action());
+    _writeQueue = result.then<void>((_) {}, onError: (_) {});
+    return result;
   }
 
-  Future<OfflineOperation> _append(String type, String? number, int operatorId, Map<String, dynamic> content, {int? sequence}) async {
-    final operation = OfflineOperation(
-      uuid: _newUuid(),
-      sequence: sequence ?? await _nextSequence(),
-      type: type,
-      number: number,
-      date: now,
-      operatorId: operatorId,
-      content: content,
+  /// Écrit une opération ; sa séquence est réservée dans la transaction, au-dessus de celle connue du serveur.
+  Future<OfflineOperation> _append(
+    String type,
+    int operatorId,
+    Map<String, dynamic> content, {
+    String? Function(int sequence)? number,
+    List<StockMovement> Function(OfflineOperation operation)? movements,
+    String? draftUuid,
+    String? uuid,
+  }) async {
+    if (uuid != null && !RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$').hasMatch(uuid)) {
+      throw const OfflineRefusal('Identifiant de vente invalide (UUID en minuscules attendu).');
+    }
+    final id = uuid ?? _newUuid();
+    final date = now;
+    final operation = await store.appendAtomic(
+      sequenceFloor: snapshot?.lastSequence ?? 0,
+      build: (sequence) => OfflineOperation(
+        uuid: id,
+        sequence: sequence,
+        type: type,
+        number: number?.call(sequence),
+        date: date,
+        operatorId: operatorId,
+        content: content,
+      ),
+      movements: movements,
+      draftUuid: draftUuid,
     );
-    await store.append(operation);
     if (offlineSince == null) {
       offlineSince = now;
       await store.write(StoreKeys.offlineSince, offlineSince!.toUtc().toIso8601String());
@@ -527,11 +668,15 @@ class OfflineEngine extends ChangeNotifier {
     return operation;
   }
 
+  /// Ventes reçues par le serveur mais à arbitrer, d'après les dernières réponses reçues par ce terminal.
+  int localArbitrationCount = 0;
+
   Future<void> _count() async {
-    final pending = await store.operations(status: OperationStatus.pending);
-    pendingCount = pending.length;
-    pendingSales = pending.where((o) => o.isSale).length;
-    refusedCount = (await store.operations(status: OperationStatus.refused)).length;
+    final counts = await store.counts();
+    pendingCount = counts.pending;
+    pendingSales = counts.pendingSales;
+    refusedCount = counts.refused;
+    localArbitrationCount = counts.arbitration;
   }
 
   Future<void> _contact() async {

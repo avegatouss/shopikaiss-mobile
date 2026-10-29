@@ -1,0 +1,3 @@
+tags:
+  # Essais contre le serveur d'intégration de la session A (base isolée) : ignorés sans SK_CODE.
+  integration:

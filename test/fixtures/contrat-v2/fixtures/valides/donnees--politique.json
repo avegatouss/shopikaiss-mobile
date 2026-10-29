@@ -1,0 +1,6 @@
+{
+    "cle_politique": "prix.validite_panier_minutes",
+    "valeur": 30,
+    "source": "defaut",
+    "verrouillee": false
+}

@@ -1,0 +1,9 @@
+{
+    "nom": "Riz parfumé 1 kg",
+    "reference": "RIZ1",
+    "categorie": "Épicerie",
+    "prix": 1000,
+    "stock_illimite": false,
+    "actif": true,
+    "vente_locale": true
+}

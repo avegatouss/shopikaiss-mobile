@@ -1,0 +1,9 @@
+{
+    "operateur_id": "7",
+    "nom": "Awa Koné",
+    "pin_empreinte": "$2y$12$abcdefghijklmnopqrstuuJ1Q2w3E4r5T6y7U8i9O0pAaSsDdFfGg",
+    "droits": [
+        "vente",
+        "ouverture_session"
+    ]
+}

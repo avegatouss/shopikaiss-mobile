@@ -48,6 +48,9 @@ class _CaissePageState extends State<CaissePage> {
   int _missedProbes = 0;
   bool _offlineShown = false;
 
+  /// Terminal pilote revenu volontairement à la caisse web : la caisse locale ne se rouvre pas d'elle-même.
+  bool _stayOnWeb = false;
+
   TerminalSession get _session => widget.session;
   AppSettings get _settings => _session.settings;
   OfflineEngine get _offline => _session.offline;
@@ -79,10 +82,15 @@ class _CaissePageState extends State<CaissePage> {
   /// Test de la boutique : en ligne, envoie la file et rafraîchit le catalogue ; injoignable deux fois, bascule.
   Future<void> _checkShop() async {
     if (_offlineShown || !_offline.paired) return;
+    // Terminal pilote de la vente locale permanente : la caisse locale est la caisse principale, réseau ou non.
+    if (_offline.permanentLocal && !_stayOnWeb && _offline.blockReason == null) {
+      await _openOffline();
+      return;
+    }
     final ok = await _offline.probe();
     if (ok) {
       _missedProbes = 0;
-      if (_offline.pendingCount > 0) await _offline.sync();
+      if (_offline.pendingCount > 0 || _offline.localArbitrationCount > 0) await _offline.sync();
       if (_offline.snapshotStale) await _offline.refreshSnapshot();
       return;
     }
@@ -113,6 +121,7 @@ class _CaissePageState extends State<CaissePage> {
     ));
     _offlineShown = false;
     _missedProbes = 0;
+    if (_offline.permanentLocal) _stayOnWeb = true;
     await _applyKeyboardBlock();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _reload();

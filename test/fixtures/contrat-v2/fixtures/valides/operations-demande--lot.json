@@ -1,0 +1,195 @@
+{
+    "operations": [
+        {
+            "uuid": "a0000000-0000-4000-8000-000000000003",
+            "type": "ouverture_session",
+            "appareil": {
+                "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+                "epoque": 1
+            },
+            "sequence": 41,
+            "cree_le": "2026-10-29T08:00:00Z",
+            "operateur_id": "7",
+            "versions": {
+                "politiques": "12",
+                "calcul": "1",
+                "curseur_catalogue": "c-000100"
+            },
+            "empreinte": "5daa47ba919c946206b23ff804d9e8af0a6d2c62418cb8d3ac1a0527a2d664cd",
+            "contenu": {
+                "fond": 25000
+            }
+        },
+        {
+            "uuid": "a0000000-0000-4000-8000-000000000001",
+            "type": "vente",
+            "appareil": {
+                "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+                "epoque": 1
+            },
+            "sequence": 42,
+            "cree_le": "2026-10-29T10:15:00Z",
+            "operateur_id": "7",
+            "versions": {
+                "politiques": "12",
+                "calcul": "1",
+                "curseur_catalogue": "c-000105"
+            },
+            "empreinte": "8ef34a76c4f73ee70d2d0333ac5fa212594d1f5096188cfe05cd78a253f86ebe",
+            "contenu": {
+                "numero_local": "HL-001-000042",
+                "brouillon_uuid": "b0000000-0000-4000-8000-000000000001",
+                "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+                "client_uuid": null,
+                "tva": {
+                    "taux": "18.000000",
+                    "incluse": true
+                },
+                "lignes": [
+                    {
+                        "ligne_uuid": "e0000000-0000-4000-8000-000000000001",
+                        "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                        "conditionnement_uuid": null,
+                        "libelle": "Riz parfumé 1 kg",
+                        "quantite": "2.000000",
+                        "coefficient": "1.000000",
+                        "quantite_base": "2.000000",
+                        "prix_unitaire": 1000,
+                        "remise": 0,
+                        "total": 2000,
+                        "revision_prix": "3"
+                    }
+                ],
+                "remise_globale": 0,
+                "livraison": 0,
+                "totaux": {
+                    "brut": 2000,
+                    "remises": 0,
+                    "base_ht": 1695,
+                    "tva": 305,
+                    "a_payer": 2000
+                },
+                "paiements": [
+                    {
+                        "tentative_uuid": "7a000000-0000-4000-8000-000000000001",
+                        "moyen": "especes",
+                        "montant": 2000,
+                        "recu": 5000,
+                        "reference": null
+                    }
+                ],
+                "mouvements": [
+                    {
+                        "mouvement_uuid": "f0000000-0000-4000-8000-000000000001",
+                        "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                        "lot_uuid": null,
+                        "variation": "-2.000000"
+                    }
+                ],
+                "autorisations": []
+            }
+        },
+        {
+            "uuid": "a0000000-0000-4000-8000-000000000002",
+            "type": "vente",
+            "appareil": {
+                "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+                "epoque": 1
+            },
+            "sequence": 43,
+            "cree_le": "2026-10-29T10:20:30.250Z",
+            "operateur_id": "7",
+            "versions": {
+                "politiques": "12",
+                "calcul": "1",
+                "curseur_catalogue": null
+            },
+            "empreinte": "0d6b5f201d4ce83b0a2f4cc32d530cf6f87cf2cd1a12514ba88fc80f8cbc0b54",
+            "contenu": {
+                "numero_local": "HL-001-000043",
+                "brouillon_uuid": "b0000000-0000-4000-8000-000000000002",
+                "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+                "client_uuid": null,
+                "tva": {
+                    "taux": "0.000000",
+                    "incluse": true
+                },
+                "lignes": [
+                    {
+                        "ligne_uuid": "e0000000-0000-4000-8000-000000000002",
+                        "produit_uuid": "c0000000-0000-4000-8000-000000000002",
+                        "conditionnement_uuid": "d0000000-0000-4000-8000-000000000001",
+                        "libelle": "Eau minérale 1,5 L — carton de 12",
+                        "quantite": "1.000000",
+                        "coefficient": "12.000000",
+                        "quantite_base": "12.000000",
+                        "prix_unitaire": 4800,
+                        "remise": 300,
+                        "total": 4500,
+                        "revision_prix": "8"
+                    },
+                    {
+                        "ligne_uuid": "e0000000-0000-4000-8000-000000000003",
+                        "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                        "conditionnement_uuid": null,
+                        "libelle": "Riz parfumé 1 kg",
+                        "quantite": "3.000000",
+                        "coefficient": "1.000000",
+                        "quantite_base": "3.000000",
+                        "prix_unitaire": 1000,
+                        "remise": 0,
+                        "total": 3000,
+                        "revision_prix": "3"
+                    }
+                ],
+                "remise_globale": 0,
+                "livraison": 0,
+                "totaux": {
+                    "brut": 7800,
+                    "remises": 300,
+                    "base_ht": 7500,
+                    "tva": 0,
+                    "a_payer": 7500
+                },
+                "paiements": [
+                    {
+                        "tentative_uuid": "7a000000-0000-4000-8000-000000000002",
+                        "moyen": "especes",
+                        "montant": 5000,
+                        "recu": 5000,
+                        "reference": null
+                    },
+                    {
+                        "tentative_uuid": "7a000000-0000-4000-8000-000000000003",
+                        "moyen": "wave",
+                        "montant": 2500,
+                        "recu": null,
+                        "reference": "T-8F2K1"
+                    }
+                ],
+                "mouvements": [
+                    {
+                        "mouvement_uuid": "f0000000-0000-4000-8000-000000000002",
+                        "produit_uuid": "c0000000-0000-4000-8000-000000000002",
+                        "lot_uuid": null,
+                        "variation": "-12.000000"
+                    },
+                    {
+                        "mouvement_uuid": "f0000000-0000-4000-8000-000000000003",
+                        "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                        "lot_uuid": null,
+                        "variation": "-3.000000"
+                    }
+                ],
+                "autorisations": [
+                    {
+                        "type": "remise",
+                        "approbateur_id": "3",
+                        "motif": "Carton abîmé",
+                        "preuve": "jeton-autorisation-local-0001"
+                    }
+                ]
+            }
+        }
+    ]
+}

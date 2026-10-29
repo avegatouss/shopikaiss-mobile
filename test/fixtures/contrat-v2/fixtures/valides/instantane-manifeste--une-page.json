@@ -1,0 +1,27 @@
+{
+    "uuid": "1a000000-0000-4000-8000-000000000001",
+    "schema": "1",
+    "curseur_base": "c-000110",
+    "cree_le": "2026-10-29T07:00:00Z",
+    "expire_le": "2026-10-29T07:30:00Z",
+    "devise": "FCFA",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1"
+    },
+    "pages": {
+        "nombre": 1,
+        "empreintes": [
+            "f07feccca2f95910e5581385ff7ef4a2ead239d0574627e95ea0663d4a5c09f1"
+        ]
+    },
+    "couverture": {
+        "epoque": 1,
+        "depuis_sequence": 30,
+        "integrees": [
+            "a0000000-0000-4000-8000-000000000003"
+        ],
+        "recues_non_integrees": [],
+        "tronque": false
+    }
+}

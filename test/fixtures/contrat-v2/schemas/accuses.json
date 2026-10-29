@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "accuses.json",
+  "title": "POST /accuses : dernier curseur appliqué, politiques réellement appliquées, état minimal de la file (télémétrie). Réponse 204.",
+  "$defs": {
+    "demande": {
+      "type": "object",
+      "required": ["curseur_applique", "version_politiques_appliquee", "file"],
+      "additionalProperties": false,
+      "properties": {
+        "curseur_applique": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/curseur" }] },
+        "version_politiques_appliquee": { "$ref": "commun.json#/$defs/version" },
+        "file": {
+          "type": "object",
+          "required": ["non_envoyees", "envoyees_non_reconciliees", "a_arbitrer", "plus_ancienne_non_envoyee_le"],
+          "additionalProperties": false,
+          "properties": {
+            "non_envoyees": { "type": "integer", "minimum": 0 },
+            "envoyees_non_reconciliees": { "type": "integer", "minimum": 0 },
+            "a_arbitrer": { "type": "integer", "minimum": 0 },
+            "plus_ancienne_non_envoyee_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] }
+          }
+        }
+      }
+    }
+  }
+}

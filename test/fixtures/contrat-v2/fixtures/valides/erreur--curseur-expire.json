@@ -1,0 +1,8 @@
+{
+    "erreur": {
+        "code": "curseur_expire",
+        "message": "Curseur hors rétention : refaire un instantané.",
+        "reessayer_apres_secondes": null,
+        "details": null
+    }
+}

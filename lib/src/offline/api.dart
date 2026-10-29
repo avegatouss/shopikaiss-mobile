@@ -22,8 +22,12 @@ class ApiResponse {
 abstract class RegisterTransport {
   Future<ApiResponse> pair(String apiBase, String code, String model, String appVersion);
   Future<ApiResponse> status(String apiBase, String token);
-  Future<ApiResponse> snapshot(String apiBase, String token);
+  /// Référentiel ; [sinceSequence] borne la couverture du stock aux ventes de séquence ≥ N (B-REQ-002).
+  Future<ApiResponse> snapshot(String apiBase, String token, {int? sinceSequence});
   Future<ApiResponse> synchronize(String apiBase, String token, List<Map<String, dynamic>> operations);
+
+  /// État d'opérations déjà soumises, en lecture seule (`POST /etats`, B-REQ-004) : n'en relance aucune.
+  Future<ApiResponse> operationStates(String apiBase, String token, List<String> uuids);
 }
 
 class HttpRegisterTransport implements RegisterTransport {
@@ -83,8 +87,19 @@ class HttpRegisterTransport implements RegisterTransport {
       _send(() => _client.get(Uri.parse('$apiBase/etat'), headers: _headers(token)), _probeTimeout);
 
   @override
-  Future<ApiResponse> snapshot(String apiBase, String token) =>
-      _send(() => _client.get(Uri.parse('$apiBase/referentiel'), headers: _headers(token)), _dataTimeout);
+  Future<ApiResponse> snapshot(String apiBase, String token, {int? sinceSequence}) => _send(
+    () => _client.get(
+      Uri.parse('$apiBase/referentiel${sinceSequence != null && sinceSequence >= 1 ? '?depuis_sequence=$sinceSequence' : ''}'),
+      headers: _headers(token),
+    ),
+    _dataTimeout,
+  );
+
+  @override
+  Future<ApiResponse> operationStates(String apiBase, String token, List<String> uuids) => _send(
+    () => _client.post(Uri.parse('$apiBase/etats'), headers: _headers(token), body: jsonEncode({'uuids': uuids})),
+    _dataTimeout,
+  );
 
   @override
   Future<ApiResponse> synchronize(String apiBase, String token, List<Map<String, dynamic>> operations) => _send(

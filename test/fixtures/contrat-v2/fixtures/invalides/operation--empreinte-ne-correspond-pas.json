@@ -1,0 +1,69 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000001",
+    "type": "vente",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 42,
+    "cree_le": "2026-10-29T10:15:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "8ef34a76c4f73ee70d2d0333ac5fa212594d1f5096188cfe05cd78a253f86ebe",
+    "contenu": {
+        "numero_local": "HL-001-000042",
+        "brouillon_uuid": "b0000000-0000-4000-8000-000000000001",
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+        "client_uuid": null,
+        "tva": {
+            "taux": "18.000000",
+            "incluse": true
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "e0000000-0000-4000-8000-000000000001",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "conditionnement_uuid": null,
+                "libelle": "Riz parfumé 1 kg",
+                "quantite": "2.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "2.000000",
+                "prix_unitaire": 1000,
+                "remise": 0,
+                "total": 2000,
+                "revision_prix": "3"
+            }
+        ],
+        "remise_globale": 0,
+        "livraison": 0,
+        "totaux": {
+            "brut": 2000,
+            "remises": 0,
+            "base_ht": 1695,
+            "tva": 305,
+            "a_payer": 1999
+        },
+        "paiements": [
+            {
+                "tentative_uuid": "7a000000-0000-4000-8000-000000000001",
+                "moyen": "especes",
+                "montant": 2000,
+                "recu": 5000,
+                "reference": null
+            }
+        ],
+        "mouvements": [
+            {
+                "mouvement_uuid": "f0000000-0000-4000-8000-000000000001",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "lot_uuid": null,
+                "variation": "-2.000000"
+            }
+        ],
+        "autorisations": []
+    }
+}

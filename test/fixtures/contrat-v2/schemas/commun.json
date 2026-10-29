@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "commun.json",
+  "title": "Définitions communes du contrat de synchronisation v2 (profil SK-SCHEMA-1)",
+  "$defs": {
+    "uuid": {
+      "description": "UUID en minuscules, version 1 à 8.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "identifiant_serveur": {
+      "description": "Identifiant numérique d'une entité sans UUID (utilisateur), transmis en chaîne pour ne pas perdre de précision.",
+      "type": "string",
+      "pattern": "^[1-9][0-9]{0,18}$"
+    },
+    "horodatage": {
+      "description": "Date et heure ISO 8601 en UTC, suffixe Z, précision à la seconde ou à la milliseconde.",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{3})?Z$"
+    },
+    "montant": {
+      "description": "Montant entier dans l'unité monétaire de la boutique (FCFA : pas de décimales).",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 999999999999
+    },
+    "montant_signe": {
+      "type": "integer",
+      "minimum": -999999999999,
+      "maximum": 999999999999
+    },
+    "quantite": {
+      "description": "Quantité décimale positive en chaîne, six décimales exactement.",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,8})\\.[0-9]{6}$"
+    },
+    "quantite_signee": {
+      "description": "Variation de stock décimale en chaîne, six décimales exactement ; négative pour une sortie.",
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,8})\\.[0-9]{6}$"
+    },
+    "taux": {
+      "description": "Taux en pourcentage, chaîne à six décimales (18 % : \"18.000000\").",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,2})\\.[0-9]{6}$"
+    },
+    "curseur": {
+      "description": "Curseur opaque du journal de changements. Le client le conserve et le renvoie tel quel ; il ne l'interprète jamais.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9._~-]+$"
+    },
+    "version": {
+      "description": "Version ou révision monotone, en chaîne (pas de perte de précision JavaScript).",
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,18})$"
+    },
+    "empreinte": {
+      "description": "SHA-256 hexadécimal minuscule de la forme canonique SK-JCS-1.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "code": {
+      "description": "Code technique stable (snake_case ASCII).",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_.]{0,63}$"
+    },
+    "texte": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "raison": {
+      "description": "Motif structuré : code stable à traduire par le client ; message lisible facultatif, sans trace ni secret.",
+      "type": "object",
+      "required": ["code"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "#/$defs/code" },
+        "message": { "type": ["string", "null"], "maxLength": 500 },
+        "details": { "type": ["object", "null"] }
+      }
+    }
+  }
+}

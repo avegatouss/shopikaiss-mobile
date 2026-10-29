@@ -1,0 +1,35 @@
+{
+    "instantane_uuid": "1a000000-0000-4000-8000-000000000001",
+    "page": 1,
+    "entites": [
+        {
+            "type": "produit",
+            "critique": false,
+            "cle": "c0000000-0000-4000-8000-000000000001",
+            "revision": "3",
+            "action": "upsert",
+            "donnees": {
+                "nom": "Riz parfumé 1 kg",
+                "reference": "RIZ1",
+                "categorie": "Épicerie",
+                "prix": 1000,
+                "stock_illimite": false,
+                "actif": true,
+                "vente_locale": true
+            }
+        },
+        {
+            "type": "stock.projection",
+            "critique": false,
+            "cle": "c0000000-0000-4000-8000-000000000001",
+            "revision": "86",
+            "action": "upsert",
+            "donnees": {
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "lot_uuid": null,
+                "quantite": "9.000000"
+            }
+        }
+    ],
+    "empreinte": "f07feccca2f95910e5581385ff7ef4a2ead239d0574627e95ea0663d4a5c09f1"
+}

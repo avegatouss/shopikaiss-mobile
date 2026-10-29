@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "donnees.json",
+  "title": "Données des changements, par type (v2.0). Un type absent de cette liste est « inconnu » pour un client v2.0.",
+  "$defs": {
+    "produit": {
+      "type": "object",
+      "required": ["nom", "reference", "categorie", "prix", "stock_illimite", "actif", "vente_locale"],
+      "additionalProperties": false,
+      "properties": {
+        "nom": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "reference": { "type": ["string", "null"], "maxLength": 100 },
+        "categorie": { "type": ["string", "null"], "maxLength": 120 },
+        "prix": { "$ref": "commun.json#/$defs/montant" },
+        "stock_illimite": { "type": "boolean" },
+        "actif": { "type": "boolean" },
+        "vente_locale": { "type": "boolean", "description": "Faux : produit vendable seulement en ligne (variantes, coffrets, lots…) ; le client l'affiche avec ce motif." }
+      }
+    },
+    "conditionnement": {
+      "type": "object",
+      "required": ["produit_uuid", "nom", "coefficient", "prix", "defaut", "actif"],
+      "additionalProperties": false,
+      "properties": {
+        "produit_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "nom": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "coefficient": { "$ref": "commun.json#/$defs/quantite" },
+        "prix": { "$ref": "commun.json#/$defs/montant" },
+        "defaut": { "type": "boolean" },
+        "actif": { "type": "boolean" }
+      }
+    },
+    "code_barre": {
+      "type": "object",
+      "required": ["code", "produit_uuid", "conditionnement_uuid"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "produit_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "conditionnement_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] }
+      }
+    },
+    "moyen_paiement": {
+      "type": "object",
+      "required": ["code", "nom", "especes", "local"],
+      "additionalProperties": false,
+      "properties": {
+        "code": { "$ref": "commun.json#/$defs/code" },
+        "nom": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "especes": { "type": "boolean" },
+        "local": { "type": "boolean", "description": "Admis pour une vente locale (paiements.moyens_locaux)." }
+      }
+    },
+    "operateur": {
+      "description": "Opérateur autorisé sur ce terminal. Le PIN n'est transmis que sous forme d'empreinte lente (bcrypt), jamais en clair.",
+      "type": "object",
+      "required": ["operateur_id", "nom", "pin_empreinte", "droits"],
+      "additionalProperties": false,
+      "properties": {
+        "operateur_id": { "$ref": "commun.json#/$defs/identifiant_serveur" },
+        "nom": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "pin_empreinte": { "type": ["string", "null"], "maxLength": 100 },
+        "droits": { "type": "array", "uniqueItems": true, "maxItems": 100, "items": { "$ref": "commun.json#/$defs/code" } }
+      }
+    },
+    "stock.projection": {
+      "description": "Projection absolue versionnée pour la clé (produit, ou produit:lot). Jamais un delta.",
+      "type": "object",
+      "required": ["produit_uuid", "lot_uuid", "quantite"],
+      "additionalProperties": false,
+      "properties": {
+        "produit_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "lot_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+        "quantite": { "$ref": "commun.json#/$defs/quantite_signee" }
+      }
+    },
+    "politique": {
+      "description": "Valeur effective calculée par le serveur (03). Le client n'applique aucune logique d'héritage. Clé inconnue critique : restriction, jamais de défaut permissif.",
+      "type": "object",
+      "required": ["cle_politique", "valeur", "source", "verrouillee"],
+      "additionalProperties": false,
+      "properties": {
+        "cle_politique": { "type": "string", "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$" },
+        "valeur": { "description": "Valeur JSON (entier, chaîne, booléen, liste ou null) ; jamais de nombre à virgule." },
+        "source": { "enum": ["defaut", "entreprise", "boutique", "terminal"] },
+        "verrouillee": { "type": "boolean" }
+      }
+    },
+    "autorisation": {
+      "type": "object",
+      "required": ["vente_locale", "version", "expire_le"],
+      "additionalProperties": false,
+      "properties": {
+        "vente_locale": { "type": "boolean" },
+        "version": { "$ref": "commun.json#/$defs/version" },
+        "expire_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] }
+      }
+    },
+    "revocation": {
+      "description": "Révocation de l'appareil ou de ses droits de vente : bloquer toute nouvelle vente dès application ; conserver la file.",
+      "type": "object",
+      "required": ["portee", "raison"],
+      "additionalProperties": false,
+      "properties": {
+        "portee": { "enum": ["appareil", "vente_locale", "operateur"] },
+        "operateur_id": { "$ref": "commun.json#/$defs/identifiant_serveur" },
+        "raison": { "$ref": "commun.json#/$defs/raison" }
+      }
+    },
+    "session": {
+      "type": "object",
+      "required": ["session_uuid", "ouverte", "ouverte_le", "operateur_id"],
+      "additionalProperties": false,
+      "properties": {
+        "session_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "ouverte": { "type": "boolean" },
+        "ouverte_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] },
+        "operateur_id": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/identifiant_serveur" }] }
+      }
+    },
+    "operation_etat": {
+      "description": "Changement d'état d'une opération du terminal (intégration, arbitrage, résolution) : la résolution revient aux terminaux par le journal.",
+      "type": "object",
+      "required": ["operation_uuid", "etat", "version_etat", "raison"],
+      "additionalProperties": false,
+      "properties": {
+        "operation_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "etat": { "enum": ["recue", "integree", "a_arbitrer", "resolue", "rejet_protocole"] },
+        "version_etat": { "$ref": "commun.json#/$defs/version" },
+        "raison": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/raison" }] }
+      }
+    }
+  }
+}

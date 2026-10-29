@@ -1,0 +1,6 @@
+{
+    "erreur": {
+        "code": "boom",
+        "message": "Exception at line 42"
+    }
+}

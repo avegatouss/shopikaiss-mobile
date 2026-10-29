@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "etat.json",
+  "title": "GET /etat : heure serveur, protocole, capacités, autorisation de l'appareil, délais conseillés. Ne vaut pas synchronisation des données.",
+  "type": "object",
+  "required": ["heure_serveur", "protocole", "capacites_serveur", "fonctions_restreintes", "autorisation", "versions", "delais", "notifications"],
+  "additionalProperties": false,
+  "properties": {
+    "heure_serveur": { "$ref": "commun.json#/$defs/horodatage" },
+    "protocole": {
+      "type": "object",
+      "required": ["courant", "minimum", "maximum"],
+      "additionalProperties": false,
+      "properties": {
+        "courant": { "type": "integer", "minimum": 2, "maximum": 99 },
+        "minimum": { "type": "integer", "minimum": 2, "maximum": 99 },
+        "maximum": { "type": "integer", "minimum": 2, "maximum": 99 }
+      }
+    },
+    "capacites_serveur": {
+      "description": "Capacités que le serveur sait traiter pour cet appareil (intersection avec celles annoncées par le client).",
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 100,
+      "items": { "$ref": "commun.json#/$defs/code" }
+    },
+    "fonctions_restreintes": {
+      "description": "Fonctions métier que le client ne doit PAS proposer localement, avec motif (capacité absente, politique, version).",
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "required": ["fonction", "raison"],
+        "additionalProperties": false,
+        "properties": {
+          "fonction": { "$ref": "commun.json#/$defs/code" },
+          "raison": { "$ref": "commun.json#/$defs/raison" }
+        }
+      }
+    },
+    "autorisation": {
+      "description": "Autorisation bornée de vente locale. Expirée ou révoquée : aucune nouvelle vente locale ; la file existante reste transmissible.",
+      "type": "object",
+      "required": ["vente_locale", "version", "expire_le"],
+      "additionalProperties": false,
+      "properties": {
+        "vente_locale": { "type": "boolean" },
+        "version": { "$ref": "commun.json#/$defs/version" },
+        "expire_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] },
+        "raison": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/raison" }] }
+      }
+    },
+    "versions": {
+      "type": "object",
+      "required": ["politiques", "calcul", "schema_instantane"],
+      "additionalProperties": false,
+      "properties": {
+        "politiques": { "$ref": "commun.json#/$defs/version" },
+        "calcul": { "$ref": "commun.json#/$defs/version" },
+        "schema_instantane": { "$ref": "commun.json#/$defs/version" }
+      }
+    },
+    "delais": {
+      "type": "object",
+      "required": ["changements_secondes", "reprise_max_secondes"],
+      "additionalProperties": false,
+      "properties": {
+        "changements_secondes": { "type": "integer", "minimum": 5, "maximum": 300 },
+        "reprise_max_secondes": { "type": "integer", "minimum": 10, "maximum": 300 }
+      }
+    },
+    "notifications": {
+      "description": "Canal d'indication « des changements existent ». Sans canal, sondage de /changements selon delais.changements_secondes.",
+      "type": "object",
+      "required": ["mode"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["sondage", "sse"] },
+        "url": { "type": ["string", "null"], "maxLength": 300 }
+      }
+    }
+  }
+}

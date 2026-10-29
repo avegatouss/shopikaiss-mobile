@@ -38,8 +38,30 @@ class FakeTransport implements RegisterTransport {
         statusCode == 200 ? const ApiResponse(200, {'operations_a_arbitrer': 0}) : ApiResponse(statusCode, const {'erreur': 'appareil_non_reconnu'}),
   );
 
+  /// `depuis_sequence` reçu à la dernière demande du référentiel.
+  int? lastSince;
+
+  /// États rendus par `POST /etats` (lecture seule), statut HTTP de cette route, et UUID demandés.
+  Map<String, String> states = {};
+  int statesStatus = 200;
+  final List<List<String>> stateCalls = [];
+
   @override
-  Future<ApiResponse> snapshot(String apiBase, String token) async => _maybe(() => ApiResponse(200, snapshotBody));
+  Future<ApiResponse> snapshot(String apiBase, String token, {int? sinceSequence}) async => _maybe(() {
+    lastSince = sinceSequence;
+    return ApiResponse(200, snapshotBody);
+  });
+
+  @override
+  Future<ApiResponse> operationStates(String apiBase, String token, List<String> uuids) async => _maybe(() {
+    stateCalls.add(uuids);
+    if (statesStatus != 200) return ApiResponse(statesStatus, const {'message': 'route absente'});
+    return ApiResponse(200, {
+      'etats': [
+        for (final u in uuids) {'uuid': u, 'statut': states[u] ?? 'inconnue', 'numero': states[u] == 'integree' ? 'V-9' : null, 'message': null},
+      ],
+    });
+  });
 
   @override
   Future<ApiResponse> synchronize(String apiBase, String token, List<Map<String, dynamic>> operations) async => _maybe(() {

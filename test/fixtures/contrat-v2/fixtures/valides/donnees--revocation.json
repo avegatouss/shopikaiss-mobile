@@ -1,0 +1,8 @@
+{
+    "portee": "vente_locale",
+    "raison": {
+        "code": "licence.expiree",
+        "message": "Licence expirée : nouvelles ventes locales bloquées.",
+        "details": null
+    }
+}

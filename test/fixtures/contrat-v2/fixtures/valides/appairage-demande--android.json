@@ -1,0 +1,12 @@
+{
+    "code": "K7Q2M9XD",
+    "installation_uuid": "4a000000-0000-4000-8000-000000000001",
+    "plateforme": "android",
+    "modele": "SUNMI T2",
+    "version_application": "2.0.0",
+    "schema_local": "7",
+    "capacites": [
+        "vente.especes",
+        "stock.couverture"
+    ]
+}

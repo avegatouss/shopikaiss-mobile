@@ -1,0 +1,10 @@
+{
+    "operation_uuid": "a0000000-0000-4000-8000-000000000002",
+    "etat": "resolue",
+    "version_etat": "3",
+    "raison": {
+        "code": "arbitrage.stock_corrige",
+        "message": null,
+        "details": null
+    }
+}

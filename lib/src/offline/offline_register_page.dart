@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:uuid/uuid.dart';
 
 import '../diagnostics.dart';
 import '../terminal/terminal_session.dart';
@@ -32,6 +33,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   final _search = TextEditingController();
   final _searchFocus = FocusNode();
   final List<CartLine> _cart = [];
+
+  /// Identifiant du panier en cours : consommé par la vente dans la même transaction, renouvelé après l'encaissement.
+  /// Un second encaissement du même panier (double appui, écran rejoué) est refusé par la base.
+  String _draftUuid = const Uuid().v4();
   Operator? _operator;
   Timer? _probe;
   Map<int, BigInt> _sold = {};
@@ -91,6 +96,19 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             ? '${report.sent} opération(s) envoyée(s) : ${report.integrated} intégrée(s)${report.pending > 0 ? ', ${report.pending} à arbitrer par la boutique' : ''}${report.refused > 0 ? ', ${report.refused} refusée(s)' : ''}.'
             : report.message,
       );
+      if (_engine.permanentLocal) {
+        // Vente locale permanente : la synchronisation tourne en arrière-plan, la caisse reste locale. Le catalogue
+        // (stock, prix) est relu à l'intervalle réglé ; seule une demande explicite ouvre la caisse web.
+        if (_engine.snapshotStale) unawaited(_engine.refreshSnapshot().then((_) => _refreshSold()));
+        if (!automatic) {
+          if (_cart.isNotEmpty) {
+            _toast('Terminez ou videz ce panier avant d’ouvrir la caisse web.');
+          } else {
+            widget.onBackOnline();
+          }
+        }
+        return;
+      }
       if (_engine.pendingCount > 0) return;
       unawaited(_engine.refreshSnapshot());
       if (_cart.isNotEmpty) {
@@ -146,19 +164,21 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         ? 'jamais'
         : '${two(contact.toLocal().day)}/${two(contact.toLocal().month)} ${two(contact.toLocal().hour)}:${two(contact.toLocal().minute)}';
     return Material(
-      color: _offline,
+      color: _bannerColor,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         child: Row(
           children: [
-            const Icon(Icons.cloud_off, color: Colors.white),
+            Icon(_bannerIcon, color: Colors.white),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                'Caisse hors ligne · dernier contact $since'
-                '${remaining != null ? ' · reste ${remaining.inHours} h ${two(remaining.inMinutes % 60)}' : ''}'
-                ' · ${_engine.pendingCount} en attente'
-                '${_lastSyncMessage != null ? ' · $_lastSyncMessage' : ''}',
+                _engine.permanentLocal
+                    ? '${_localStatus()}${_lastSyncMessage != null ? ' · $_lastSyncMessage' : ''}'
+                    : 'Caisse hors ligne · dernier contact $since'
+                          '${remaining != null ? ' · reste ${remaining.inHours} h ${two(remaining.inMinutes % 60)}' : ''}'
+                          ' · ${_engine.pendingCount} en attente'
+                          '${_lastSyncMessage != null ? ' · $_lastSyncMessage' : ''}',
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -176,13 +196,34 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               onPressed: _engine.syncing ? null : () => _tryOnline(),
               icon: _engine.syncing
                   ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.wifi_find),
-              label: const Text('Reconnecter'),
+                  : Icon(_engine.permanentLocal ? Icons.public : Icons.wifi_find),
+              label: Text(_engine.permanentLocal ? 'Caisse web' : 'Reconnecter'),
             ),
           ],
         ),
       ),
     );
+  }
+
+  /// Vente locale permanente et boutique joignable : bandeau vert ; sinon, bandeau orange de la vente hors ligne.
+  bool get _localOnline => _engine.permanentLocal && _engine.reachable == true;
+  Color get _bannerColor => _localOnline ? _brand : _offline;
+  IconData get _bannerIcon => _localOnline ? (_engine.pendingCount == 0 ? Icons.cloud_done : Icons.cloud_upload) : Icons.cloud_off;
+
+  /// État de la caisse locale permanente, en mots distincts pour des situations distinctes (doc 06 § D).
+  String _localStatus({bool short = false}) {
+    final parts = <String>[];
+    if (_engine.reachable == true) {
+      parts.add(_engine.pendingCount == 0 ? 'Caisse locale · à jour' : 'Caisse locale · ${_engine.pendingCount} à transmettre');
+    } else {
+      final remaining = _engine.remaining;
+      parts.add(short ? 'Connexion interrompue' : 'Connexion interrompue — vente locale disponible');
+      if (remaining != null) parts.add('reste ${remaining.inHours} h');
+      if (_engine.pendingCount > 0) parts.add('${_engine.pendingCount} à transmettre');
+    }
+    if (_engine.localArbitrationCount > 0) parts.add('${_engine.localArbitrationCount} à arbitrer');
+    if (!short && _engine.snapshotStale) parts.add('catalogue ancien');
+    return parts.join(' · ');
   }
 
   /// Petit téléphone : l'écran défile (clavier ouvert, écran court) ; disposition standard inchangée.
@@ -192,28 +233,30 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Widget _compactBanner() {
     final remaining = _engine.remaining;
     return Material(
-      color: _offline,
+      color: _bannerColor,
       child: Padding(
         padding: const EdgeInsets.only(left: 10),
         child: Row(
           children: [
-            const Icon(Icons.cloud_off, color: Colors.white, size: 20),
+            Icon(_bannerIcon, color: Colors.white, size: 20),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
-                'Hors ligne${remaining != null ? ' · reste ${remaining.inHours} h' : ''} · ${_engine.pendingCount} en attente',
+                _engine.permanentLocal
+                    ? _localStatus(short: true)
+                    : 'Hors ligne${remaining != null ? ' · reste ${remaining.inHours} h' : ''} · ${_engine.pendingCount} en attente',
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
             ),
             IconButton(
-              tooltip: 'Reconnecter',
+              tooltip: _engine.permanentLocal ? 'Caisse web' : 'Reconnecter',
               color: Colors.white,
               onPressed: _engine.syncing ? null : () => _tryOnline(),
               icon: _engine.syncing
                   ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.wifi_find),
+                  : Icon(_engine.permanentLocal ? Icons.public : Icons.wifi_find),
             ),
             PopupMenuButton<String>(
               iconColor: Colors.white,
@@ -624,7 +667,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (payments == null || !mounted) return;
     final OfflineOperation operation;
     try {
-      operation = await _engine.recordSale(List.of(_cart), payments, _operator!);
+      operation = await _engine.recordSale(List.of(_cart), payments, _operator!, draftUuid: _draftUuid);
     } on OfflineRefusal catch (e) {
       _toast(e.message);
       return;
@@ -647,7 +690,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       return;
     }
     final lines = List.of(_cart);
-    setState(_cart.clear);
+    setState(() {
+      _cart.clear();
+      _draftUuid = const Uuid().v4();
+    });
     unawaited(_refreshSold());
     await _print(snapshot, operation, lines, payments);
     final change = payments.fold<int>(0, (sum, p) => sum + p.change);

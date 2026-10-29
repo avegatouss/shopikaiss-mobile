@@ -46,6 +46,10 @@ dependencies:
   http: ^1.6.0
   uuid: ^4.6.0
   bcrypt: ^1.2.0
+  # Empreintes SHA-256 du contrat v2 (déjà verrouillé en 3.0.7 comme dépendance indirecte).
+  crypto: ^3.0.7
+  # API SQLite sans Flutter : le moteur de caisse tourne aussi dans un hôte Dart pur (Windows). Déjà verrouillé en 2.5.14.
+  sqflite_common: ^2.5.14
 
 dev_dependencies:
   flutter_test:
