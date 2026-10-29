@@ -58,6 +58,18 @@ class _Host implements WindowsHost {
   }) async {
     calls.add(command);
     argumentsByCommand[command] = arguments;
+    if (command == HostCommand.drafts) {
+      return {
+        'items': [
+          {
+            'draft_id': 'held-1',
+            'summary': 'Panier test',
+            'lines_count': 2,
+            'total_label': '4 000 F',
+          },
+        ],
+      };
+    }
     if (command == HostCommand.history) {
       if (failHistory) {
         throw const HostFailure('offline', 'Moteur indisponible');
@@ -126,18 +138,76 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets('category discount and suspended basket use engine commands', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1366, 768);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final host = _Host();
+    host.state['categories'] = ['Épicerie'];
+    host.state['capabilities'] = {
+      'discount': {'allowed': true},
+      'suspend': {'allowed': true},
+    };
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Épicerie'));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.search], {
+      'query': '',
+      'category': 'Épicerie',
+    });
+    await tester.tap(find.byTooltip('Remise de ligne'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), '100');
+    await tester.tap(find.text('Appliquer'));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.setLineDiscount], {
+      'line_id': 'l1',
+      'amount': 100,
+    });
+    await tester.tap(find.text('En attente (F8)'));
+    await tester.pumpAndSettle();
+    expect(host.calls, contains(HostCommand.suspendDraft));
+    await tester.tap(find.text('Suspendus (0)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Panier test'));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.resumeDraft], {
+      'draft_id': 'held-1',
+    });
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+  });
   if (Platform.environment['SHOPIKAISS_VISUAL_PREVIEW'] == '1') {
     testWidgets('render visual review with fictitious data', (tester) async {
       await tester.runAsync(() async {
-      final font = FontLoader('Segoe UI');
-      font.addFont(
-        Future.value(
-          ByteData.sublistView(
-            await File('C:/Windows/Fonts/segoeui.ttf').readAsBytes(),
+        final font = FontLoader('Segoe UI');
+        font.addFont(
+          Future.value(
+            ByteData.sublistView(
+              await File('C:/Windows/Fonts/segoeui.ttf').readAsBytes(),
+            ),
           ),
-        ),
-      );
-      await font.load();
+        );
+        await font.load();
+        final icons = FontLoader('MaterialIcons');
+        icons.addFont(
+          Future.value(
+            ByteData.sublistView(
+              await File(
+                'C:/dev/flutter/bin/cache/artifacts/material_fonts/MaterialIcons-Regular.otf',
+              ).readAsBytes(),
+            ),
+          ),
+        );
+        await icons.load();
       });
       tester.view.physicalSize = const Size(1366, 768);
       tester.view.devicePixelRatio = 1;
@@ -146,6 +216,11 @@ void main() {
       final host = _Host();
       host.state['store_name'] = 'Boutique de démonstration';
       host.state['sync_label'] = 'À jour';
+      host.state['categories'] = ['Épicerie', 'Boissons', 'Maison'];
+      host.state['capabilities'] = {
+        'discount': {'allowed': true},
+        'suspend': {'allowed': true},
+      };
       final names = [
         'Riz parfumé 5 kg',
         'Huile végétale 1 L',
@@ -195,6 +270,14 @@ void main() {
           child: WindowsRegisterApp(controller: c),
         ),
       );
+      await tester.runAsync(() async {
+        await precacheImage(
+          const AssetImage(
+            'assets/branding/shopikaiss/SHOPIKAISS_02_Or_et_noir_sur_blanc.png',
+          ),
+          key.currentContext!,
+        );
+      });
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       await tester.runAsync(() async {
@@ -334,6 +417,7 @@ void main() {
       expect(
         host.calls.every(
           (command) => [
+            HostCommand.status,
             HostCommand.view,
             HostCommand.history,
             HostCommand.reprint,

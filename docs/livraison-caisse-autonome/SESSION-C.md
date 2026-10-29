@@ -181,3 +181,13 @@ Protection complémentaire : présence du journal v1 pending-sale.json bloque le
 ## Fenêtre réellement affichée — 29/10
 
 L'utilisateur signalait une interface inchangée : processus encore ouvert depuis ddf3a746fcff, malgré les raccourcis mis à jour. Contrôle accessibilité : panier vide, état À jour, ancien libellé Encaisser · F4. Fermeture normale puis lancement effectif de bf4f3f91007c : logo présent, écran appairage v2. Capture native toujours indisponible (timeout) ; aucune validation visuelle de parité annoncée. Sauvegarde à froid après arrêt du nouveau moteur dans LocalAppData/ShopiKaiss/sauvegarde-bascule-v2-20261029-215201, puis réouverture de la version v2. Demande à A déposée dans la présentation partagée pour l'appairage Tablette Pâtisserie.
+
+## Boîte à lettres et lot 2 B — 29/10
+
+INBOX-C.md et PROTOCOLE.md lus. e075296 fusionné (12f68dc) après sauvegarde du lot de densité visuelle cf0baed. Résolution du doublon de clé assets introduit par la fusion automatique du manifeste ; les deux jeux de ressources sont conservés, aucune version de dépendance changée. Icône Windows régénérée en six tailles depuis marque/hd/embleme-1050-transparent.png, source HD copiée dans les ressources.
+
+Commandes IPC ajoutées : setLineDiscount, suspendDraft, drafts, resumeDraft, deleteDraft, setPayments ; logout/openSession déjà raccordées. search.category reste un argument de search, pas une commande distincte. Interface : catégories sous le scan/recherche, remise par ligne selon capacités, mise en attente F8 et liste/reprise des paniers locaux. Prix et totaux restent calculés par B. Après refus d'un paiement, relecture de la vue autoritaire et remise à zéro du rendu de monnaie. Les paiements multiples ne sont pas proposés dans l'interface tant que la politique/contrat ne les ouvre pas. Suppression de panier disponible dans le protocole, pas de bouton de suppression ajouté dans ce lot.
+
+46 tests Windows réussis ; analyse finale sans anomalie. Aperçu généré par Flutter à 1366×768 avec données fictives, inspecté : catalogue à gauche, panier à droite, lignes et outils compacts, actions de fin de vente fixées en bas. Ce rendu de test ne remplace pas la recette native sur le poste.
+
+Appairage réel v2 effectué avec l'hôte installé bf4f3f9, Tablette Pâtisserie / Plateau : prêt, session déjà ouverte reprise de l'instantané, Caissier Démo identifié, panier vide, fermeture code 0. Aucune nouvelle session ni vente créée pendant ce contrôle ; aucune donnée secrète consignée. Résultat transmis dans JOURNAL.md.

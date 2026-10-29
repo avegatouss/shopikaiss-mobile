@@ -5,6 +5,7 @@ import '../ipc/protocol.dart';
 import 'register_controller.dart';
 import 'sales_history.dart';
 import 'brand_logo.dart';
+import 'suspended_drafts.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -26,6 +27,7 @@ class WindowsRegisterApp extends StatelessWidget {
         surfaceTintColor: Colors.transparent,
         elevation: 0,
         titleTextStyle: TextStyle(
+          fontFamily: 'Segoe UI',
           color: Color(0xff26332e),
           fontSize: 14,
           fontWeight: FontWeight.w600,
@@ -144,6 +146,44 @@ class _RegisterState extends State<_Register> {
   }
 
   bool get _canEdit => c.ready && !c.busy && c.uncertainOperation == null;
+  bool _allowed(String name) =>
+      (c.capabilities[name] as Map?)?['allowed'] == true;
+
+  Future<void> _discount(Map<String, dynamic> line) async {
+    var amount = '${line['discount'] ?? 0}';
+    final result = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remise de ligne'),
+        content: TextFormField(
+          initialValue: amount,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Remise en F CFA (0 pour retirer)',
+          ),
+          onChanged: (value) => amount = value,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final parsed = int.tryParse(amount.trim());
+              if (parsed != null && parsed >= 0) Navigator.pop(context, parsed);
+            },
+            child: const Text('Appliquer'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || result == null || !_canEdit) return;
+    await c.command(HostCommand.setLineDiscount, {
+      'line_id': line['id'],
+      'amount': result,
+    });
+  }
 
   Future<void> _submitScan() async {
     if (!_canEdit || _scan.text.trim().isEmpty) return;
@@ -250,6 +290,11 @@ class _RegisterState extends State<_Register> {
       bindings: {
         const SingleActivator(LogicalKeyboardKey.f4): _payment,
         const SingleActivator(LogicalKeyboardKey.f2): _scanFocus.requestFocus,
+        const SingleActivator(LogicalKeyboardKey.f8): () {
+          if (_canEdit && _allowed('suspend') && c.lines.isNotEmpty) {
+            c.command(HostCommand.suspendDraft, {});
+          }
+        },
       },
       child: Scaffold(
         appBar: AppBar(
@@ -447,18 +492,47 @@ class _RegisterState extends State<_Register> {
                     onPressed: _canEdit
                         ? () => c.command(HostCommand.search, {
                             'query': _search.text,
+                            'category': ?c.view['category'],
                           })
                         : null,
                     icon: const Icon(Icons.search),
                   ),
                 ),
-                onSubmitted: (query) =>
-                    c.command(HostCommand.search, {'query': query}),
+                onSubmitted: (query) => c.command(HostCommand.search, {
+                  'query': query,
+                  'category': ?c.view['category'],
+                }),
               ),
             ),
           ],
         ),
         const SizedBox(height: 8),
+        if ((c.view['categories'] as List? ?? const []).isNotEmpty)
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final category in [
+                  '',
+                  ...(c.view['categories'] as List).cast<String>(),
+                ])
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ChoiceChip(
+                      label: Text(category.isEmpty ? 'Voir tout' : category),
+                      selected: (c.view['category'] ?? '') == category,
+                      onSelected: _canEdit
+                          ? (_) => c.command(HostCommand.search, {
+                              'query': _search.text,
+                              'category': category,
+                            })
+                          : null,
+                    ),
+                  ),
+              ],
+            ),
+          ),
         Expanded(
           child: c.products.isEmpty
               ? const Center(child: Text('Aucun article à afficher.'))
@@ -627,6 +701,19 @@ class _RegisterState extends State<_Register> {
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
+                            Tooltip(
+                              message:
+                                  (c.capabilities['discount']
+                                          as Map?)?['reason']
+                                      as String? ??
+                                  'Remise de ligne',
+                              child: IconButton(
+                                icon: const Icon(Icons.percent, size: 18),
+                                onPressed: _canEdit && _allowed('discount')
+                                    ? () => _discount(line)
+                                    : null,
+                              ),
+                            ),
                             SizedBox(
                               width: 85,
                               child: Text(
@@ -656,6 +743,33 @@ class _RegisterState extends State<_Register> {
                   ),
           ),
           const Divider(),
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton.icon(
+                onPressed: _canEdit && _allowed('suspend') && c.lines.isNotEmpty
+                    ? () => c.command(HostCommand.suspendDraft, {})
+                    : null,
+                icon: const Icon(Icons.pause_circle_outline),
+                label: const Text('En attente (F8)'),
+              ),
+              TextButton.icon(
+                onPressed: _canEdit
+                    ? () => showDialog<void>(
+                        context: context,
+                        builder: (_) => SuspendedDraftsDialog(controller: c),
+                      )
+                    : null,
+                icon: const Icon(Icons.list_alt),
+                label: Text('Suspendus (${c.view['suspended_count'] ?? 0})'),
+              ),
+            ],
+          ),
+          if (!c.canPay && c.view['pay_reason'] is String && c.lines.isNotEmpty)
+            Text(
+              c.view['pay_reason'] as String,
+              style: const TextStyle(color: Color(0xff974b0c)),
+            ),
           if (c.view['totals'] is Map) ...[
             Text(
               'Base HT : ${(c.view['totals'] as Map)['base_ht_label'] ?? "—"}',

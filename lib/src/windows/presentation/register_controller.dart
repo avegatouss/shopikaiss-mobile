@@ -54,6 +54,7 @@ class WindowsRegisterController extends ChangeNotifier {
 
   late final StreamSubscription<Map<String, dynamic>> _subscription;
   Map<String, dynamic> view = const {};
+  Map<String, dynamic> capabilities = const {};
   bool ready = false;
   bool busy = false;
   bool _disposed = false;
@@ -87,6 +88,7 @@ class WindowsRegisterController extends ChangeNotifier {
     if (_disposed || !_transportAvailable || _journalBlocked) return;
     final generation = ++_refreshGeneration;
     try {
+      final status = await host.call(HostCommand.status);
       final next = await host.call(HostCommand.view);
       if (_disposed || generation != _refreshGeneration) return;
       if (next['schema'] != 1 || next['revision'] is! int) {
@@ -97,6 +99,9 @@ class WindowsRegisterController extends ChangeNotifier {
       }
       if ((next['revision'] as int) < (view['revision'] as int? ?? -1)) return;
       view = next;
+      capabilities = status['capabilities'] is Map<String, dynamic>
+          ? status['capabilities'] as Map<String, dynamic>
+          : const {};
       ready = next['ready'] == true;
     } on HostFailure catch (error) {
       if (_disposed || generation != _refreshGeneration) return;
@@ -148,6 +153,11 @@ class WindowsRegisterController extends ChangeNotifier {
       await refresh();
     } on HostFailure catch (error) {
       message = error.message;
+      if (command == HostCommand.setPayments ||
+          command == HostCommand.setPayment) {
+        paymentChange = null;
+        await refresh();
+      }
       // A timed-out basket command might have committed. Disable editing until
       // the authoritative draft is reloaded; never replay a scan blindly.
       if (error.code == 'host_unavailable') ready = false;
