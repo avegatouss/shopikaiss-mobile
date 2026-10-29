@@ -137,4 +137,47 @@ void main() {
       },
     );
   }
+
+  for (final mode in [
+    'bad-error-code',
+    'bad-error-message',
+    'bad-error-proof',
+  ]) {
+    test('$mode settles the sale as unknown and disconnects', () async {
+      expect(dart, isNotNull);
+      final host = await ProcessWindowsHost.start(
+        dart!,
+        arguments: ['test/windows/fixtures/host_process.dart', mode],
+        timeout: const Duration(seconds: 2),
+      );
+      addTearDown(host.close);
+      final disconnected = host.events.firstWhere(
+        (event) => event['name'] == 'disconnected',
+      );
+      await expectLater(
+        host
+            .call(HostCommand.commitSale, operationId: 'stable-sale')
+            .timeout(const Duration(seconds: 6)),
+        throwsA(
+          isA<HostFailure>().having(
+            (error) => error.outcomeUnknown,
+            'uncertain sale',
+            true,
+          ),
+        ),
+      );
+      await disconnected.timeout(const Duration(seconds: 2));
+      // The broken process must not accept another operation or replay a sale.
+      await expectLater(
+        host.call(HostCommand.status),
+        throwsA(
+          isA<HostFailure>().having(
+            (error) => error.code,
+            'closed transport',
+            'host_unavailable',
+          ),
+        ),
+      );
+    });
+  }
 }

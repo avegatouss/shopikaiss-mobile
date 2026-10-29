@@ -129,6 +129,16 @@ class ProcessWindowsHost implements WindowsHost {
       completer.complete(frame['result'] as Map<String, dynamic>);
     } else if (frame['ok'] == false && frame['error'] is Map) {
       final error = frame['error'] as Map;
+      // Validate before casting: this completer is no longer in _pending.
+      // Throwing here would orphan it, so neither disconnect nor timeout could
+      // settle the call. A malformed failure never proves absence of a sale.
+      if ((error['code'] != null && error['code'] is! String) ||
+          (error['message'] != null && error['message'] is! String) ||
+          (error['not_committed'] != null && error['not_committed'] is! bool)) {
+        completer.completeError(_failure(command));
+        _disconnect();
+        return;
+      }
       completer.completeError(
         HostFailure(
           error['code'] as String? ?? 'host_error',
