@@ -207,3 +207,9 @@ Quatre palettes locales : vert, bleu, prune, terracotta. Emplacements images à 
 Aperçu séparé client/remise globale/frais/note : champs inactifs, aucune mutation de panier simulée. Besoins moteur dans CLIENT-REMISES-FRAIS.md, envoyés à A/B au journal partagé. Les remises de ligne existantes restent raccordées.
 
 Validation : 47 tests Windows passent, analyse sans remarque, rendu Flutter fictif inspecté. Dernier ajustement purement visuel : palette propagée à la fenêtre de paiement.
+
+## Raccordement du lot moteur 2.1 (018f678)
+
+Moteur B fusionné sans conflit. Commandes Windows setGlobalDiscount, setDelivery, setNote ajoutées. Panneau client/remise/livraison désormais réel pour les trois fonctions moteur, avec contrôles capabilities et motifs de refus. Sélection/création client encore indisponible. Remise de ligne : montant ou pourcentage, valeur initiale issue de discount_entry. Totaux moteur affichés pour remise globale/livraison et arrondi espèces, sans recalcul UI.
+
+L’activation contract21 reste inchangée : aucune activation forcée ni vente démo effectuée. Les moyens déclaratifs de B sont inclus dans le moteur, mais l’éditeur multi-paiements et référence reste à terminer côté Windows. Le téléchargement d’images reste en attente.

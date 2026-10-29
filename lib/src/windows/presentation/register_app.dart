@@ -201,38 +201,66 @@ class _RegisterState extends State<_Register> {
       (c.capabilities[name] as Map?)?['allowed'] == true;
 
   Future<void> _discount(Map<String, dynamic> line) async {
-    var amount = '${line['discount'] ?? 0}';
-    final result = await showDialog<int>(
+    final entry = line['discount_entry'] as Map?;
+    var percent = entry?['type'] == 'pourcentage';
+    var amount = '${entry?['valeur'] ?? line['discount'] ?? 0}';
+    final result = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remise de ligne'),
-        content: TextFormField(
-          initialValue: amount,
-          keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: 'Remise en F CFA (0 pour retirer)',
+      builder: (context) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Remise de ligne'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButton<bool>(
+                value: percent,
+                items: const [
+                  DropdownMenuItem(
+                    value: false,
+                    child: Text('Montant (F CFA)'),
+                  ),
+                  DropdownMenuItem(value: true, child: Text('Pourcentage (%)')),
+                ],
+                onChanged: (v) => update(() => percent = v!),
+              ),
+              TextFormField(
+                initialValue: amount,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: percent
+                      ? 'Remise en %'
+                      : 'Remise en F CFA (0 pour retirer)',
+                ),
+                onChanged: (value) => amount = value,
+              ),
+            ],
           ),
-          onChanged: (value) => amount = value,
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final parsed = int.tryParse(amount.trim());
+                if (percent) {
+                  Navigator.pop(context, <String, dynamic>{
+                    'percent': amount.trim(),
+                  });
+                } else if (parsed != null && parsed >= 0) {
+                  Navigator.pop(context, <String, dynamic>{'amount': parsed});
+                }
+              },
+              child: const Text('Appliquer'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Annuler'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final parsed = int.tryParse(amount.trim());
-              if (parsed != null && parsed >= 0) Navigator.pop(context, parsed);
-            },
-            child: const Text('Appliquer'),
-          ),
-        ],
       ),
     );
     if (!mounted || result == null || !_canEdit) return;
     await c.command(HostCommand.setLineDiscount, {
       'line_id': line['id'],
-      'amount': result,
+      ...result,
     });
   }
 
@@ -753,10 +781,10 @@ class _RegisterState extends State<_Register> {
             child: TextButton.icon(
               onPressed: () => showDialog<void>(
                 context: context,
-                builder: (_) => const SaleOptionsPreview(),
+                builder: (_) => SaleOptionsPreview(controller: c),
               ),
               icon: const Icon(Icons.person_outline, size: 18),
-              label: const Text('Client, remise et frais · aperçu'),
+              label: const Text('Client, remise et livraison'),
             ),
           ),
           Expanded(
@@ -860,6 +888,14 @@ class _RegisterState extends State<_Register> {
               style: const TextStyle(color: Color(0xff974b0c)),
             ),
           if (c.view['totals'] is Map) ...[
+            if ((c.view['totals'] as Map)['global_discount_label'] != null)
+              Text(
+                'Remise globale : ${(c.view['totals'] as Map)['global_discount_label']}',
+              ),
+            if ((c.view['totals'] as Map)['delivery_label'] != null)
+              Text(
+                'Livraison : ${(c.view['totals'] as Map)['delivery_label']}',
+              ),
             Text(
               'Base HT : ${(c.view['totals'] as Map)['base_ht_label'] ?? "—"}',
             ),
@@ -1039,6 +1075,15 @@ class _PaymentState extends State<_Payment> {
                 const Text('Validation automatique du montant…'),
               if (_accepted && c.paymentChange != null)
                 Text('Monnaie à rendre : ${c.paymentChange} F CFA'),
+              if (_accepted &&
+                  (c.view['payment'] as Map?)?['rounding_label'] != null) ...[
+                Text(
+                  'Arrondi espèces : ${(c.view['payment'] as Map)['rounding_label']}',
+                ),
+                Text(
+                  'À recevoir en espèces : ${(c.view['payment'] as Map)['cash_due_label']}',
+                ),
+              ],
             ],
             Text(
               c.view['payment_label'] as String? ??

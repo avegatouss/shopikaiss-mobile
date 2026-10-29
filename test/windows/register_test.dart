@@ -330,6 +330,67 @@ void main() {
     });
   });
 
+  testWidgets('sale extras require capability and send engine commands', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final host = _Host();
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Client, remise et livraison'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<TextButton>(
+            find.widgetWithText(TextButton, 'Appliquer la remise globale'),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('Fermer'));
+    await tester.pumpAndSettle();
+    host.state['capabilities'] = {
+      for (final key in ['global_discount', 'delivery', 'note'])
+        key: {'allowed': true},
+    };
+    await c.refresh();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Client, remise et livraison'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Remise globale (0 pour retirer)'),
+      '100',
+    );
+    await tester.tap(find.text('Appliquer la remise globale'));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.setGlobalDiscount], {
+      'amount': 100,
+    });
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Frais de livraison (F CFA)'),
+      '500',
+    );
+    await tester.tap(find.text('Appliquer la livraison'));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.setDelivery], {'amount': 500});
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Note sur le ticket'),
+      'Merci',
+    );
+    await tester.tap(find.text('Enregistrer la note'));
+    await tester.pumpAndSettle();
+    expect(host.argumentsByCommand[HostCommand.setNote], {'text': 'Merci'});
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+  });
+
   testWidgets('late amount validation never enables an edited payment', (
     tester,
   ) async {
