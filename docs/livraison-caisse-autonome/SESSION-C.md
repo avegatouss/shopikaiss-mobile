@@ -219,3 +219,7 @@ L’activation contract21 reste inchangée : aucune activation forcée ni vente 
 Boutons −/+ dans le panier, pas de retrait implicite à zéro, pas de flottants ; contrôle métier moteur conservé. Menu poste : plein écran natif/F11, back-office HTTPS configurable, aide raccourcis/F1, Ctrl+F recherche. Choix imprimante parmi pilotes Windows enregistré pour la caisse ; impression du duplicata moteur depuis historique, sans renvoi automatique ni nouvelle vente. Format PDF 80 mm ; validation papier et multi-écrans encore nécessaire. Pas de ticket original inventé (commande moteur demandée).
 
 Les demandes catalogue complet (aujourd’hui 60 résultats), filtres marque/fournisseur, clients, clôture, promotions et afficheur sont suivies dans PERIPHERIQUES-ET-PARITE.md et le journal partagé. Aucun de ces points n’est déclaré terminé tant que son raccordement et sa recette ne sont pas faits.
+
+## Taille, catégories et accès session
+
+Taille des produits 150–330 px avec boutons −/+ dans les réglages. Flèches gauche/droite autour de la liste de catégories. Accès session dans menu du poste : relecture état/capacités, conservation de la session existante, saisie fond de caisse et seconde vérification avant commande openSession. Aucun ajout de clôture fictive. Analyse sans remarque ; 49 tests Windows passent en série.

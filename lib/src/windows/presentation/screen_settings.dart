@@ -58,7 +58,7 @@ class ScreenSettings {
         result.imageFit = data['image_fit'] as String;
       }
       result.compact = data['compact'] == true;
-      result.tileWidth = (data['tile_width'] as num).toDouble().clamp(150, 240);
+      result.tileWidth = (data['tile_width'] as num).toDouble().clamp(150, 330);
       result.cataloguePercent = (data['catalogue_percent'] as num)
           .toInt()
           .clamp(45, 65);
@@ -192,12 +192,41 @@ class ScreenSettingsPanel extends StatelessWidget {
               onChanged();
             },
           ),
-          const Text('Taille des fiches produits'),
+          Text('Taille des produits : ${settings.tileWidth.round()} px'),
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Réduire les produits',
+                icon: const Icon(Icons.remove),
+                onPressed: () {
+                  settings.tileWidth = (settings.tileWidth - 15).clamp(
+                    150,
+                    330,
+                  );
+                  onChanged();
+                },
+              ),
+              const Expanded(
+                child: Text('Petits ← → Grands', textAlign: TextAlign.center),
+              ),
+              IconButton(
+                tooltip: 'Agrandir les produits',
+                icon: const Icon(Icons.add),
+                onPressed: () {
+                  settings.tileWidth = (settings.tileWidth + 15).clamp(
+                    150,
+                    330,
+                  );
+                  onChanged();
+                },
+              ),
+            ],
+          ),
           Slider(
             value: settings.tileWidth,
             min: 150,
-            max: 240,
-            divisions: 6,
+            max: 330,
+            divisions: 12,
             label: '${settings.tileWidth.round()} px',
             onChanged: (v) {
               settings.tileWidth = v;

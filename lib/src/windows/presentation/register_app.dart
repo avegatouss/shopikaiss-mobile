@@ -166,6 +166,78 @@ class _RegisterState extends State<_Register> {
 
   final _scanFocus = FocusNode();
   final _searchFocus = FocusNode();
+  final _categoriesScroll = ScrollController();
+  void _scrollCategories(int direction) {
+    if (!_categoriesScroll.hasClients) return;
+    final target = (_categoriesScroll.offset + direction * 280).clamp(
+      0.0,
+      _categoriesScroll.position.maxScrollExtent,
+    );
+    _categoriesScroll.animateTo(
+      target,
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOut,
+    );
+  }
+
+  Future<void> _session() async {
+    await c.refresh();
+    if (!mounted) return;
+    if (c.sessionOpen != false || !_allowed('open_session')) {
+      final text = c.sessionOpen == true
+          ? 'Une session est déjà ouverte sur ce terminal. Elle est conservée.'
+          : (c.capabilities['open_session'] as Map?)?['reason']?.toString() ??
+                'État de session indisponible : actualisez avant de continuer.';
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Session de caisse'),
+          content: Text(text),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Fermer'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    String value = '0';
+    final amount = await showDialog<int>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Ouvrir la session'),
+        content: TextFormField(
+          initialValue: value,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Fond de caisse compté (F CFA)',
+          ),
+          onChanged: (v) => value = v,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final amount = int.tryParse(value.trim());
+              if (amount != null && amount >= 0) Navigator.pop(context, amount);
+            },
+            child: const Text('Ouvrir la session'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || amount == null) return;
+    await c.refresh();
+    if (c.sessionOpen == false && _allowed('open_session')) {
+      await c.command(HostCommand.openSession, {'float': amount});
+    }
+  }
+
   bool _fullscreen = false;
   Future<void> _toggleFullscreen() async {
     try {
@@ -227,6 +299,7 @@ class _RegisterState extends State<_Register> {
     _scan.dispose();
     _scanFocus.dispose();
     _searchFocus.dispose();
+    _categoriesScroll.dispose();
     super.dispose();
   }
 
@@ -396,9 +469,15 @@ class _RegisterState extends State<_Register> {
 
   Future<void> _stepQuantity(Map<String, dynamic> line, int step) async {
     if (!_canEdit) return;
-    final quantity = steppedQuantity(line['quantity'] ?? line['quantity_label'], step);
+    final quantity = steppedQuantity(
+      line['quantity'] ?? line['quantity_label'],
+      step,
+    );
     if (quantity == null) return;
-    await c.command(HostCommand.changeQuantity, {'line_id': line['id'], 'quantity': quantity});
+    await c.command(HostCommand.changeQuantity, {
+      'line_id': line['id'],
+      'quantity': quantity,
+    });
   }
 
   Future<void> _clear() async {
@@ -467,8 +546,18 @@ class _RegisterState extends State<_Register> {
                   if (value == 'full') _toggleFullscreen();
                   if (value == 'back') _backOffice();
                   if (value == 'help') _shortcuts();
+                  if (value == 'session') _session();
                 },
                 itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'session',
+                    enabled: !c.busy,
+                    child: Text(
+                      c.sessionOpen == false
+                          ? 'Ouvrir la session'
+                          : 'Session de caisse',
+                    ),
+                  ),
                   PopupMenuItem(
                     value: 'full',
                     child: Text(
@@ -702,26 +791,45 @@ class _RegisterState extends State<_Register> {
         if ((c.view['categories'] as List? ?? const []).isNotEmpty)
           SizedBox(
             height: 40,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+            child: Row(
               children: [
-                for (final category in [
-                  '',
-                  ...(c.view['categories'] as List).cast<String>(),
-                ])
-                  Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ChoiceChip(
-                      label: Text(category.isEmpty ? 'Voir tout' : category),
-                      selected: (c.view['category'] ?? '') == category,
-                      onSelected: _canEdit
-                          ? (_) => c.command(HostCommand.search, {
-                              'query': _search.text,
-                              'category': category,
-                            })
-                          : null,
-                    ),
+                IconButton(
+                  tooltip: 'Catégories précédentes',
+                  onPressed: () => _scrollCategories(-1),
+                  icon: const Icon(Icons.chevron_left),
+                ),
+                Expanded(
+                  child: ListView(
+                    controller: _categoriesScroll,
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final category in [
+                        '',
+                        ...(c.view['categories'] as List).cast<String>(),
+                      ])
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: ChoiceChip(
+                            label: Text(
+                              category.isEmpty ? 'Voir tout' : category,
+                            ),
+                            selected: (c.view['category'] ?? '') == category,
+                            onSelected: _canEdit
+                                ? (_) => c.command(HostCommand.search, {
+                                    'query': _search.text,
+                                    'category': category,
+                                  })
+                                : null,
+                          ),
+                        ),
+                    ],
                   ),
+                ),
+                IconButton(
+                  tooltip: 'Catégories suivantes',
+                  onPressed: () => _scrollCategories(1),
+                  icon: const Icon(Icons.chevron_right),
+                ),
               ],
             ),
           ),
@@ -904,15 +1012,40 @@ class _RegisterState extends State<_Register> {
                             c.ready && !c.busy && c.uncertainOperation == null
                             ? () => _quantity(line)
                             : null,
-                        subtitle: Row(mainAxisSize: MainAxisSize.min, children: [
-                          IconButton(tooltip: 'Diminuer la quantité', visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.remove, size: 18),
-                            onPressed: _canEdit && steppedQuantity(line['quantity'] ?? line['quantity_label'], -1) != null ? () => _stepQuantity(line, -1) : null),
-                          Flexible(child: Text('${line['quantity_label'] ?? ''}', maxLines: 1)),
-                          IconButton(tooltip: 'Augmenter la quantité', visualDensity: VisualDensity.compact,
-                            icon: const Icon(Icons.add, size: 18),
-                            onPressed: _canEdit ? () => _stepQuantity(line, 1) : null),
-                        ]),
+                        subtitle: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              tooltip: 'Diminuer la quantité',
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.remove, size: 18),
+                              onPressed:
+                                  _canEdit &&
+                                      steppedQuantity(
+                                            line['quantity'] ??
+                                                line['quantity_label'],
+                                            -1,
+                                          ) !=
+                                          null
+                                  ? () => _stepQuantity(line, -1)
+                                  : null,
+                            ),
+                            Flexible(
+                              child: Text(
+                                '${line['quantity_label'] ?? ''}',
+                                maxLines: 1,
+                              ),
+                            ),
+                            IconButton(
+                              tooltip: 'Augmenter la quantité',
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.add, size: 18),
+                              onPressed: _canEdit
+                                  ? () => _stepQuantity(line, 1)
+                                  : null,
+                            ),
+                          ],
+                        ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
