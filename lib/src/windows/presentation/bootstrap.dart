@@ -9,6 +9,7 @@ import '../ipc/protocol.dart';
 import '../ipc/supervised_host.dart';
 import '../platform/sale_intent.dart';
 import 'register_app.dart';
+import 'brand_logo.dart';
 import 'register_controller.dart';
 
 /// Explicit integration build only. No path received from the server is run.
@@ -142,6 +143,8 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const Center(child: ShopikaissLogo(width: 300)),
+                    const SizedBox(height: 24),
                     const Text(
                       'Mise en service de la caisse',
                       style: TextStyle(fontSize: 24),

@@ -163,3 +163,9 @@ Trois tests ajoutés : réponse de vue tardive après coupure, reconnexion avec 
 Le périmètre cible est maintenant la caisse web complète, avec les mêmes parcours et droits. Référence de travail, écarts et demande C-REQ-005 à B : [PARITE-CAISSE-WEB-WINDOWS.md](PARITE-CAISSE-WEB-WINDOWS.md). Les fonctions absentes restent des travaux requis, pas des exclusions acceptées.
 
 Lot 718ec0e : grille 58/42, présentations visuelle/compacte, scan F2 séparé de la recherche, choix du conditionnement, saisie espèces reçues et monnaie calculée par le moteur. Analyse propre, 45/45 tests Windows réussis. Release compilée et installée dans `%LOCALAPPDATA%/Programs/Shopikaiss-Recette/718ec0eb905c`, raccourci mis à jour ; données intactes, pas de fermeture imposée à la fenêtre actuelle. Comparaison visuelle native non effectuée, parité complète non acquise. B reste à cb10844 ; hôte v2 et commandes métier enrichies attendus. Aucun push, aucune modification main, aucune vente démo supplémentaire.
+
+## Identité visuelle et pied de panier — 29/10
+
+Six PNG fournis par le responsable conservés sans modification sous assets/branding/shopikaiss (empreintes comparées aux originaux). Logo horizontal or/noir sur fond clair et or sur noir en thème sombre, utilisé à la connexion, dans l'en-tête et sur l'écran non configuré. Icône Windows ICO dérivée du fichier 04, six tailles 16 à 256 px ; aucun changement du dessin original. pubspec.yaml ne change que l'enregistrement des ressources, aucune dépendance/version modifiée ; ces ressources seront également embarquées si B reprend ce manifeste pour Android.
+
+Pied du panier rapproché du web : libellé À payer et actions Vider le panier / Payer (F4) côte à côte. 45/45 tests Windows réussis, analyse sans anomalie. Rendu natif côte à côte non validé ; la parité complète reste ouverte.

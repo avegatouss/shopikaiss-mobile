@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
 import 'sales_history.dart';
+import 'brand_logo.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -44,7 +45,7 @@ class _NotConnected extends StatelessWidget {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.desktop_windows_outlined, size: 52),
+                ShopikaissLogo(width: 280),
                 SizedBox(height: 20),
                 Text(
                   'Votre caisse doit être configurée',
@@ -219,7 +220,18 @@ class _RegisterState extends State<_Register> {
       child: Scaffold(
         appBar: AppBar(
           toolbarHeight: 48,
-          title: Text(c.view['store_name'] as String? ?? 'Shopikaiss'),
+          title: Row(
+            children: [
+              const ShopikaissLogo(width: 155),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  c.view['store_name'] as String? ?? 'Caisse',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
           actions: [
             IconButton(
               tooltip: 'Ventes de ce poste',
@@ -498,17 +510,6 @@ class _RegisterState extends State<_Register> {
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 12),
-          if (c.lines.isNotEmpty)
-            Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: c.ready && !c.busy && c.uncertainOperation == null
-                    ? _clear
-                    : null,
-                icon: const Icon(Icons.remove_shopping_cart_outlined),
-                label: const Text('Vider le panier'),
-              ),
-            ),
           Expanded(
             child: c.lines.isEmpty
                 ? const Center(child: Text('Scannez votre premier article.'))
@@ -542,17 +543,31 @@ class _RegisterState extends State<_Register> {
                   ),
           ),
           const Divider(),
+          const Text('À payer', textAlign: TextAlign.end),
           Text(
             c.view['total_label'] as String? ?? '—',
             textAlign: TextAlign.end,
             style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: c.canPay ? _payment : null,
-            style: FilledButton.styleFrom(padding: const EdgeInsets.all(20)),
-            icon: const Icon(Icons.payments_outlined),
-            label: const Text('Encaisser · F4'),
+          Row(
+            children: [
+              OutlinedButton(
+                onPressed: _canEdit && c.lines.isNotEmpty ? _clear : null,
+                child: const Text('Vider le panier'),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: c.canPay ? _payment : null,
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.all(20),
+                  ),
+                  icon: const Icon(Icons.payments_outlined),
+                  label: const Text('Payer (F4)'),
+                ),
+              ),
+            ],
           ),
         ],
       ),

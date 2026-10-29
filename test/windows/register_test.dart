@@ -176,7 +176,7 @@ void main() {
       });
       await tester.pumpWidget(WindowsRegisterApp(controller: c));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Encaisser · F4'));
+      await tester.tap(find.text('Payer (F4)'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Espèces'));
       await tester.pumpAndSettle();
@@ -428,7 +428,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(host.calls, contains(HostCommand.addProduct));
     expect(host.calls, isNot(contains(HostCommand.scan)));
-    await tester.tap(find.text('Encaisser · F4'));
+    await tester.tap(find.text('Payer (F4)'));
     await tester.pumpAndSettle();
     final confirm = find.widgetWithText(FilledButton, 'Confirmer le paiement');
     expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
@@ -623,7 +623,7 @@ void main() {
         await tester.tap(find.text('Panier').first);
         await tester.pumpAndSettle();
       }
-      await tester.tap(find.text('Encaisser · F4'));
+      await tester.tap(find.text('Payer (F4)'));
       await tester.pumpAndSettle();
       expect(find.text('Paiement'), findsOneWidget);
       expect(tester.takeException(), isNull);
