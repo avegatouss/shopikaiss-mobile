@@ -59,6 +59,7 @@ class ProcessWindowsHost implements WindowsHost {
   int _sequence = 0;
   bool _disconnected = false;
   Future<void>? _shutdown;
+  Future<void> _writes = Future.value();
 
   @override
   Stream<Map<String, dynamic>> get events => _events.stream;
@@ -98,10 +99,15 @@ class ProcessWindowsHost implements WindowsHost {
       _commands.remove(id);
     });
     try {
-      _process.stdin.add(frame);
-      unawaited(
-        _process.stdin.flush().catchError((Object error) => _disconnect()),
-      );
+      // IOSink rejects add() while a previous flush() is bound. Serialize
+      // transport writes, not response waits, so status/view may run together.
+      _writes = _writes
+          .then((_) async {
+            if (_disconnected || !_pending.containsKey(id)) return;
+            _process.stdin.add(frame);
+            await _process.stdin.flush();
+          })
+          .catchError((Object error) => _disconnect());
       return await result.future;
     } finally {
       timer.cancel();
@@ -195,6 +201,7 @@ class ProcessWindowsHost implements WindowsHost {
     // Drain output until exit: cancelling a process pipe before sending EOF can
     // deadlock on Windows while the child is waiting for more input.
     try {
+      await _writes;
       await _process.stdin.close();
     } catch (_) {
       // Broken stdin is not proof of process exit; still wait for the owner.
