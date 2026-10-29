@@ -12,6 +12,7 @@ import 'package:shopikaiss_terminal/src/windows/presentation/register_controller
 class _Host implements WindowsHost {
   final changes = StreamController<Map<String, dynamic>>.broadcast();
   final calls = <HostCommand>[];
+  final argumentsByCommand = <HostCommand, Map<String, dynamic>>{};
   String? committedId;
   bool loseReply = false;
   bool reconciled = false;
@@ -48,6 +49,7 @@ class _Host implements WindowsHost {
     String? operationId,
   }) async {
     calls.add(command);
+    argumentsByCommand[command] = arguments;
     if (command == HostCommand.view && pendingView != null) {
       return pendingView!.future;
     }
@@ -93,6 +95,68 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets(
+    'quantity stays an engine command and clearing requires confirmation',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Article en panier'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Nouvelle quantité'),
+        '1,5',
+      );
+      await tester.tap(find.text('Appliquer'));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.changeQuantity], {
+        'line_id': 'l1',
+        'quantity': '1,5',
+      });
+      await tester.tap(find.text('Vider le panier'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Conserver'));
+      await tester.pumpAndSettle();
+      expect(host.calls, isNot(contains(HostCommand.clear)));
+      await tester.tap(find.text('Vider le panier'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Vider le panier'));
+      await tester.pumpAndSettle();
+      expect(host.calls.where((c) => c == HostCommand.clear), hasLength(1));
+    },
+  );
+
+  testWidgets('pending sale blocks basket edits', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final host = _Host()..loseReply = true;
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await c.refresh();
+    await c.commitSale();
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Article en panier'));
+    await tester.tap(find.text('Vider le panier'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(host.calls, isNot(contains(HostCommand.changeQuantity)));
+    expect(host.calls, isNot(contains(HostCommand.clear)));
+  });
   test(
     'durable intent survives UI disposal and resolves without recommit',
     () async {

@@ -104,6 +104,63 @@ class _RegisterState extends State<_Register> {
     );
   }
 
+  Future<void> _quantity(Map<String, dynamic> line) async {
+    var input = '';
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Modifier la quantité'),
+        content: TextField(
+          onChanged: (value) => input = value,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'Nouvelle quantité',
+            helperText:
+                '${line['name']} · actuellement ${line['quantity_label']}',
+          ),
+          onSubmitted: (value) => Navigator.of(context).pop(value),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(input),
+            child: const Text('Appliquer'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || value == null || value.trim().isEmpty) return;
+    await c.command(HostCommand.changeQuantity, {
+      'line_id': line['id'],
+      'quantity': value.trim(),
+    });
+  }
+
+  Future<void> _clear() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vider le panier ?'),
+        content: const Text('Tous les articles de ce panier seront retirés.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Conserver'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Vider le panier'),
+          ),
+        ],
+      ),
+    );
+    if (mounted && confirmed == true) await c.command(HostCommand.clear, {});
+  }
+
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: c,
@@ -297,6 +354,17 @@ class _RegisterState extends State<_Register> {
             style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 12),
+          if (c.lines.isNotEmpty)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: c.ready && !c.busy && c.uncertainOperation == null
+                    ? _clear
+                    : null,
+                icon: const Icon(Icons.remove_shopping_cart_outlined),
+                label: const Text('Vider le panier'),
+              ),
+            ),
           Expanded(
             child: c.lines.isEmpty
                 ? const Center(child: Text('Scannez votre premier article.'))
@@ -308,6 +376,10 @@ class _RegisterState extends State<_Register> {
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         title: Text(line['name'] as String? ?? ''),
+                        onTap:
+                            c.ready && !c.busy && c.uncertainOperation == null
+                            ? () => _quantity(line)
+                            : null,
                         subtitle: Text(
                           '${line['quantity_label'] ?? ''} · ${line['total_label'] ?? ''}',
                         ),

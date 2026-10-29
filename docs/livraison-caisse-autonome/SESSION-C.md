@@ -1,4 +1,12 @@
-## Dernière remise : bootstrap et journal durable
+## Suite sur B f5247a4 : actions panier
+
+Base commune avancée sans conflit vers B `f5247a4` (contrat 2.0.1). Son essai v2 réel est décrit dans SESSION-B ; C ne l'a pas rejoué. B conserve le raccordement v2 de l'hôte, sans changement prévu du protocole local. La synchronisation v1 reste celle de l'application de recette actuelle.
+
+C ajoute uniquement l'interface panier : clic sur une ligne pour saisir sa quantité, transmise telle quelle à changeQuantity pour validation/calcul par le moteur ; vider le panier avec confirmation explicite via clear. Aucun calcul financier côté Windows. Annuler le dialogue n'écrit rien ; une vente incertaine interdit ces actions, y compris si son état change pendant le dialogue grâce au contrôle du contrôleur.
+
+Analyse Windows sans anomalie et 39 tests Windows réussis, dont deux nouveaux tests d'interface sur quantité, confirmation et blocage pendant un encaissement incertain. Aucun fichier moteur/API/Android modifié. Pas de nouveau ZIP dans ce lot : le paquet précédent demeure au code 3ce238f. Main et production inchangées. Le correctif MySQL signalé par B reste à coordonner avec A séparément de la caisse autonome.
+
+## Remise précédente : bootstrap et journal durable
 
 Voir [RACCORDEMENT-HOTE-C.md](RACCORDEMENT-HOTE-C.md) pour la suite sur B `0c39b40` : lancement de l'hôte, appairage/PIN, journal d'intention et 190 tests réussis. Les états ci-dessous sont historiques.
 
