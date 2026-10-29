@@ -41,3 +41,21 @@ L'utilisateur confirme un PIN commun à tous les profils. Une tentative Gérante
 Demande à A : contrôler les données de démonstration et la projection OfflineSnapshot. Le code serveur consulté projette users.pin_hash lorsque le mode PIN est actif. Vérifier où disparaît cette valeur et assurer la cohérence entre le PIN commun annoncé et les caissiers des deux boutiques. Ne pas désactiver le contrôle PIN pour contourner le défaut. Après correction, recharger le référentiel et poursuivre l'essai d'encaissement autorisé par l'utilisateur.
 
 Correctif C : BEngineAdapter refuse explicitement `pin_unconfigured` si le référentiel exige un PIN sans fournir d'empreinte pour l'utilisateur sélectionné. Aucune tentative n'est consommée dans ce cas, aucune connexion n'est autorisée. Test ajouté sur vraie base SQLite avec un référentiel sans PIN : compteur inchangé, refus explicite ; quatre tests d'adaptateur réussis. Ce correctif source n'est pas encore recompilé dans l'installation locale. Aucune vente créée.
+
+## Clarification A et vente réelle de démonstration sur Plateau
+
+A confirme que les comptes Administrateur et Gérante Démo n'ont pas de PIN défini : le référentiel est fidèle à la base, aucun défaut serveur n'est établi. Le PIN annoncé sur la page de démonstration concerne Caissier Démo (3), présent à Plateau. Le diagnostic précédent doit donc être lu comme une configuration absente, non comme une perte de synchronisation. Le contrat précise ce cas.
+
+Le code v1 Windows destiné à Tablette Pâtisserie a été consommé sur le moteur installé `9f079ed`. Base initialement distincte `%LOCALAPPDATA%/ShopiKaiss/recette-tablette-patisserie`, sans remplacer Cocody et sans utiliser le code de B ou son terminal Caisse 2. Appairage Plateau réussi, session déjà ouverte et authentification Caissier Démo réussie. Vente locale permanente autorisée par les données reçues ; C n'a publié aucune politique.
+
+Essai via les tubes privés du véritable exécutable installé, pas via les clics de l'interface :
+
+- Produit 42, Tasse en céramique ; stock initial 22. Quantité changée à deux puis ramenée à une par commandes du moteur.
+- Paiement espèces 1 500 F, sans recalcul côté pilote. UUID durable écrit avant envoi : `c95c4cd9-aba0-4d5b-a07f-a05dfd381f10`.
+- Vente locale `HL-005-000003`, acceptée par le serveur sous **V-20261029-0015**, état intégrée. Une occurrence dans l'historique local.
+- Renvoi local de commitSale avec le même UUID : même vente, sans nouvel encaissement. Consultation saleStatus confirme committed ; intention retirée après confirmation.
+- Synchronisation : stock affiché 21, panier vide, état À jour. Arrêt et relance de l'hôte : même vente intégrée, stock toujours 21 et deuxième rejeu idempotent. Ticket récupéré (22 lignes), sans impression matérielle.
+
+Le contrôle de l'historique web par navigateur, la coupure réelle du réseau et l'imprimante ne sont pas encore faits. Aucune preuve de déploiement de e9a45bfa n'a été recueillie par C ; le test porte sur l'hôte v1 et ne valide pas le champ v2 versions.politiques.
+
+La fenêtre utilisateur reste pour l'instant sur Cocody. Sa fermeture automatisée a été refusée par Computer Use car des saisies utilisateur étaient en cours ; fermeture demandée à l'utilisateur avant changement de base. Cocody ne contient aucune opération ; la base Tablette contient une seule opération transmise/intégrée et aucun journal d'intention en attente. Les sessions serveur restent ouvertes pour la suite des essais et devront être clôturées en coordination avec A/B, sans fermer Caisse 2 à leur place.
