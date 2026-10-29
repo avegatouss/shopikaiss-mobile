@@ -146,6 +146,13 @@ abstract class CaisseEngine extends EngineNotifier {
   /// moteur au moment de l'écriture ; l'écran s'en sert pour proposer ou non l'action.
   bool hasRight(Operator operator, String right);
 
+  /// Remise maximale (francs) que [operator] peut accorder sur une ligne de [base] francs : plafond du terminal
+  /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
+  int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
+
+  /// Total des remises permis à [operator] sur une vente (contrat 2.1 `remise_max_montant`), ou null sans limite.
+  int? maxSaleDiscountFor(Operator operator) => null;
+
   /// Heures restantes avant l'arrêt de la vente locale.
   Duration? get remaining {
     final s = snapshot;

@@ -128,6 +128,15 @@ Caisse 2, vente V-20261029-0016.
   a ajoutés à `paiements.moyens_locaux`. `reference` facultative, figée dans la vente ; un moyen déclaré n'est jamais
   une confirmation de paiement. Android et l'hôte Windows annoncent la capacité.
 
+## Contrat 2.1 (lot 1a, `d1bfc9ac` de A)
+
+`V2Engine.contract21` annonce `contrat.2_1` ; la forme 2.1 n'est utilisée que si le serveur rend aussi la capacité.
+Changement de forme : nouvel instantané complet (`reparation`), jamais de mélange. Désactivé par défaut (pas en
+production avant l'accord de A). Apports visibles : catégories dans l'ordre de la boutique, `products[].brand`,
+`supplier`, `unit`, recherche par marque ; plafond de remise du rôle (`remise_max_pourcent`, le plus petit avec la
+politique du terminal) et `remise_max_montant` par vente, contrôlés par l'adaptateur et par le moteur ;
+`preparePayment.methods[].reference` (`aucune` | `facultative` | `obligatoire`), référence obligatoire exigée.
+
 ## Limites actuelles
 
 - Clôture de session, client, note, tarif gros, remise globale, frais, marque/fournisseur/images,

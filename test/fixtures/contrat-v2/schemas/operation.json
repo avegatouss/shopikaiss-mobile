@@ -78,7 +78,7 @@
             "a_payer": { "$ref": "commun.json#/$defs/montant" }
           }
         },
-        "paiements": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/paiement" } },
+        "paiements": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/paiement" } },
         "mouvements": { "type": "array", "minItems": 0, "maxItems": 400, "items": { "$ref": "#/$defs/mouvement" } },
         "autorisations": { "type": "array", "minItems": 0, "maxItems": 10, "items": { "$ref": "#/$defs/autorisation" } }
       }
@@ -111,7 +111,7 @@
         "moyen": { "$ref": "commun.json#/$defs/code" },
         "montant": { "$ref": "commun.json#/$defs/montant" },
         "recu": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant" }], "description": "Espèces seulement : somme remise par le client." },
-        "reference": { "type": ["string", "null"], "maxLength": 100 }
+        "reference": { "type": ["string", "null"], "maxLength": 120 }
       }
     },
     "mouvement": {

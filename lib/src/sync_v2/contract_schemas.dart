@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.0.2) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 1a) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -217,6 +217,803 @@ const contractV2Schemas = <String, String>{
       }
     }
   }
+}
+''',
+  'donnees-2.1.json': r'''{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "donnees-2.1.json",
+    "title": "Données des changements, forme 2.1 (rendue aux clients qui annoncent contrat.2_1 ; REVISION-2.1 §7.1). Les autres reçoivent la forme 2.0 de donnees.json.",
+    "$defs": {
+        "produit": {
+            "type": "object",
+            "required": [
+                "nom",
+                "reference",
+                "categorie",
+                "prix",
+                "stock_illimite",
+                "actif",
+                "vente_locale",
+                "categorie_uuid",
+                "marque",
+                "fournisseur",
+                "unite",
+                "prix_gros",
+                "gros_quantite_min",
+                "seuil_alerte",
+                "cree_le"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                },
+                "reference": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 100
+                },
+                "categorie": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "prix": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "stock_illimite": {
+                    "type": "boolean"
+                },
+                "actif": {
+                    "type": "boolean"
+                },
+                "vente_locale": {
+                    "type": "boolean",
+                    "description": "Faux : produit vendable seulement en ligne (variantes, coffrets, lots…) ; le client l'affiche avec ce motif."
+                },
+                "categorie_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "marque": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "fournisseur": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 200
+                },
+                "unite": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "code",
+                                "nom"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "code": {
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ],
+                                    "maxLength": 20
+                                },
+                                "nom": {
+                                    "type": "string",
+                                    "maxLength": 120
+                                }
+                            }
+                        }
+                    ]
+                },
+                "prix_gros": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ]
+                },
+                "gros_quantite_min": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/quantite"
+                        }
+                    ]
+                },
+                "seuil_alerte": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/quantite"
+                        }
+                    ]
+                },
+                "cree_le": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                }
+            }
+        },
+        "conditionnement": {
+            "type": "object",
+            "required": [
+                "produit_uuid",
+                "nom",
+                "coefficient",
+                "prix",
+                "defaut",
+                "actif",
+                "prix_gros"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "coefficient": {
+                    "$ref": "commun.json#/$defs/quantite"
+                },
+                "prix": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "defaut": {
+                    "type": "boolean"
+                },
+                "actif": {
+                    "type": "boolean"
+                },
+                "prix_gros": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ]
+                }
+            }
+        },
+        "code_barre": {
+            "type": "object",
+            "required": [
+                "code",
+                "produit_uuid",
+                "conditionnement_uuid"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                },
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "conditionnement_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                }
+            }
+        },
+        "moyen_paiement": {
+            "type": "object",
+            "required": [
+                "code",
+                "nom",
+                "especes",
+                "local",
+                "reference"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "$ref": "commun.json#/$defs/code"
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "especes": {
+                    "type": "boolean"
+                },
+                "local": {
+                    "type": "boolean",
+                    "description": "Admis pour une vente locale (paiements.moyens_locaux)."
+                },
+                "reference": {
+                    "enum": [
+                        "aucune",
+                        "facultative",
+                        "obligatoire"
+                    ],
+                    "description": "Référence de transaction : réglage Trésorerie du web (references_required) ; espèces, crédit, compte client, carte cadeau : aucune."
+                }
+            }
+        },
+        "operateur": {
+            "description": "Opérateur autorisé sur ce terminal. Le PIN n'est transmis que sous forme d'empreinte lente (bcrypt), jamais en clair.",
+            "type": "object",
+            "required": [
+                "operateur_id",
+                "nom",
+                "pin_empreinte",
+                "droits",
+                "remise_max_pourcent",
+                "remise_max_montant",
+                "approbateur_remise"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "pin_empreinte": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 100,
+                    "description": "null quand la politique demande un PIN : l’opérateur n’a pas défini de PIN ; le refuser avec le motif « PIN non défini », sans compter d’échec."
+                },
+                "droits": {
+                    "type": "array",
+                    "uniqueItems": true,
+                    "maxItems": 100,
+                    "items": {
+                        "$ref": "commun.json#/$defs/code"
+                    }
+                },
+                "remise_max_pourcent": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/taux"
+                        }
+                    ]
+                },
+                "remise_max_montant": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ]
+                },
+                "approbateur_remise": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "stock.projection": {
+            "description": "Projection absolue versionnée pour la clé (produit, ou produit:lot). Jamais un delta.",
+            "type": "object",
+            "required": [
+                "produit_uuid",
+                "lot_uuid",
+                "quantite"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "lot_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "quantite": {
+                    "$ref": "commun.json#/$defs/quantite_signee"
+                }
+            }
+        },
+        "politique": {
+            "description": "Valeur effective calculée par le serveur (03). Le client n'applique aucune logique d'héritage. Clé inconnue critique : restriction, jamais de défaut permissif.",
+            "type": "object",
+            "required": [
+                "cle_politique",
+                "valeur",
+                "source",
+                "verrouillee"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "cle_politique": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+                },
+                "valeur": {
+                    "description": "Valeur JSON (entier, chaîne, booléen, liste ou null) ; jamais de nombre à virgule."
+                },
+                "source": {
+                    "enum": [
+                        "defaut",
+                        "entreprise",
+                        "boutique",
+                        "terminal"
+                    ]
+                },
+                "verrouillee": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "boutique": {
+            "description": "Révision 2.0.1 (B-REQ-005) : paramètres de calcul de la boutique. Critique : un changement de TVA modifie le total des ventes suivantes ; une vente déjà commise garde la TVA qu'elle a figée.",
+            "type": "object",
+            "required": [
+                "nom",
+                "devise",
+                "tva_taux",
+                "tva_incluse",
+                "regles",
+                "ticket",
+                "devise_secondaire"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                },
+                "devise": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 10
+                },
+                "tva_taux": {
+                    "$ref": "commun.json#/$defs/taux"
+                },
+                "tva_incluse": {
+                    "type": "boolean"
+                },
+                "regles": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                        "remise_pourcentage_arrondi",
+                        "arrondi_especes",
+                        "trop_percu",
+                        "moins_a_un",
+                        "livraison_droit",
+                        "ouverture_session",
+                        "survente",
+                        "gros",
+                        "fuseau"
+                    ],
+                    "description": "Codes du web, tels quels (PARITE-CAISSE-WEB §3).",
+                    "properties": {
+                        "remise_pourcentage_arrondi": {
+                            "enum": [
+                                "down",
+                                "nearest"
+                            ]
+                        },
+                        "arrondi_especes": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "type": "object",
+                                    "required": [
+                                        "pas",
+                                        "mode"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "pas": {
+                                            "type": "integer",
+                                            "minimum": 1
+                                        },
+                                        "mode": {
+                                            "type": "string",
+                                            "maxLength": 40
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "trop_percu": {
+                            "enum": [
+                                "refuse",
+                                "customer_advance",
+                                "cash_change"
+                            ]
+                        },
+                        "moins_a_un": {
+                            "enum": [
+                                "refuse",
+                                "remove"
+                            ]
+                        },
+                        "livraison_droit": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/code"
+                                }
+                            ]
+                        },
+                        "ouverture_session": {
+                            "enum": [
+                                "payment",
+                                "before_sale",
+                                "automatic"
+                            ]
+                        },
+                        "survente": {
+                            "type": "string",
+                            "maxLength": 40
+                        },
+                        "gros": {
+                            "type": "object",
+                            "required": [
+                                "actif",
+                                "mode",
+                                "quantite_min",
+                                "droit",
+                                "remises",
+                                "prix_lot"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "actif": {
+                                    "type": "boolean"
+                                },
+                                "mode": {
+                                    "enum": [
+                                        "cart",
+                                        "quantity",
+                                        "cart_and_quantity"
+                                    ]
+                                },
+                                "quantite_min": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/quantite"
+                                        }
+                                    ]
+                                },
+                                "droit": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/code"
+                                        }
+                                    ]
+                                },
+                                "remises": {
+                                    "enum": [
+                                        "refuse",
+                                        "allow"
+                                    ]
+                                },
+                                "prix_lot": {
+                                    "enum": [
+                                        "refuse",
+                                        "lot_price",
+                                        "lowest"
+                                    ]
+                                }
+                            }
+                        },
+                        "fuseau": {
+                            "type": "string",
+                            "maxLength": 64
+                        }
+                    }
+                },
+                "ticket": {
+                    "type": "object",
+                    "required": [
+                        "raison_sociale",
+                        "adresse",
+                        "telephone",
+                        "ncc",
+                        "entete",
+                        "pied",
+                        "largeur_papier"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "raison_sociale": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 160
+                        },
+                        "adresse": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 500
+                        },
+                        "telephone": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 60
+                        },
+                        "ncc": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 60
+                        },
+                        "entete": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 1000
+                        },
+                        "pied": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 1000
+                        },
+                        "largeur_papier": {
+                            "type": "integer",
+                            "minimum": 30,
+                            "maximum": 120
+                        }
+                    }
+                },
+                "devise_secondaire": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "libelle",
+                                "taux"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "libelle": {
+                                    "type": "string",
+                                    "maxLength": 20
+                                },
+                                "taux": "commun.json#/$defs/taux"
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        "autorisation": {
+            "type": "object",
+            "required": [
+                "vente_locale",
+                "version",
+                "expire_le"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "vente_locale": {
+                    "type": "boolean"
+                },
+                "version": {
+                    "$ref": "commun.json#/$defs/version"
+                },
+                "expire_le": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                }
+            }
+        },
+        "revocation": {
+            "description": "Révocation de l'appareil ou de ses droits de vente : bloquer toute nouvelle vente dès application ; conserver la file.",
+            "type": "object",
+            "required": [
+                "portee",
+                "raison"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "portee": {
+                    "enum": [
+                        "appareil",
+                        "vente_locale",
+                        "operateur"
+                    ]
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "raison": {
+                    "$ref": "commun.json#/$defs/raison"
+                }
+            }
+        },
+        "session": {
+            "type": "object",
+            "required": [
+                "session_uuid",
+                "ouverte",
+                "ouverte_le",
+                "operateur_id"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "ouverte": {
+                    "type": "boolean"
+                },
+                "ouverte_le": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "operateur_id": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        }
+                    ]
+                }
+            }
+        },
+        "operation_etat": {
+            "description": "Changement d'état d'une opération du terminal (intégration, arbitrage, résolution) : la résolution revient aux terminaux par le journal.",
+            "type": "object",
+            "required": [
+                "operation_uuid",
+                "etat",
+                "version_etat",
+                "raison"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "operation_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "etat": {
+                    "enum": [
+                        "recue",
+                        "integree",
+                        "a_arbitrer",
+                        "resolue",
+                        "rejet_protocole"
+                    ]
+                },
+                "version_etat": {
+                    "$ref": "commun.json#/$defs/version"
+                },
+                "raison": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/raison"
+                        }
+                    ]
+                }
+            }
+        },
+        "categorie": {
+            "description": "Révision 2.1 : catégorie du catalogue (onglets de la caisse web). Non critique.",
+            "type": "object",
+            "required": [
+                "nom",
+                "ordre",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "ordre": {
+                    "type": "integer"
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        }
+    }
 }
 ''',
   'donnees.json': r'''{
@@ -638,7 +1435,7 @@ const contractV2Schemas = <String, String>{
             "a_payer": { "$ref": "commun.json#/$defs/montant" }
           }
         },
-        "paiements": { "type": "array", "minItems": 1, "maxItems": 10, "items": { "$ref": "#/$defs/paiement" } },
+        "paiements": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/paiement" } },
         "mouvements": { "type": "array", "minItems": 0, "maxItems": 400, "items": { "$ref": "#/$defs/mouvement" } },
         "autorisations": { "type": "array", "minItems": 0, "maxItems": 10, "items": { "$ref": "#/$defs/autorisation" } }
       }
@@ -671,7 +1468,7 @@ const contractV2Schemas = <String, String>{
         "moyen": { "$ref": "commun.json#/$defs/code" },
         "montant": { "$ref": "commun.json#/$defs/montant" },
         "recu": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant" }], "description": "Espèces seulement : somme remise par le client." },
-        "reference": { "type": ["string", "null"], "maxLength": 100 }
+        "reference": { "type": ["string", "null"], "maxLength": 120 }
       }
     },
     "mouvement": {

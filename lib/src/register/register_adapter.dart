@@ -308,6 +308,9 @@ class LocalRegisterAdapter {
               'id': p.id,
               'name': p.name,
               'category': p.category,
+              'brand': p.brand,
+              'supplier': p.supplier,
+              'unit': p.unit,
               'price_label': formatFcfa(p.price, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'packagings': [for (final k in p.packagings) {'id': k.id, 'name': k.name, 'price_label': formatFcfa(k.price, currency)}],
@@ -335,9 +338,12 @@ class LocalRegisterAdapter {
     for (final (_, cart) in resolved) {
       if (cart == null || cart.discount == 0) continue;
       if (!engine.hasRight(_operator!, 'remise')) return '${_operator!.name} n’a pas le droit d’accorder une remise : retirez celle de « ${cart.label} ».';
-      final max = maxLineDiscount(cart.base, snapshot.rules.maxLineDiscountPercent);
+      final max = engine.maxLineDiscountFor(_operator!, cart.base);
       if (cart.discount > max) return 'Remise sur « ${cart.label} » au-delà du maximum (${formatFcfa(max)}) : corrigez-la.';
     }
+    final saleCap = engine.maxSaleDiscountFor(_operator!);
+    final total = resolved.fold<int>(0, (sum, r) => sum + (r.$2?.discount ?? 0));
+    if (saleCap != null && total > saleCap) return 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).';
     return null;
   }
 
@@ -443,12 +449,14 @@ class LocalRegisterAdapter {
       final snapshot = _snapshot();
       final cart = line.materialize(snapshot);
       if (cart == null) throw const AdapterFailure('panier_invalide', 'Article retiré du catalogue : retirez-le du panier.');
-      final max = maxLineDiscount(cart.base, snapshot.rules.maxLineDiscountPercent);
+      final max = engine.maxLineDiscountFor(_operator!, cart.base);
       if (amount > max) {
-        throw AdapterFailure(
-          'remise_refusee',
-          'Remise au-delà du maximum hors ligne (${snapshot.rules.maxLineDiscountPercent} %, soit ${formatFcfa(max)} sur cette ligne).',
-        );
+        throw AdapterFailure('remise_refusee', 'Remise au-delà du maximum autorisé (${formatFcfa(max)} sur cette ligne).');
+      }
+      final saleCap = engine.maxSaleDiscountFor(_operator!);
+      final others = _draft.lines.where((l) => l.id != lineId).fold<int>(0, (sum, l) => sum + l.discount);
+      if (saleCap != null && others + amount > saleCap) {
+        throw AdapterFailure('remise_refusee', 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).');
       }
     }
     return _mutate(() => line.discount = amount);
@@ -546,7 +554,7 @@ class LocalRegisterAdapter {
     return {
       'payable': payable,
       'payable_label': formatFcfa(payable),
-      'methods': [for (final m in snapshot.methods) {'code': m.code, 'name': m.name, 'cash': m.isCash}],
+      'methods': [for (final m in snapshot.methods) {'code': m.code, 'name': m.name, 'cash': m.isCash, 'reference': m.referenceMode}],
     };
   }
 
@@ -577,7 +585,7 @@ class LocalRegisterAdapter {
           methodCode: method.code,
           amount: amount,
           received: method.isCash ? (received as int? ?? amount) : null,
-          reference: method.isCash || text.isEmpty ? null : text,
+          reference: method.isCash || method.referenceMode == 'aucune' || text.isEmpty ? null : text,
         ),
       );
     }
@@ -603,6 +611,8 @@ class LocalRegisterAdapter {
       if (p.amount <= 0) return 'Chaque paiement doit être positif.';
       if (p.received != null && p.received! < p.amount) return 'Le montant reçu est inférieur au montant à régler.';
       if ((p.reference?.length ?? 0) > 100) return 'Référence de paiement trop longue (100 caractères au plus).';
+      final method = snapshot.methods.firstWhere((m) => m.code == p.methodCode);
+      if (method.referenceMode == 'obligatoire' && p.reference == null) return 'Référence obligatoire pour « ${method.name} ».';
       paid += p.amount;
     }
     if (paid != payable) return 'La somme des paiements (${formatFcfa(paid)}) doit égaler le montant à payer (${formatFcfa(payable)}).';

@@ -396,4 +396,86 @@ void main() {
     await e.sync();
     expect((await e.saleStatus(sale.uuid))!.serverStatus, 'integree');
   });
+
+  test('contrat 2.1 (lot 1a) : nouvel instantané au passage en 2.1, catégories ordonnées, marque, plafonds du rôle, référence obligatoire', () async {
+    server.put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 10, 'source': 'boutique', 'verrouillee': false});
+    final before = await paired();
+    expect(before.snapshot!.categories, isEmpty);
+
+    // Le serveur passe en forme 2.1 (il ne la rend qu'à un client qui annonce contrat.2_1).
+    const hygiene = '0c000000-0000-4000-8000-000000000001';
+    const services = '0c000000-0000-4000-8000-000000000002';
+    Map<String, dynamic> produit21(String nom, String? ref, int prix, bool illimite, String categorie, String? marque) => {
+      'nom': nom, 'reference': ref, 'categorie': null, 'prix': prix, 'stock_illimite': illimite, 'actif': true, 'vente_locale': true,
+      'categorie_uuid': categorie, 'marque': marque, 'fournisseur': 'Grossiste Plateau', 'unite': {'code': 'pce', 'nom': 'Pièce'},
+      'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null, 'cree_le': null,
+    };
+    Map<String, dynamic> operateur21(String id, String nom, String? pin, List<String> droits, String? pourcent, int? montant) => {
+      'operateur_id': id, 'nom': nom, 'pin_empreinte': pin, 'droits': droits,
+      'remise_max_pourcent': pourcent, 'remise_max_montant': montant, 'approbateur_remise': false,
+    };
+    server
+      ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1']
+      ..put('boutique', fakeShop, {
+        'nom': 'Boutique', 'devise': 'FCFA', 'tva_taux': '18.000000', 'tva_incluse': true,
+        'regles': {
+          'remise_pourcentage_arrondi': 'down', 'arrondi_especes': null, 'trop_percu': 'cash_change', 'moins_a_un': 'refuse',
+          'livraison_droit': null, 'ouverture_session': 'automatic', 'survente': 'refuse',
+          'gros': {'actif': false, 'mode': 'cart', 'quantite_min': null, 'droit': null, 'remises': 'refuse', 'prix_lot': 'refuse'},
+          'fuseau': 'Africa/Abidjan',
+        },
+        'ticket': {'raison_sociale': null, 'adresse': null, 'telephone': null, 'ncc': null, 'entete': null, 'pied': null, 'largeur_papier': 80},
+        'devise_secondaire': null,
+      }, critical: true)
+      ..put('categorie', hygiene, {'nom': 'Hygiène', 'ordre': 2, 'actif': true})
+      ..put('categorie', services, {'nom': 'Services', 'ordre': 1, 'actif': true})
+      ..put('produit', fakeSavon, produit21('Savon', 'SAV', 500, false, hygiene, 'Dove'))
+      ..put('produit', fakeService, produit21('Emballage', null, 100, true, services, null))
+      ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
+      ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
+      ..put('moyen_paiement', 'moyen:wave', {'code': 'wave', 'nom': 'Wave', 'especes': false, 'local': true, 'reference': 'obligatoire'})
+      ..put('politique', 'paiements.moyens_locaux', {'cle_politique': 'paiements.moyens_locaux', 'valeur': ['especes', 'wave'], 'source': 'boutique', 'verrouillee': false})
+      ..put('operateur', 'operateur:7', operateur21('7', 'Awa', 'empreinte', ['ouverture_session', 'remise', 'vente'], '5.000000', 40), critical: true)
+      ..put('operateur', 'operateur:8', operateur21('8', 'Stagiaire', null, <String>[], null, null));
+
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true, contract21: true);
+    await e.load('https://boutique.exemple.ci');
+    final report = await e.sync();
+    expect(report.reachable, isTrue);
+    expect(e.blockReason, isNull);
+
+    final s = e.snapshot!;
+    expect(s.categories, ['Services', 'Hygiène'], reason: 'ordre de la boutique, pas alphabétique');
+    final savonProduct = s.byCode('6190000000011')!.$1;
+    expect([savonProduct.category, savonProduct.brand, savonProduct.supplier, savonProduct.unit], ['Hygiène', 'Dove', 'Grossiste Plateau', 'Pièce']);
+    expect(s.search('dove').single.name, 'Savon');
+
+    // Plafonds : terminal 10 %, rôle 5 % et 40 F par vente ; le plus petit s'applique.
+    final awa = s.operators.firstWhere((o) => o.id == 7);
+    expect(e.maxLineDiscountFor(awa, 1000), 50);
+    expect(e.maxSaleDiscountFor(awa), 40);
+    final cashMethod = s.methods.firstWhere((m) => m.isCash);
+    final tooMuch = savon(e, units: 2)..discount = 45;
+    await expectLater(e.recordSale([tooMuch], [CartPayment(method: cashMethod, amount: 955, received: 955)], awa),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('par vente'))));
+
+    // Référence obligatoire pour Wave.
+    final wave = s.methods.firstWhere((m) => m.code == 'wave');
+    expect(wave.referenceMode, 'obligatoire');
+    await expectLater(e.recordSale([savon(e)], [CartPayment(method: wave, amount: 500)], awa),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Référence obligatoire'))));
+    final sale = await e.recordSale([savon(e)], [CartPayment(method: wave, amount: 500, reference: 'T-1')], awa,
+        operationUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000e1');
+    expect(sale.isSale, isTrue);
+
+    // Adaptateur : catégories, marque et mode de référence exposés.
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    final view = await adapter.execute('search', {'query': '', 'category': 'Hygiène'}, null);
+    expect((view['products'] as List).single, containsPair('brand', 'Dove'));
+    final prepared = await adapter.execute('preparePayment', {}, null);
+    expect([for (final m in prepared['methods'] as List) m['reference']]..sort(), ['aucune', 'obligatoire']);
+    await adapter.close();
+  });
 }

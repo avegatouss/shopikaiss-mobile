@@ -2,6 +2,8 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
+import '../offline/money.dart';
+
 import '../offline/api.dart';
 import '../offline/engine.dart';
 import '../offline/models.dart';
@@ -38,7 +40,12 @@ class V2Engine extends CaisseEngine {
     String Function()? newUuid,
     super.pinVerifier,
     this.declaredPayments = false,
+    this.contract21 = false,
   }) : _newUuid = newUuid ?? (() => const Uuid().v4());
+
+  /// Annonce `contrat.2_1` : formes 2.1 des données (catégories ordonnées, marque, fournisseur, unité, plafonds de
+  /// remise par opérateur, référence de paiement selon le moyen). Sans effet si le serveur ne la rend pas.
+  final bool contract21;
 
   /// Annonce `vente.paiement_declare` : les moyens déclarés (mobile money…) publiés pour la vente locale deviennent
   /// utilisables hors connexion comme les espèces, SI le serveur rend aussi cette capacité (ouverte par A le 29/10,
@@ -76,6 +83,9 @@ class V2Engine extends CaisseEngine {
   Map<int, String> _productUuids = const {};
   Map<int, String> _packagingUuids = const {};
   Map<int, List<String>> _rights = const {};
+
+  /// Plafonds de remise du rôle (contrat 2.1) : pourcentage en millionièmes, montant par vente ; null = sans limite.
+  Map<int, (BigInt?, int?)> _discountCaps = const {};
   String? _sessionUuid;
   V2Vat? _vat;
 
@@ -90,6 +100,7 @@ class V2Engine extends CaisseEngine {
     String Function()? newUuid,
     Future<bool> Function(String pin, String hash)? pinVerifier,
     bool declaredPayments = false,
+    bool contract21 = false,
   }) => V2Engine(
     store: store,
     v2: V2Store(store.database, SchemaValidator((file) => contractV2Schemas[file] ?? (throw SchemaProfileError('Schéma inconnu : $file')))),
@@ -101,6 +112,7 @@ class V2Engine extends CaisseEngine {
     newUuid: newUuid,
     pinVerifier: pinVerifier,
     declaredPayments: declaredPayments,
+    contract21: contract21,
   );
 
   static String apiBaseFor(String origin) => '$origin/api/caisse/v2';
@@ -139,7 +151,11 @@ class V2Engine extends CaisseEngine {
       transport: transport,
       appVersion: appVersion,
       localSchema: offlineSchemaVersion,
-      capabilities: [...CaisseV2Client.defaultCapabilities, if (declaredPayments) CaisseV2Client.declaredPaymentCapability],
+      capabilities: [
+        ...CaisseV2Client.defaultCapabilities,
+        if (declaredPayments) CaisseV2Client.declaredPaymentCapability,
+        if (contract21) CaisseV2Client.contract21Capability,
+      ],
     );
     _sync = V2Sync(_client!, v2);
     _token = await v2.read(V2Keys.token);
@@ -324,6 +340,18 @@ class V2Engine extends CaisseEngine {
   bool hasRight(Operator operator, String right) => (_rights[operator.id] ?? const []).contains(right);
 
   @override
+  int maxLineDiscountFor(Operator operator, int base) {
+    final terminal = super.maxLineDiscountFor(operator, base);
+    final percent = _discountCaps[operator.id]?.$1;
+    if (percent == null) return terminal;
+    final role = (BigInt.from(base) * percent ~/ BigInt.from(100000000)).toInt();
+    return role < terminal ? role : terminal;
+  }
+
+  @override
+  int? maxSaleDiscountFor(Operator operator) => _discountCaps[operator.id]?.$2;
+
+  @override
   Future<OfflineOperation> openSession(int float, Operator operator) => serialized(() async {
     final s = _requireSelling(allowWithoutSession: true);
     if (!s.rules.sessionOpening) throw const OfflineRefusal('L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.');
@@ -350,6 +378,18 @@ class V2Engine extends CaisseEngine {
         checkSale(s, lines, payments);
         _requireRight(operator, 'vente', 'vendre');
         if (lines.any((l) => l.discount > 0)) _requireRight(operator, 'remise', 'accorder une remise');
+        for (final l in lines) {
+          if (l.discount > maxLineDiscountFor(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
+        }
+        final saleCap = maxSaleDiscountFor(operator);
+        if (saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) > saleCap) {
+          throw OfflineRefusal('Remises au-delà du plafond de ${operator.name} par vente (${formatFcfa(saleCap)}).');
+        }
+        for (final p in payments) {
+          if (p.method.referenceMode == 'obligatoire' && (p.reference == null || p.reference!.trim().isEmpty)) {
+            throw OfflineRefusal('Référence obligatoire pour « ${p.method.name} ».');
+          }
+        }
         // Moyens admis : ceux du catalogue local (politique paiements.moyens_locaux et capacités du serveur), vérifiés
         // par checkSale ; une seule ligne d'espèces (la monnaie se rend sur elle).
         if (payments.where((p) => p.method.isCash).length > 1) throw const OfflineRefusal('Une seule ligne d’espèces par vente.');
@@ -383,7 +423,7 @@ class V2Engine extends CaisseEngine {
                   method: p.method.code,
                   amount: p.amount,
                   received: p.method.isCash ? (p.received ?? p.amount) : null,
-                  reference: p.method.isCash || p.reference == null || p.reference!.isEmpty ? null : p.reference,
+                  reference: p.method.isCash || p.method.referenceMode == 'aucune' || p.reference == null || p.reference!.isEmpty ? null : p.reference,
                 ),
             ],
             vat: _vat!,
@@ -533,20 +573,32 @@ class V2Engine extends CaisseEngine {
     final ids = await v2.localIds([...products.keys, ...packagings.keys]);
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
+    final categories = await v2.entities('categorie');
+    String? categoryOf(Map<String, dynamic> product) {
+      final category = categories[product['categorie_uuid']];
+      return category != null && category['actif'] == true ? category['nom'] as String : product['categorie'] as String?;
+    }
+
+    final orderedCategories = categories.values.where((c) => c['actif'] == true).toList()
+      ..sort((a, b) => (a['ordre'] as int).compareTo(b['ordre'] as int));
     final localMethods = (policies['paiements.moyens_locaux'] as List?)?.cast<String>() ?? const <String>[];
     // Espèces, et moyens déclarés quand les deux côtés ont la capacité ; toujours dans la politique de la boutique.
     final declared = declaredPayments && ((_state?['capacites_serveur'] as List?)?.contains(CaisseV2Client.declaredPaymentCapability) ?? false);
     final methods = [
       for (final m in (await v2.entities('moyen_paiement')).values)
         if (m['local'] == true && (m['especes'] == true || declared) && localMethods.contains(m['code']))
-          {'code': m['code'], 'nom': m['nom'], 'especes': m['especes'] == true},
+          {'code': m['code'], 'nom': m['nom'], 'especes': m['especes'] == true, 'reference': m['reference']},
     ];
     final rights = <int, List<String>>{};
+    final caps = <int, (BigInt?, int?)>{};
     final operators = <Map<String, dynamic>>[];
     for (final o in (await v2.entities('operateur')).values) {
       final id = int.tryParse('${o['operateur_id']}');
       if (id == null) continue;
       rights[id] = (o['droits'] as List).cast<String>();
+      if (o['remise_max_pourcent'] != null || o['remise_max_montant'] != null) {
+        caps[id] = (o['remise_max_pourcent'] == null ? null : parseMicros(o['remise_max_pourcent'] as String), o['remise_max_montant'] as int?);
+      }
       if (rights[id]!.contains('vente')) operators.add({'id': id, 'nom': o['nom'], 'pin': o['pin_empreinte']});
     }
     final session = await _ownSession();
@@ -570,6 +622,7 @@ class V2Engine extends CaisseEngine {
       'empreinte': cursor,
       'moyens': methods,
       'caissiers': operators,
+      'categories': [for (final c in orderedCategories) c['nom']],
       'produits': [
         for (final e in products.entries)
           if (e.value['actif'] == true && e.value['vente_locale'] == true)
@@ -577,7 +630,10 @@ class V2Engine extends CaisseEngine {
               'id': ids[e.key],
               'nom': e.value['nom'],
               'reference': e.value['reference'],
-              'categorie': e.value['categorie'],
+              'categorie': categoryOf(e.value),
+              'marque': e.value['marque'],
+              'fournisseur': e.value['fournisseur'],
+              'unite': (e.value['unite'] as Map?)?['nom'],
               'prix': e.value['prix'],
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
@@ -602,6 +658,7 @@ class V2Engine extends CaisseEngine {
     _productUuids = {for (final e in products.keys) ids[e]!: e};
     _packagingUuids = {for (final e in packagings.keys) ids[e]!: e};
     _rights = rights;
+    _discountCaps = caps;
     _sessionUuid = session?['session_uuid'] as String?;
     snapshot = Snapshot(raw);
   }

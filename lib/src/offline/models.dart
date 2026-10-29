@@ -55,15 +55,24 @@ class Snapshot {
     final q = fold(query.trim());
     return products
         .where((p) => category == null || p.category == category)
-        .where((p) => q.isEmpty || fold(p.name).contains(q) || fold(p.reference ?? '').contains(q) || p.codes.any((c) => c.code.contains(query.trim())))
+        .where(
+          (p) =>
+              q.isEmpty ||
+              fold(p.name).contains(q) ||
+              fold(p.reference ?? '').contains(q) ||
+              fold(p.brand ?? '').contains(q) ||
+              p.codes.any((c) => c.code.contains(query.trim())),
+        )
         .take(limit)
         .toList();
   }
 
-  /// Catégories du catalogue, dans l'ordre alphabétique (sans accents ni casse).
+  /// Catégories du catalogue : ordre de la boutique (contrat 2.1), sinon ordre alphabétique (sans accents ni casse).
   List<String> get categories {
-    final names = {for (final p in products) if (p.category != null && p.category!.isNotEmpty) p.category!}.toList();
-    return names..sort((a, b) => fold(a).compareTo(fold(b)));
+    final names = {for (final p in products) if (p.category != null && p.category!.isNotEmpty) p.category!};
+    final ordered = [for (final c in (raw['categories'] as List? ?? const [])) if (names.contains(c)) c as String];
+    final rest = names.where((n) => !ordered.contains(n)).toList()..sort((a, b) => fold(a).compareTo(fold(b)));
+    return [...ordered, ...rest];
   }
 
   Operator? operatorById(int? id) {
@@ -146,11 +155,18 @@ class OfflineRules {
 }
 
 class PaymentMethodInfo {
-  PaymentMethodInfo(Map<String, dynamic> m) : code = (m['code'] ?? '') as String, name = (m['nom'] ?? '') as String, isCash = m['especes'] == true;
+  PaymentMethodInfo(Map<String, dynamic> m)
+    : code = (m['code'] ?? '') as String,
+      name = (m['nom'] ?? '') as String,
+      isCash = m['especes'] == true,
+      referenceMode = (m['reference'] as String?) ?? (m['especes'] == true ? 'aucune' : 'facultative');
 
   final String code;
   final String name;
   final bool isCash;
+
+  /// Référence de transaction : `aucune`, `facultative` ou `obligatoire` (contrat 2.1, réglage Trésorerie du web).
+  final String referenceMode;
 }
 
 class Operator {
@@ -189,6 +205,9 @@ class Product {
       name = (m['nom'] ?? '') as String,
       reference = m['reference'] as String?,
       category = m['categorie'] as String?,
+      brand = m['marque'] as String?,
+      supplier = m['fournisseur'] as String?,
+      unit = m['unite'] as String?,
       price = (m['prix'] as num?)?.toInt() ?? 0,
       unlimitedStock = m['stock_illimite'] == true,
       stockMicros = parseMicros(((m['stock'] ?? '0') as String).replaceFirst('-', '')) ?? BigInt.zero,
@@ -200,6 +219,11 @@ class Product {
   final String name;
   final String? reference;
   final String? category;
+  final String? brand;
+  final String? supplier;
+
+  /// Nom de l'unité de vente (contrat 2.1), ou null.
+  final String? unit;
   final int price;
   final bool unlimitedStock;
   final BigInt stockMicros;
