@@ -5,6 +5,7 @@ import 'package:sqflite_common/sqlite_api.dart';
 import 'canonical_json.dart';
 import 'decimal6.dart';
 import 'schema_validator.dart';
+import 'v2_sale.dart' show V2Vat;
 
 /// Tables du protocole v2 (schéma local 4), créées à côté des tables v1 sans les modifier.
 ///
@@ -64,9 +65,9 @@ class V2Keys {
   static const revoked = 'v2.revocation';
 }
 
-/// Types de changement connus de ce client (donnees.json, révision 2.0).
+/// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
 const knownV2Types = {
-  'produit', 'conditionnement', 'code_barre', 'moyen_paiement', 'operateur', 'stock.projection', //
+  'boutique', 'produit', 'conditionnement', 'code_barre', 'moyen_paiement', 'operateur', 'stock.projection', //
   'politique', 'autorisation', 'revocation', 'session', 'operation_etat',
 };
 
@@ -240,6 +241,16 @@ class V2Store {
   Future<Map<String, Map<String, dynamic>>> entities(String type) async {
     final rows = await db.query('v2_entites', where: 'type = ? AND donnees IS NOT NULL', whereArgs: [type]);
     return {for (final r in rows) r['cle'] as String: Map<String, dynamic>.from(jsonDecode(r['donnees'] as String) as Map)};
+  }
+
+  /// TVA de la boutique de l'appairage (entité `boutique`, contrat 2.0.1). Null si le serveur ne la publie pas encore
+  /// (serveur 2.0.0) : l'appelant ne doit alors vendre que dans une boutique sans TVA connue, jamais deviner un taux.
+  Future<V2Vat?> shopVat() async {
+    final device = await read(V2Keys.device);
+    final shopUuid = device == null ? null : (jsonDecode(device) as Map)['boutique_uuid'] as String?;
+    final shop = shopUuid == null ? null : (await entities('boutique'))[shopUuid];
+    if (shop == null) return null;
+    return V2Vat(rate: shop['tva_taux'] as String, included: shop['tva_incluse'] as bool);
   }
 
   Future<Map<String, int>> counts() async {

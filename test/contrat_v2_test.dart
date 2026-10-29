@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/canonical_json.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/schema_validator.dart';
 
-/// Contrat de synchronisation v2 (session A, révision 2.0.0-l1, copie dans test/fixtures/contrat-v2) : le terminal fait
+/// Contrat de synchronisation v2 (session A, révision 2.0.1, copie dans test/fixtures/contrat-v2) : le terminal fait
 /// passer les MÊMES vecteurs de canonicalisation et les MÊMES fixtures que le serveur (`ContratV2Test`), preuve
 /// d'interopérabilité attendue en P5.
 void main() {
@@ -37,7 +37,7 @@ void main() {
 
   group('Schémas SK-SCHEMA-1 : fixtures valides et invalides', () {
     final fixtures = (json('fixtures/index.json')! as Map)['fixtures'] as List;
-    test('49 fixtures présentes', () => expect(fixtures, hasLength(49)));
+    test('50 fixtures présentes (révision 2.0.1)', () => expect(fixtures, hasLength(50)));
     for (final raw in fixtures) {
       final fixture = raw as Map;
       test('${fixture['fichier']}', () {

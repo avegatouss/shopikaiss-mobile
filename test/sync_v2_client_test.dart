@@ -52,6 +52,7 @@ class FakeV2Server implements V2Transport {
     put('stock.projection', _savon, {'produit_uuid': _savon, 'lot_uuid': null, 'quantite': '10.000000'});
     put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true});
     put('operateur', 'operateur:7', {'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': null, 'droits': ['vente']}, critical: true);
+    put('boutique', _shop, {'nom': 'Boutique', 'devise': 'FCFA', 'tva_taux': '18.000000', 'tva_incluse': true}, critical: true);
     put('session', 'session:$_terminal', {'session_uuid': _session, 'ouverte': true, 'ouverte_le': '2026-10-29T07:00:00Z', 'operateur_id': '7'});
   }
 
@@ -261,7 +262,8 @@ void main() {
     final packs = await store.entities('conditionnement');
     final builder = V2SaleBuilder(products: products, packagings: packs, revisions: const {}, newUuid: uuid);
     final cart = [V2CartLine(productUuid: _savon, packagingUuid: packaging, quantityMicros: Decimal6.parseInput(quantity)!)];
-    final payable = builder.payable(cart);
+    final vat = (await store.shopVat())!;
+    final payable = builder.payable(cart, vat: vat);
     final device = jsonDecode((await store.read(V2Keys.device))!) as Map;
     final epoch = int.parse((await store.read(V2Keys.epoch))!);
     final opUuid = operationUuid ?? uuid();
@@ -285,6 +287,7 @@ void main() {
           sessionUuid: _session,
           cart: cart,
           payment: V2Payment(method: 'especes', amount: payable, received: payable),
+          vat: vat,
         ),
       ),
       draftUuid: draftUuid,
@@ -295,7 +298,9 @@ void main() {
 
   test('les schémas embarqués sont exactement ceux du contrat (copie de A)', () {
     for (final f in Directory('test/fixtures/contrat-v2/schemas').listSync().whereType<File>()) {
-      expect(contractV2Schemas[p.basename(f.path)], f.readAsStringSync(), reason: p.basename(f.path));
+      // Fins de ligne neutralisées : la copie Git peut être en CRLF sur Windows, le contenu JSON est le même.
+      String lf(String? s) => (s ?? '').replaceAll('\r\n', '\n');
+      expect(lf(contractV2Schemas[p.basename(f.path)]), lf(f.readAsStringSync()), reason: p.basename(f.path));
     }
     expect(contractV2Schemas, hasLength(10));
   });
@@ -339,6 +344,9 @@ void main() {
     final line = (op['contenu']['lignes'] as List).single as Map;
     expect(line['quantite_base'], '24.000000');
     expect(line['total'], 11000);
+    // TVA 18 % incluse (entité boutique, 2.0.1) : 11000 × 18 / 118 = 1677,97 → 1678 ; à payer inchangé.
+    expect(op['contenu']['tva'], {'taux': '18.000000', 'incluse': true});
+    expect(op['contenu']['totaux'], {'brut': 11000, 'remises': 0, 'base_ht': 9322, 'tva': 1678, 'a_payer': 11000});
     expect((op['contenu']['mouvements'] as List).single['variation'], '-24.000000');
     expect(op['sequence'], 1, reason: 'séquence reprise après derniere_sequence du serveur');
     expect(await stock(), 10000000 - 24000000, reason: 'stock estimé négatif autorisé et visible');

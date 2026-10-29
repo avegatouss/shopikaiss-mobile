@@ -21,7 +21,7 @@ class V2Payment {
   final String? reference;
 }
 
-/// TVA de la boutique. Non publiée par le journal v2 en 2.0.0-l1 (demande B-REQ-005) : fournie par l'appelant.
+/// TVA de la boutique, figée dans la vente : entité `boutique` du journal v2 (contrat 2.0.1, [V2Store.shopVat]).
 class V2Vat {
   const V2Vat({this.rate = '0.000000', this.included = true});
 

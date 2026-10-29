@@ -104,8 +104,25 @@ empreinte (renvoi identique après réponse perdue, quarantaine `rejet_protocole
 mouvement (§6, exemple 10 → 7 → 7 → 7 vérifié), `/operations/etats` en lecture seule, accusés. Vente v2 construite par la
 règle de calcul unique du moteur (`money.dart`) et recoupée comme `CoherenceVente`.
 Tests : `test/sync_v2_client_test.dart` (16, faux serveur validant chaque requête par le contrat) ;
-`test/integration/serveur_a_v2_test.dart` (serveur A réel, `SK_V2_CODE`) — **pas encore exécuté** : code X9DX-6VPT expiré.
-Pas encore branché sur l'écran ni sur l'adaptateur Windows (prochain incrément) ; TVA à fournir par l'appelant (B-REQ-005).
+`test/integration/serveur_a_v2_test.dart` (serveur A réel ; `SK_V2_CODE`, ou reprise `SK_V2_REPRISE` + `SK_V2_VENTE`).
+Pas encore branché sur l'écran ni sur l'adaptateur Windows (prochain incrément).
+
+### Essai v2 contre le serveur A — 29/10/2026 09:40 : PASS
+
+Serveur 8130 figé sur A `11d66be1` (contrat 2.0.0), Caisse 2 pilote, code JVME-4K5W. Appairage : époque 10, dernière
+séquence 2. Instantané : 176 entités (49 produits, 42 projections de stock, 17 politiques…), curseur c-1. Vente locale
+Riz parfumé 5 kg (4 500 F), séquence 3, uuid 181e0701-9771-41f8-b7cb-c67febd79b3e : **integree, V-20261029-0002** ; renvoi
+identique → même état et même version, aucun doublon ; `/operations/etats` → integree / inconnue. Couverture : la
+projection 55 couvrant la vente arrive par le journal, stock estimé **55** (56 − 1, sans double décompte). Premier passage
+en échec côté essai seulement : 5 synchronisations en moins de 2 s, alors que le serveur ne rebalaye qu'au plus toutes les
+5 s (`balayage_min_secondes`) ; l'essai sonde désormais au rythme `delais.changements_secondes` ; reprise sur la même
+base appairée : PASS.
+
+### Contrat 2.0.1 (A `12dcea4e`, B-REQ-005)
+
+Copie du contrat 2.0.1 (50 fixtures), schémas embarqués régénérés, type critique `boutique` connu du client ;
+`V2Store.shopVat()` donne la TVA figée dans la vente (sans entité : aucune TVA devinée). Le serveur d'intégration peut
+passer en 2.0.1.
 
 ## Incrément 6 — intégration de C et hôte exécutable Windows
 
@@ -123,7 +140,11 @@ Validation sur le commit intégré (29/10) :
 - Android : `flutter build apk --release` OK, `ci.khoga.shopikaiss.terminal`, versionCode 7, certificat SHA-256
   F5:D8:84:71…C2:C5:1B:EB = clé de release existante ; aucune bibliothèque native ajoutée ;
 - Windows : `Build-Integration.ps1` OK (NuGet `C:/dev/nuget` au PATH), `Test-Launch.ps1` PASS, `Test-Native.ps1` 1/1.
-Non fait : recette sur téléphone réel, écran Windows branché sur l'hôte (bootstrap de C), installateur signé.
+Non fait : recette sur téléphone réel, installateur signé.
+
+Fusion `caa9aaa` de C `5cdfb9b` (bootstrap qui lance l'hôte, écrans appairage/PIN, journal `pending-sale.json`), sans
+conflit. Revalidation : suite **191/191** ; APK release identique (versionCode 7, certificat F5:D8:84…1B:EB, 9 bibliothèques
+natives, aucune SQLite ajoutée).
 
 ## Demandes à A
 
@@ -183,5 +204,5 @@ Bloque : vente v2 dans une boutique à TVA non nulle.
 1. Matrice de parité des parcours mobile actuels (doc 06 § C).
 2. Panier durable (brouillon persistant et reprise après redémarrage), écran « vente retrouvée » entre COMMIT et impression.
 3. Extraction d’un moteur sans Flutter (interfaces stockage/horloge/transport) et faux moteur pour C — contrat moteur v0.
-4. ~~Client v2~~ (incrément 5) : essai réel contre A (nouveau code), puis branchement écran Android et hôte Windows.
-5. Bootstrap Windows (C) : lancer `shopikaiss_moteur.exe` depuis l'interface, journal durable de l'intention d'encaissement.
+4. ~~Client v2~~ (incrément 5, essai A PASS) : branchement sur l'écran Android et l'hôte Windows (vente v2 du pilote).
+5. ~~Bootstrap Windows~~ (C, fusionné) : recette visuelle et matérielle sur poste pilote.

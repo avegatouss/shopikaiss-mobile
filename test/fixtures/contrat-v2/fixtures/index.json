@@ -153,6 +153,11 @@
             "valide": true
         },
         {
+            "fichier": "valides/donnees--boutique.json",
+            "schema": "donnees.json#/$defs/boutique",
+            "valide": true
+        },
+        {
             "fichier": "valides/donnees--code_barre.json",
             "schema": "donnees.json#/$defs/code_barre",
             "valide": true

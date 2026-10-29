@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.0.0-l1) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.0.1) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -304,6 +304,18 @@ const contractV2Schemas = <String, String>{
         "valeur": { "description": "Valeur JSON (entier, chaîne, booléen, liste ou null) ; jamais de nombre à virgule." },
         "source": { "enum": ["defaut", "entreprise", "boutique", "terminal"] },
         "verrouillee": { "type": "boolean" }
+      }
+    },
+    "boutique": {
+      "description": "Révision 2.0.1 (B-REQ-005) : paramètres de calcul de la boutique. Critique : un changement de TVA modifie le total des ventes suivantes ; une vente déjà commise garde la TVA qu'elle a figée.",
+      "type": "object",
+      "required": ["nom", "devise", "tva_taux", "tva_incluse"],
+      "additionalProperties": false,
+      "properties": {
+        "nom": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "devise": { "type": "string", "minLength": 1, "maxLength": 10 },
+        "tva_taux": { "$ref": "commun.json#/$defs/taux" },
+        "tva_incluse": { "type": "boolean" }
       }
     },
     "autorisation": {
