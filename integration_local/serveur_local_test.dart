@@ -24,9 +24,12 @@ class SwitchableTransport implements RegisterTransport {
   @override
   Future<ApiResponse> status(String a, String t) async => online ? inner.status(a, t) : _off;
   @override
-  Future<ApiResponse> snapshot(String a, String t) async => online ? inner.snapshot(a, t) : _off;
+  Future<ApiResponse> snapshot(String a, String t, {int? sinceSequence}) async =>
+      online ? inner.snapshot(a, t, sinceSequence: sinceSequence) : _off;
   @override
   Future<ApiResponse> synchronize(String a, String t, List<Map<String, dynamic>> o) async => online ? inner.synchronize(a, t, o) : _off;
+  @override
+  Future<ApiResponse> operationStates(String a, String t, List<String> u) async => online ? inner.operationStates(a, t, u) : _off;
 }
 
 void main() {

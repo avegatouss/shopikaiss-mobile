@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common/sqlite_api.dart';
 import 'package:uuid/uuid.dart';
 
+import '../sync_v2/v2_store.dart' show createV2SyncTables;
 import 'models.dart';
 
 /// Mémoire durable de la caisse hors ligne sur le terminal : appairage, dernier référentiel, file des opérations.
@@ -92,7 +93,7 @@ class StoreKeys {
 }
 
 /// Version du schéma SQLite local. Les migrations sont additives : aucune donnée existante n'est réécrite.
-const offlineSchemaVersion = 3;
+const offlineSchemaVersion = 4;
 
 /// Espace de noms des identifiants de mouvements : `v5(espace, "<uuid opération>:<rang de ligne>")`, recalculable à
 /// l'identique (migration, reprise) sans dépendre d'un tirage aléatoire.
@@ -137,6 +138,9 @@ StockMovement _movement(Map<String, Object?> r) => StockMovement(
   quantityMicros: r['quantite_micros'] as int,
   coveredAt: DateTime.tryParse(r['couvert_le'] as String? ?? '')?.toLocal(),
 );
+
+/// Schéma 4 : projection et file du protocole v2 (lib/src/sync_v2/v2_store.dart), à côté des tables v1 inchangées.
+Future<void> _createV4Tables(DatabaseExecutor db) => createV2SyncTables(db);
 
 Future<void> _createV3Tables(DatabaseExecutor db) async {
   await db.execute('CREATE TABLE paniers (uuid TEXT PRIMARY KEY, revision INTEGER NOT NULL, contenu TEXT NOT NULL, maj_le TEXT NOT NULL)');
@@ -247,6 +251,7 @@ class SqfliteOfflineStore implements OfflineStore {
           await db.execute('CREATE INDEX operations_statut ON operations (statut, sequence)');
           await _createV2Tables(db);
           await _createV3Tables(db);
+          await _createV4Tables(db);
         },
         // sqflite exécute la migration dans une transaction : interrompue, elle est annulée et rejouée au prochain
         // démarrage, sans effacement.
@@ -254,6 +259,8 @@ class SqfliteOfflineStore implements OfflineStore {
           if (oldVersion < 2) await _migrateTo2(db);
           // 2 → 3 : paniers conservés (table nouvelle, rien d'existant modifié).
           if (oldVersion < 3) await _createV3Tables(db);
+          // 3 → 4 : tables du protocole v2 (nouvelles, rien d'existant modifié).
+          if (oldVersion < 4) await _createV4Tables(db);
         },
         onDowngrade: (db, oldVersion, newVersion) async {
           // Une application plus ancienne ne doit pas lire un schéma qu'elle ne comprend pas, ni l'effacer.
@@ -265,6 +272,9 @@ class SqfliteOfflineStore implements OfflineStore {
   }
 
   Future<void> close() => _db.close();
+
+  /// Base partagée avec la file v2 ([V2Store]) : une vente v2 et ses mouvements s'écrivent dans la même base.
+  Database get database => _db;
 
   @override
   Future<String?> read(String key) async {
