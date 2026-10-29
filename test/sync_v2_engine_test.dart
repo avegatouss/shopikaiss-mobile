@@ -425,7 +425,7 @@ void main() {
           'fuseau': 'Africa/Abidjan',
         },
         'ticket': {'raison_sociale': null, 'adresse': null, 'telephone': null, 'ncc': null, 'entete': null, 'pied': null, 'largeur_papier': 80},
-        'devise_secondaire': null,
+        'devise_secondaire': {'libelle': 'EUR', 'taux': '655.957000'},
       }, critical: true)
       ..put('categorie', hygiene, {'nom': 'Hygiène', 'ordre': 2, 'actif': true})
       ..put('categorie', services, {'nom': 'Services', 'ordre': 1, 'actif': true})

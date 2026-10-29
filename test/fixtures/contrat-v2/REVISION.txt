@@ -1,5 +1,5 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commit : d1bfc9ac (révision 2.1, lot 1a : projection par révision contrat.2_1, donnees-2.1.json ; paiements ≤ 20, référence ≤ 120)
+Commit : 262a722f (révision 2.1, lot 1a + correctif devise_secondaire : projection par révision contrat.2_1, donnees-2.1.json ; paiements ≤ 20, référence ≤ 120)
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

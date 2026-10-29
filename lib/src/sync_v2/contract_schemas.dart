@@ -856,7 +856,10 @@ const contractV2Schemas = <String, String>{
                                     "type": "string",
                                     "maxLength": 20
                                 },
-                                "taux": "commun.json#/$defs/taux"
+                                "taux": {
+                                    "$ref": "commun.json#/$defs/quantite",
+                                    "description": "Unités de la devise secondaire pour 1 unité de la devise de la boutique ou l'inverse, tel que saisi au web ; format quantité (6 décimales)."
+                                }
                             }
                         }
                     ]
