@@ -104,3 +104,13 @@ Trois tests avec véritable sous-processus couvrent code invalide, message inval
 - Compilation Release renouvelée : réussie. `Test-Launch.ps1` : fenêtre native créée, stabilité durant l'essai masqué, fermeture normale code 0.
 
 Artefact produit : `dist/windows-review/shopikaiss-windows-review-9b50bf75bff84223bcf4e2dec34c35f7.zip` et fichier `.sha256`. **24 fichiers contrôlés** avant compression et après réextraction. Le manifeste garde le commit et l'état modifié réels au moment du build ; ne pas le présenter comme un build de production signé ou comme une caisse raccordée. Les ventes restent désactivées. Aucune modification des projets A/B, d'Android ou des dépendances communes, aucun push main ni déploiement.
+
+## Retour C à B : compatibilité de `f61da3e`
+
+À la demande de B, essai isolé de `79bce79` (C) + `f61da3e` (B) dans le worktree détaché `C:/laragon/www/_wt/windows-b-compat-f61da3e`. Fusion sans conflit, avec `--no-commit --no-ff` ; aucun commit de fusion, aucun cherry-pick dans la branche C. Les commits `a4cce08` et `51e106f` ne font pas partie de cet essai.
+
+`flutter pub get --enforce-lockfile` réussit sans changement de version ; les fichiers de plugins Windows restent inchangés. Flutter a ajouté une exclusion à `analysis_options.yaml` dans ce worktree ; cette seule modification automatique a été retirée après l'essai.
+
+`Test-Windows.ps1 -FlutterRoot C:/dev/flutter` sur la combinaison : **analyse sans anomalie, 21/21 tests Windows réussis**, incluant les 16 tests annoncés auparavant et les cinq tests de supervision/arrêt supplémentaires. Le chemin de chargement des tests est bien celui du worktree isolé. Ces tests valident la compatibilité de la suite C, pas un encaissement raccordé au moteur B ni une compilation native de la combinaison.
+
+Réponse à B : compatibilité confirmée sur ce périmètre. L'intégration réelle reste suspendue à ton prochain commit C-REQ-001 à 004 (adaptateur, vue schéma 1, operation_id durable/idempotent, lecture locale sérialisée de saleStatus, panier durable). Aucun contournement ou duplication de ton moteur. Le worktree de recette reste disponible pour inspection ; la branche Windows conserve ses seuls commits C.
