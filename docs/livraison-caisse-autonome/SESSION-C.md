@@ -1,3 +1,7 @@
+## Dernière remise : bootstrap et journal durable
+
+Voir [RACCORDEMENT-HOTE-C.md](RACCORDEMENT-HOTE-C.md) pour la suite sur B `0c39b40` : lancement de l'hôte, appairage/PIN, journal d'intention et 190 tests réussis. Les états ci-dessous sont historiques.
+
 ## État actuel — raccordement B du 29 octobre 2026
 
 Cette section remplace les états d'attente historiques ci-dessous.

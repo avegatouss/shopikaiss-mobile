@@ -5,7 +5,8 @@ import '../ipc/protocol.dart';
 import 'register_controller.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
-  const WindowsRegisterApp({super.key, this.controller});
+  const WindowsRegisterApp({super.key, this.controller, this.onConnection});
+  final VoidCallback? onConnection;
   final WindowsRegisterController? controller;
 
   @override
@@ -22,7 +23,9 @@ class WindowsRegisterApp extends StatelessWidget {
         border: OutlineInputBorder(),
       ),
     ),
-    home: controller == null ? const _NotConnected() : _Register(controller!),
+    home: controller == null
+        ? const _NotConnected()
+        : _Register(controller!, onConnection),
   );
 }
 
@@ -66,7 +69,8 @@ class _NotConnected extends StatelessWidget {
 }
 
 class _Register extends StatefulWidget {
-  const _Register(this.controller);
+  const _Register(this.controller, this.onConnection);
+  final VoidCallback? onConnection;
   final WindowsRegisterController controller;
   @override
   State<_Register> createState() => _RegisterState();
@@ -120,6 +124,12 @@ class _RegisterState extends State<_Register> {
                     : 'Moteur local indisponible',
               ),
             ),
+            if (widget.onConnection != null)
+              IconButton(
+                tooltip: 'Connexion au moteur',
+                onPressed: c.busy ? null : widget.onConnection,
+                icon: const Icon(Icons.settings_input_component),
+              ),
             const SizedBox(width: 16),
             IconButton(
               tooltip: 'Actualiser l’état local',

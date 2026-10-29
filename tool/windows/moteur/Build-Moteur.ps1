@@ -11,10 +11,10 @@ Push-Location $PSScriptRoot
 try {
     # Versions verrouillées : pubspec.lock de l'hôte aligné sur celui de l'application (aucune résolution réseau).
     & $flutter pub get --offline --enforce-lockfile
-    if ($LASTEXITCODE -ne 0) { throw 'Dépendances de l’hôte non résolues avec le verrou.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Dépendances de l''hôte non résolues avec le verrou.' }
     if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force }
     & $dart build cli -o $output
-    if ($LASTEXITCODE -ne 0) { throw 'Construction de l’hôte impossible.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Construction de l''hôte impossible.' }
     $exe = Join-Path $output 'bundle/bin/shopikaiss_moteur.exe'
     $dll = Join-Path $output 'bundle/lib/sqlite3.dll'
     if (!(Test-Path -LiteralPath $exe) -or !(Test-Path -LiteralPath $dll)) { throw 'Exécutable ou sqlite3.dll absent.' }
