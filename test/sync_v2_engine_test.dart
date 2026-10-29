@@ -361,4 +361,39 @@ void main() {
     await expectLater(e.recordSale([line], [cash(e, 450)], operator),
         throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('remise'))));
   });
+
+  test('moyens déclarés : hors connexion comme les espèces, seulement si le moteur ET le serveur ont la capacité', () async {
+    server
+      ..put('moyen_paiement', 'moyen:wave', {'code': 'wave', 'nom': 'Wave', 'especes': false, 'local': true})
+      ..put('politique', 'paiements.moyens_locaux', {'cle_politique': 'paiements.moyens_locaux', 'valeur': ['especes', 'wave'], 'source': 'boutique', 'verrouillee': false});
+
+    // Interrupteur coupé (état livré) : espèces seules, même si le serveur annonce la capacité.
+    server.capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare'];
+    var e = await paired();
+    expect([for (final m in e.snapshot!.methods) m.code], ['especes']);
+
+    // Interrupteur actif mais serveur sans la capacité : espèces seules.
+    server.capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes'];
+    e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true);
+    await e.load('https://boutique.exemple.ci');
+    await e.sync();
+    expect([for (final m in e.snapshot!.methods) m.code], ['especes']);
+
+    // Les deux : Wave proposé ; vente mixte enregistrée sans réseau, référence figée, pas de « reçu » hors espèces.
+    server.capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare'];
+    await e.sync();
+    expect([for (final m in e.snapshot!.methods) m.code]..sort(), ['especes', 'wave']);
+    final wave = e.snapshot!.methods.firstWhere((m) => m.code == 'wave');
+    final sale = await e.recordSale([savon(e)], [CartPayment(method: e.snapshot!.methods.firstWhere((m) => m.isCash), amount: 300, received: 300), CartPayment(method: wave, amount: 200, reference: 'T-8F2K1')],
+        e.snapshot!.operators.first, operationUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000d1');
+    final stored = (await e.v2.operation(sale.uuid))!['operation'] as Map;
+    final payments = ((stored['contenu'] as Map)['paiements'] as List).cast<Map>();
+    expect([for (final p in payments) [p['moyen'], p['montant'], p['recu'], p['reference']]], [
+      ['especes', 300, 300, null],
+      ['wave', 200, null, 'T-8F2K1'],
+    ]);
+    await e.sync();
+    expect((await e.saleStatus(sale.uuid))!.serverStatus, 'integree');
+  });
 }

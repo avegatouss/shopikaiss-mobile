@@ -84,8 +84,12 @@ class CaisseV2Client {
 
   static const protocol = 2;
 
-  /// Capacités de ce client en révision 2.0 (README §2). `vente.paiement_declare` n'est pas annoncée : non implémentée.
+  /// Capacités de ce client en révision 2.0 (README §2). `vente.paiement_declare` s'y ajoute seulement quand le moteur
+  /// l'active (voir `V2Engine.declaredPayments`).
   static const defaultCapabilities = ['vente.especes', 'stock.couverture', 'instantane.v1'];
+
+  /// Moyens « paiement externe déclaré » (03 `paiements.externe_declare`) : référence saisie, jamais une confirmation.
+  static const declaredPaymentCapability = 'vente.paiement_declare';
 
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;

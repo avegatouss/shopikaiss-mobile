@@ -37,7 +37,13 @@ class V2Engine extends CaisseEngine {
     super.clock,
     String Function()? newUuid,
     super.pinVerifier,
+    this.declaredPayments = false,
   }) : _newUuid = newUuid ?? (() => const Uuid().v4());
+
+  /// Annonce `vente.paiement_declare` : les moyens déclarés (mobile money…) publiés pour la vente locale deviennent
+  /// utilisables hors connexion comme les espèces, SI le serveur rend aussi cette capacité. Désactivé tant que A ne
+  /// l'a pas ouverte côté serveur.
+  final bool declaredPayments;
 
   /// Transport v1, pour vider seulement la file d'une installation 1.1.5 mise à jour (routes v1 gardées par le
   /// serveur) ; aucune nouvelle opération v1. Null : pas d'ancienne file (Windows).
@@ -83,6 +89,7 @@ class V2Engine extends CaisseEngine {
     DateTime Function()? clock,
     String Function()? newUuid,
     Future<bool> Function(String pin, String hash)? pinVerifier,
+    bool declaredPayments = false,
   }) => V2Engine(
     store: store,
     v2: V2Store(store.database, SchemaValidator((file) => contractV2Schemas[file] ?? (throw SchemaProfileError('Schéma inconnu : $file')))),
@@ -93,6 +100,7 @@ class V2Engine extends CaisseEngine {
     clock: clock,
     newUuid: newUuid,
     pinVerifier: pinVerifier,
+    declaredPayments: declaredPayments,
   );
 
   static String apiBaseFor(String origin) => '$origin/api/caisse/v2';
@@ -126,7 +134,13 @@ class V2Engine extends CaisseEngine {
       await v2.write(V2Keys.token, null);
     }
     apiBase = apiBaseFor(effective);
-    _client = CaisseV2Client(apiBase: apiBase!, transport: transport, appVersion: appVersion, localSchema: offlineSchemaVersion);
+    _client = CaisseV2Client(
+      apiBase: apiBase!,
+      transport: transport,
+      appVersion: appVersion,
+      localSchema: offlineSchemaVersion,
+      capabilities: [...CaisseV2Client.defaultCapabilities, if (declaredPayments) CaisseV2Client.declaredPaymentCapability],
+    );
     _sync = V2Sync(_client!, v2);
     _token = await v2.read(V2Keys.token);
     _client!.token = _token;
@@ -520,9 +534,12 @@ class V2Engine extends CaisseEngine {
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
     final localMethods = (policies['paiements.moyens_locaux'] as List?)?.cast<String>() ?? const <String>[];
+    // Espèces, et moyens déclarés quand les deux côtés ont la capacité ; toujours dans la politique de la boutique.
+    final declared = declaredPayments && ((_state?['capacites_serveur'] as List?)?.contains(CaisseV2Client.declaredPaymentCapability) ?? false);
     final methods = [
       for (final m in (await v2.entities('moyen_paiement')).values)
-        if (m['local'] == true && m['especes'] == true && localMethods.contains(m['code'])) {'code': m['code'], 'nom': m['nom'], 'especes': true},
+        if (m['local'] == true && (m['especes'] == true || declared) && localMethods.contains(m['code']))
+          {'code': m['code'], 'nom': m['nom'], 'especes': m['especes'] == true},
     ];
     final rights = <int, List<String>>{};
     final operators = <Map<String, dynamic>>[];
