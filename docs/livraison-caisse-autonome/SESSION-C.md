@@ -199,3 +199,11 @@ Panneau local : catalogue liste/grille, largeur des fiches, proportion catalogue
 Montant reçu : validation moteur automatique après 250 ms de pause, collage compris ; Entrée force la validation. Toute modification invalide immédiatement la confirmation. Une réponse antérieure à la dernière saisie ne la réactive pas. Aucun calcul monétaire ajouté dans Windows, aucun encaissement automatique.
 
 47 tests Windows passent et analyse sans remarque, dont le cas réponse montant tardive suivi d’une nouvelle saisie. Images : cadrage et demande A/B dans IMAGES-PRODUITS.md ; service non raccordé tant que manifeste/cache ne sont pas fournis.
+
+## Couleurs, disposition des photos et options de vente préparées
+
+Quatre palettes locales : vert, bleu, prune, terracotta. Emplacements images à gauche, au-dessus ou masqués, avec préférence entière/recadrée mémorisée pour les futures photos locales. Le cache image reste à raccorder ; pictogrammes seulement actuellement.
+
+Aperçu séparé client/remise globale/frais/note : champs inactifs, aucune mutation de panier simulée. Besoins moteur dans CLIENT-REMISES-FRAIS.md, envoyés à A/B au journal partagé. Les remises de ligne existantes restent raccordées.
+
+Validation : 47 tests Windows passent, analyse sans remarque, rendu Flutter fictif inspecté. Dernier ajustement purement visuel : palette propagée à la fenêtre de paiement.

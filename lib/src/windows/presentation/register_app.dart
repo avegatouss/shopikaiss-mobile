@@ -9,6 +9,7 @@ import 'sales_history.dart';
 import 'brand_logo.dart';
 import 'suspended_drafts.dart';
 import 'screen_settings.dart';
+import 'sale_options_preview.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -121,6 +122,22 @@ class _RegisterState extends State<_Register> {
   final _search = TextEditingController();
   final _scan = TextEditingController();
   final _screen = ScreenSettings.load();
+  ColorScheme get _palette =>
+      ColorScheme.fromSeed(seedColor: _screen.accentColor);
+  Widget _imageSlot({bool large = false}) => Container(
+    width: large ? double.infinity : 30,
+    height: large ? 60 : 30,
+    alignment: Alignment.center,
+    decoration: BoxDecoration(
+      color: _palette.primary.withValues(alpha: .06),
+      borderRadius: BorderRadius.circular(4),
+    ),
+    child: Icon(
+      Icons.inventory_2_outlined,
+      size: large ? 32 : 19,
+      color: _palette.primary,
+    ),
+  );
   bool get _compact => _screen.compact;
   Timer? _saveSettings;
   void _screenChanged() {
@@ -172,7 +189,10 @@ class _RegisterState extends State<_Register> {
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => _Payment(c),
+      builder: (_) => Theme(
+        data: Theme.of(context).copyWith(colorScheme: _palette),
+        child: _Payment(c),
+      ),
     );
   }
 
@@ -317,186 +337,190 @@ class _RegisterState extends State<_Register> {
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
     animation: c,
-    builder: (context, _) => CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.f4): _payment,
-        const SingleActivator(LogicalKeyboardKey.f2): _scanFocus.requestFocus,
-        const SingleActivator(LogicalKeyboardKey.f8): () {
-          if (_canEdit && _allowed('suspend') && c.lines.isNotEmpty) {
-            c.command(HostCommand.suspendDraft, {});
-          }
+    builder: (context, _) => Theme(
+      data: Theme.of(context).copyWith(colorScheme: _palette),
+      child: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.f4): _payment,
+          const SingleActivator(LogicalKeyboardKey.f2): _scanFocus.requestFocus,
+          const SingleActivator(LogicalKeyboardKey.f8): () {
+            if (_canEdit && _allowed('suspend') && c.lines.isNotEmpty) {
+              c.command(HostCommand.suspendDraft, {});
+            }
+          },
         },
-      },
-      child: Scaffold(
-        endDrawer: ScreenSettingsPanel(
-          settings: _screen,
-          onChanged: _screenChanged,
-        ),
-        appBar: AppBar(
-          toolbarHeight: 40,
-          title: Row(
-            children: [
-              const ShopikaissLogo(width: 125),
+        child: Scaffold(
+          endDrawer: ScreenSettingsPanel(
+            settings: _screen,
+            onChanged: _screenChanged,
+          ),
+          appBar: AppBar(
+            toolbarHeight: 40,
+            title: Row(
+              children: [
+                const ShopikaissLogo(width: 125),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Text(
+                    c.view['store_name'] as String? ?? 'Caisse',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              Builder(
+                builder: (context) => IconButton(
+                  tooltip: 'Réglages de l’écran',
+                  icon: const Icon(Icons.tune),
+                  onPressed: () => Scaffold.of(context).openEndDrawer(),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Ventes de ce poste',
+                onPressed: c.ready && !c.busy
+                    ? () => showDialog<void>(
+                        context: context,
+                        builder: (_) => SalesHistoryDialog(host: c.host),
+                      )
+                    : null,
+                icon: const Icon(Icons.receipt_long_outlined),
+              ),
+              Chip(
+                avatar: Icon(
+                  c.ready ? Icons.check_circle_outline : Icons.warning_amber,
+                  size: 18,
+                ),
+                label: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: MediaQuery.sizeOf(context).width * .32,
+                  ),
+                  child: Text(
+                    c.ready
+                        ? c.view['sync_label'] as String? ?? 'Moteur local prêt'
+                        : 'Moteur local indisponible',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+              if (widget.onConnection != null)
+                IconButton(
+                  tooltip: 'Connexion au moteur',
+                  onPressed: c.busy ? null : widget.onConnection,
+                  icon: const Icon(Icons.settings_input_component),
+                ),
               const SizedBox(width: 16),
+              IconButton(
+                tooltip: 'Actualiser l’état local',
+                onPressed: c.busy ? null : c.refresh,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          body: Column(
+            children: [
+              Material(
+                color: Colors.white,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 2,
+                  ),
+                  child: Row(
+                    children: [
+                      SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(
+                            value: false,
+                            icon: Icon(Icons.grid_view),
+                            label: Text('Visuelle'),
+                          ),
+                          ButtonSegment(
+                            value: true,
+                            icon: Icon(Icons.view_list),
+                            label: Text('Compacte'),
+                          ),
+                        ],
+                        selected: {_compact},
+                        onSelectionChanged: (value) =>
+                            _setCatalogueMode(value.single),
+                      ),
+                      const SizedBox(width: 12),
+                      TextButton.icon(
+                        onPressed: c.ready && !c.busy
+                            ? () => showDialog<void>(
+                                context: context,
+                                builder: (_) =>
+                                    SalesHistoryDialog(host: c.host),
+                              )
+                            : null,
+                        icon: const Icon(Icons.history),
+                        label: const Text('Ventes récentes'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (c.message != null)
+                MaterialBanner(
+                  content: Text(c.message!),
+                  actions: [
+                    if (c.uncertainOperation != null)
+                      TextButton(
+                        onPressed: c.busy ? null : c.reconcile,
+                        child: const Text('Vérifier la vente'),
+                      )
+                    else
+                      TextButton(
+                        onPressed: c.busy ? null : c.refresh,
+                        child: const Text('Vérifier l’état'),
+                      ),
+                  ],
+                ),
+              if (c.receipt != null)
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text('Vente enregistrée · ${c.receipt}'),
+                ),
               Expanded(
-                child: Text(
-                  c.view['store_name'] as String? ?? 'Caisse',
-                  overflow: TextOverflow.ellipsis,
+                child: LayoutBuilder(
+                  builder: (context, box) => box.maxWidth >= 900
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Expanded(
+                              flex: _screen.cataloguePercent,
+                              child: _catalogue(),
+                            ),
+                            Expanded(
+                              flex: 100 - _screen.cataloguePercent,
+                              child: _cart(),
+                            ),
+                          ],
+                        )
+                      : DefaultTabController(
+                          length: 2,
+                          child: Column(
+                            children: [
+                              const TabBar(
+                                tabs: [
+                                  Tab(text: 'Articles'),
+                                  Tab(text: 'Panier'),
+                                ],
+                              ),
+                              Expanded(
+                                child: TabBarView(
+                                  children: [_catalogue(), _cart()],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                 ),
               ),
             ],
           ),
-          actions: [
-            Builder(
-              builder: (context) => IconButton(
-                tooltip: 'Réglages de l’écran',
-                icon: const Icon(Icons.tune),
-                onPressed: () => Scaffold.of(context).openEndDrawer(),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Ventes de ce poste',
-              onPressed: c.ready && !c.busy
-                  ? () => showDialog<void>(
-                      context: context,
-                      builder: (_) => SalesHistoryDialog(host: c.host),
-                    )
-                  : null,
-              icon: const Icon(Icons.receipt_long_outlined),
-            ),
-            Chip(
-              avatar: Icon(
-                c.ready ? Icons.check_circle_outline : Icons.warning_amber,
-                size: 18,
-              ),
-              label: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: MediaQuery.sizeOf(context).width * .32,
-                ),
-                child: Text(
-                  c.ready
-                      ? c.view['sync_label'] as String? ?? 'Moteur local prêt'
-                      : 'Moteur local indisponible',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
-            if (widget.onConnection != null)
-              IconButton(
-                tooltip: 'Connexion au moteur',
-                onPressed: c.busy ? null : widget.onConnection,
-                icon: const Icon(Icons.settings_input_component),
-              ),
-            const SizedBox(width: 16),
-            IconButton(
-              tooltip: 'Actualiser l’état local',
-              onPressed: c.busy ? null : c.refresh,
-              icon: const Icon(Icons.refresh),
-            ),
-          ],
-        ),
-        body: Column(
-          children: [
-            Material(
-              color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 2,
-                ),
-                child: Row(
-                  children: [
-                    SegmentedButton<bool>(
-                      segments: const [
-                        ButtonSegment(
-                          value: false,
-                          icon: Icon(Icons.grid_view),
-                          label: Text('Visuelle'),
-                        ),
-                        ButtonSegment(
-                          value: true,
-                          icon: Icon(Icons.view_list),
-                          label: Text('Compacte'),
-                        ),
-                      ],
-                      selected: {_compact},
-                      onSelectionChanged: (value) =>
-                          _setCatalogueMode(value.single),
-                    ),
-                    const SizedBox(width: 12),
-                    TextButton.icon(
-                      onPressed: c.ready && !c.busy
-                          ? () => showDialog<void>(
-                              context: context,
-                              builder: (_) => SalesHistoryDialog(host: c.host),
-                            )
-                          : null,
-                      icon: const Icon(Icons.history),
-                      label: const Text('Ventes récentes'),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (c.message != null)
-              MaterialBanner(
-                content: Text(c.message!),
-                actions: [
-                  if (c.uncertainOperation != null)
-                    TextButton(
-                      onPressed: c.busy ? null : c.reconcile,
-                      child: const Text('Vérifier la vente'),
-                    )
-                  else
-                    TextButton(
-                      onPressed: c.busy ? null : c.refresh,
-                      child: const Text('Vérifier l’état'),
-                    ),
-                ],
-              ),
-            if (c.receipt != null)
-              Padding(
-                padding: const EdgeInsets.all(8),
-                child: Text('Vente enregistrée · ${c.receipt}'),
-              ),
-            Expanded(
-              child: LayoutBuilder(
-                builder: (context, box) => box.maxWidth >= 900
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Expanded(
-                            flex: _screen.cataloguePercent,
-                            child: _catalogue(),
-                          ),
-                          Expanded(
-                            flex: 100 - _screen.cataloguePercent,
-                            child: _cart(),
-                          ),
-                        ],
-                      )
-                    : DefaultTabController(
-                        length: 2,
-                        child: Column(
-                          children: [
-                            const TabBar(
-                              tabs: [
-                                Tab(text: 'Articles'),
-                                Tab(text: 'Panier'),
-                              ],
-                            ),
-                            Expanded(
-                              child: TabBarView(
-                                children: [_catalogue(), _cart()],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-              ),
-            ),
-          ],
         ),
       ),
     ),
@@ -592,7 +616,9 @@ class _RegisterState extends State<_Register> {
                     final p = c.products[index];
                     return ListTile(
                       dense: true,
-                      leading: const Icon(Icons.inventory_2_outlined),
+                      leading: _screen.imageLayout == 'hidden'
+                          ? null
+                          : _imageSlot(),
                       title: Text(p['name'] as String? ?? ''),
                       subtitle: Text(
                         'Stock : ${p['stock_label'] ?? "à vérifier"}',
@@ -605,7 +631,9 @@ class _RegisterState extends State<_Register> {
               : GridView.builder(
                   gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
                     maxCrossAxisExtent: _screen.tileWidth,
-                    mainAxisExtent: _screen.tileWidth * 115 / 175,
+                    mainAxisExtent:
+                        _screen.tileWidth * 115 / 175 +
+                        (_screen.imageLayout == 'top' ? 68 : 0),
                     crossAxisSpacing: 4,
                     mainAxisSpacing: 4,
                   ),
@@ -613,7 +641,7 @@ class _RegisterState extends State<_Register> {
                   itemBuilder: (context, index) {
                     final p = c.products[index];
                     return Card(
-                      color: const Color(0xffe4f1e9),
+                      color: _palette.primaryContainer.withValues(alpha: .45),
                       child: InkWell(
                         onTap:
                             c.ready && !c.busy && c.uncertainOperation == null
@@ -624,20 +652,22 @@ class _RegisterState extends State<_Register> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
+                              if (_screen.imageLayout == 'top') ...[
+                                _imageSlot(large: true),
+                                const SizedBox(height: 8),
+                              ],
                               Expanded(
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Padding(
-                                      padding: EdgeInsets.only(
-                                        right: 6,
-                                        top: 2,
+                                    if (_screen.imageLayout == 'left')
+                                      Padding(
+                                        padding: EdgeInsets.only(
+                                          right: 6,
+                                          top: 2,
+                                        ),
+                                        child: _imageSlot(),
                                       ),
-                                      child: Icon(
-                                        Icons.inventory_2_outlined,
-                                        size: 19,
-                                      ),
-                                    ),
                                     Expanded(
                                       child: Text(
                                         p['name'] as String? ?? '',
@@ -665,10 +695,10 @@ class _RegisterState extends State<_Register> {
                                       ),
                                     ),
                                   ),
-                                  const CircleAvatar(
+                                  CircleAvatar(
                                     radius: 12,
-                                    backgroundColor: Color(0xff164e42),
-                                    child: Icon(
+                                    backgroundColor: _palette.primary,
+                                    child: const Icon(
                                       Icons.add,
                                       size: 16,
                                       color: Colors.white,
@@ -718,6 +748,17 @@ class _RegisterState extends State<_Register> {
             ],
           ),
           const Divider(height: 18),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => const SaleOptionsPreview(),
+              ),
+              icon: const Icon(Icons.person_outline, size: 18),
+              label: const Text('Client, remise et frais · aperçu'),
+            ),
+          ),
           Expanded(
             child: c.lines.isEmpty
                 ? const Center(child: Text('Scannez votre premier article.'))
