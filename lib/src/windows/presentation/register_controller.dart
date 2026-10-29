@@ -16,6 +16,9 @@ class WindowsRegisterController extends ChangeNotifier {
         } else if (event['name'] == 'connected') {
           _transportAvailable = true;
           ready = false;
+          // B's revision is process-local. The supervisor proves old host exit.
+          view = const {};
+          paymentMethods = const [];
           if (uncertainOperation == null) message = null;
           unawaited(refresh());
         } else if (event['name'] == 'committed') {
@@ -38,6 +41,7 @@ class WindowsRegisterController extends ChangeNotifier {
   String? uncertainOperation;
   String? receipt;
   String? _checkoutId;
+  List<Map<String, dynamic>> paymentMethods = const [];
 
   List<Map<String, dynamic>> get products => _rows('products');
   List<Map<String, dynamic>> get lines => _rows('lines');
@@ -97,9 +101,16 @@ class WindowsRegisterController extends ChangeNotifier {
     if (!ready || busy || uncertainOperation != null) return;
     busy = true;
     message = null;
+    if (command == HostCommand.preparePayment) paymentMethods = const [];
     notifyListeners();
     try {
-      await host.call(command, arguments: arguments);
+      final result = await host.call(command, arguments: arguments);
+      if (command == HostCommand.preparePayment) {
+        paymentMethods = (result['methods'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .where((m) => m['code'] is String && m['name'] is String)
+            .toList();
+      }
       _checkoutId = null;
       await refresh();
     } on HostFailure catch (error) {
@@ -169,6 +180,13 @@ class WindowsRegisterController extends ChangeNotifier {
         uncertainOperation = null;
         _checkoutId = null;
         message = null;
+        await refresh();
+      } else if (result['state'] == 'not_found' &&
+          result['definitive'] == true &&
+          result['operation_id'] == operation) {
+        uncertainOperation = null;
+        _checkoutId = null;
+        message = 'Vente non enregistrée. Le panier peut être repris.';
         await refresh();
       } else {
         // A simple "not found" is not proof that another process won't commit.

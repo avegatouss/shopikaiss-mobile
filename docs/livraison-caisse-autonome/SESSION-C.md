@@ -1,3 +1,26 @@
+## État actuel — raccordement B du 29 octobre 2026
+
+Cette section remplace les états d'attente historiques ci-dessous.
+
+Branche de remise : `feat/caisse-windows-raccordement`, worktree `C:/laragon/www/_wt/windows-engine-integration`. Fusion `276c76e` de C `2204e54` et B `1a178ef`, sans conflit. Aucun push, modification de main, serveur ou base de production.
+
+- `BEngineAdapter` raccorde le vrai `LocalRegisterAdapter` au protocole C. Ajout des commandes pair, login, addProduct et clear. Les identifiants de consultation/réimpression sont transmis au troisième paramètre attendu par B ; deux identifiants contradictoires sont refusés. Une erreur B certaine conserve sa preuve ; les autres restent de résultat inconnu.
+- Le catalogue utilise addProduct. Le dialogue de paiement propose les moyens fournis par le moteur et demande setPayment avant validation. Aucun calcul de total Windows ; paiement exact et unique à ce stade.
+- Une reconnexion accepte la révision du nouveau processus, qui repart de zéro. Le panier reste bloqué si une vente est incertaine. Seul not_found définitif pour le même UUID autorise sa reprise, après lecture locale sérialisée par B.
+- Trois tests passent par les trames IPC, le vrai adaptateur B et une vraie base SQLite : panier et paiement restaurés ; réponse d'encaissement perdue puis base rouverte, vente retrouvée et rejeu sans doublon ; refus certain et consultation locale sans appel réseau. Le transport HTTP est simulé et ce raccordement utilise un hôte en mémoire, pas encore l'exécutable moteur.
+- Vérifications : analyse Windows sans anomalie, 30/30 tests Windows ; suite fusionnée `flutter test --no-pub --exclude-tags integration` : 167 tests réussis. Les tests contre le serveur réel sont exclus volontairement. Aucun changement de pubspec/lock ni de code métier B.
+
+### Remise à B
+
+Intégrer la branche complète `feat/caisse-windows-raccordement` dans la branche B (elle contient les précédents commits Windows et a déjà B 1a178ef dans ses ancêtres). Ne pas reprendre uniquement le dernier commit si les fichiers Windows antérieurs sont absents. B assemble ensuite l'hôte exécutable avec BEngineAdapter, initialise SQLite FFI dans LocalAppData, appelle start() avant d'accepter les commandes et ferme proprement adaptateur/base à la sortie. Un seul hôte doit posséder la base, y compris entre sessions Windows. Conserver RegisterCashierPlugins ; ne pas réintroduire l'enregistrement WebView non qualifié.
+
+### Portes encore ouvertes
+
+Le point d'entrée distribué reste fermé aux ventes : pas de nouvel exécutable raccordé produit ici. Restent l'assemblage et le bootstrap réel, écrans appairage/PIN, persistance de l'UUID incertain avant envoi et récupération après redémarrage complet de l'interface, validation Android et Windows sur le commit intégré, recette serveur isolé et matériel. Le test de reprise livré conserve le contrôleur UI pendant la réouverture de la base : il ne prouve pas encore la reprise après arrêt complet de l'interface. Ne pas confondre panier durable B et journal durable de l'intention Windows.
+
+Restent aussi les fonctions non exposées (rendu monnaie, remises, paiements multiples, ouverture hors ligne Windows selon capacités B), impression/spouleur et distribution signée. Le ZIP de revue antérieur reste sans moteur raccordé ; aucun pilote production autorisé par ces tests. Les résultats et demandes d'accord de A sont hors de cette livraison C.
+
+---
 # Session C — Windows
 
 Base : `c5f9483`. Branche : `feat/caisse-autonome-windows`.

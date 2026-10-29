@@ -6,6 +6,10 @@ const maxIpcFrameBytes = 1024 * 1024;
 
 /// Private local transport contract. This is not the server v2 contract.
 enum HostCommand {
+  pair,
+  login,
+  addProduct,
+  clear,
   status,
   view,
   search,

@@ -230,7 +230,7 @@ class _RegisterState extends State<_Register> {
                       child: InkWell(
                         onTap:
                             c.ready && !c.busy && c.uncertainOperation == null
-                            ? () => c.command(HostCommand.scan, {
+                            ? () => c.command(HostCommand.addProduct, {
                                 'product_id': p['id'],
                               })
                             : null,
@@ -353,6 +353,27 @@ class _Payment extends StatelessWidget {
               style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 20),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final method in c.paymentMethods)
+                  OutlinedButton.icon(
+                    icon: Icon(
+                      method['cash'] == true
+                          ? Icons.payments_outlined
+                          : Icons.account_balance_wallet_outlined,
+                    ),
+                    onPressed: c.canPay
+                        ? () => c.command(HostCommand.setPayment, {
+                            'method': method['code'],
+                          })
+                        : null,
+                    label: Text(method['name'] as String),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
             Text(
               c.view['payment_label'] as String? ??
                   'Choisissez un moyen autorisé dans le moteur local.',

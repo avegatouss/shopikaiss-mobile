@@ -1,3 +1,18 @@
+## Addendum de raccordement validé sur B 1a178ef
+
+Les points ci-dessous précisent ou remplacent les propositions historiques suivantes :
+
+- Adaptateur livré : `lib/src/windows/ipc/b_engine_adapter.dart`, autour de LocalRegisterAdapter. Les 17 commandes sont reconnues, dont pair, login, addProduct et clear. Pair est une opération de configuration réseau ; elle n'est pas utilisable comme action de vente hors ligne. Le reste des règles métier appartient à B.
+- saleStatus et reprint acceptent l'operation_id de l'enveloppe ou des arguments et le transmettent au troisième paramètre B. Des identifiants contradictoires sont rejetés. AdapterFailure devient HostFailure(outcomeUnknown: !notCommitted) ; aucune exception inattendue n'est transformée en refus certain.
+- revision est monotone dans un processus, pas entre redémarrages. L'événement connected invalide l'ancienne vue avant rechargement, sans effacer une vente incertaine.
+- not_found, definitive:true et le même operation_id déverrouillent le panier. Cela repose sur la sérialisation B et, au redémarrage, sur la sortie prouvée de l'ancien hôte, la même base et son verrou exclusif. not_found seul ne suffit jamais.
+- B 1a178ef garantit l'idempotence par operation_id et le panier consommé en transaction. Il ne valide pas les arguments C draft_id/revision : ne pas présenter ceux-ci comme une précondition serveur déjà appliquée.
+- Le panier B est durable. L'UUID d'une intention incertaine du contrôleur C reste en mémoire : un journal durable avant envoi et sa réconciliation au démarrage restent obligatoires avant d'activer les ventes dans le bootstrap réel.
+- preparePayment fournit les moyens proposés par l'écran ; setPayment choisit le moyen avec le montant exact calculé par B. Aucun calcul financier local Windows. Rendu monnaie et autres capacités métier non encore exposées restent à traiter.
+
+Preuves et consignes d'assemblage : voir la section actuelle de SESSION-C.md. L'hôte exécutable reste à assembler par B sur le commit intégré ; les tests SQLite/IPC ne constituent pas sa recette native.
+
+---
 # Proposition de raccordement Windows à B
 
 Ce contrat local de présentation/transport est proposé par C. Il ne remplace pas les contrats métier de B ou l’API serveur de A. À valider puis adapter par B avant intégration. Version IPC : 1.

@@ -12,6 +12,8 @@ class _Host implements WindowsHost {
   String? committedId;
   bool loseReply = false;
   bool reconciled = false;
+  bool definitive = false;
+  String? lookupId;
   Completer<Map<String, dynamic>>? pendingView;
   final Map<String, dynamic> state = {
     'schema': 1,
@@ -46,6 +48,17 @@ class _Host implements WindowsHost {
     if (command == HostCommand.view && pendingView != null) {
       return pendingView!.future;
     }
+    if (command == HostCommand.preparePayment) {
+      return {
+        'methods': [
+          {'code': 'especes', 'name': 'Espèces', 'cash': true},
+        ],
+      };
+    }
+    if (command == HostCommand.setPayment) {
+      state['payment_valid'] = true;
+      state['payment_label'] = 'Espèces 2 000 F';
+    }
     if (command == HostCommand.commitSale) {
       committedId = operationId;
       if (loseReply) {
@@ -64,7 +77,8 @@ class _Host implements WindowsHost {
     if (command == HostCommand.saleStatus) {
       return {
         'state': reconciled ? 'committed' : 'not_found',
-        'operation_id': arguments['operation_id'],
+        'operation_id': lookupId ?? arguments['operation_id'],
+        'definitive': definitive,
         'number': 'TEST-1',
       };
     }
@@ -76,6 +90,85 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets('catalogue and payment buttons use B commands', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final host = _Host();
+    host.state['payment_valid'] = false;
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Produit de test'));
+    await tester.pumpAndSettle();
+    expect(host.calls, contains(HostCommand.addProduct));
+    expect(host.calls, isNot(contains(HostCommand.scan)));
+    await tester.tap(find.text('Encaisser · F4'));
+    await tester.pumpAndSettle();
+    final confirm = find.widgetWithText(FilledButton, 'Confirmer le paiement');
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
+    await tester.tap(find.text('Espèces'));
+    await tester.pumpAndSettle();
+    expect(host.calls, contains(HostCommand.setPayment));
+    expect(tester.widget<FilledButton>(confirm).onPressed, isNotNull);
+    await tester.tap(confirm);
+    await tester.pumpAndSettle();
+    expect(
+      host.calls.where((call) => call == HostCommand.commitSale).length,
+      1,
+    );
+  });
+  test(
+    'only definitive absence for the same operation unlocks the basket',
+    () async {
+      final host = _Host()..loseReply = true;
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await c.refresh();
+      await c.commitSale();
+      final operation = c.uncertainOperation;
+      host.definitive = true;
+      host.lookupId = 'another-sale';
+      await c.reconcile();
+      expect(c.uncertainOperation, operation);
+      expect(c.canPay, false);
+      host.lookupId = null;
+      await c.reconcile();
+      expect(c.uncertainOperation, isNull);
+      expect(c.canPay, true);
+      expect(
+        host.calls.where((call) => call == HostCommand.commitSale).length,
+        1,
+      );
+    },
+  );
+
+  test('restarted engine may restart its view revision at zero', () async {
+    final host = _Host();
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    host.state['revision'] = 200;
+    await c.refresh();
+    host.state['revision'] = 0;
+    host.state['total_label'] = 'Nouveau moteur';
+    host.changes.add({'name': 'disconnected'});
+    host.changes.add({'name': 'connected'});
+    await Future<void>.delayed(Duration.zero);
+    expect(c.view['revision'], 0);
+    expect(c.view['total_label'], 'Nouveau moteur');
+    expect(c.ready, true);
+  });
   test('late view after disconnection cannot enable payment', () async {
     final host = _Host()..pendingView = Completer<Map<String, dynamic>>();
     final c = WindowsRegisterController(host);
