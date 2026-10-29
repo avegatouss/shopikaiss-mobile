@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
+import 'sales_history.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -170,6 +171,16 @@ class _RegisterState extends State<_Register> {
         appBar: AppBar(
           title: Text(c.view['store_name'] as String? ?? 'Shopikaiss'),
           actions: [
+            IconButton(
+              tooltip: 'Ventes de ce poste',
+              onPressed: c.ready && !c.busy
+                  ? () => showDialog<void>(
+                      context: context,
+                      builder: (_) => SalesHistoryDialog(host: c.host),
+                    )
+                  : null,
+              icon: const Icon(Icons.receipt_long_outlined),
+            ),
             Chip(
               avatar: Icon(
                 c.ready ? Icons.check_circle_outline : Icons.warning_amber,

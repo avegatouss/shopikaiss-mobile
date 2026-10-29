@@ -17,6 +17,7 @@ class _Host implements WindowsHost {
   bool loseReply = false;
   bool reconciled = false;
   bool definitive = false;
+  bool failHistory = false;
   String? lookupId;
   Completer<Map<String, dynamic>>? pendingView;
   final Map<String, dynamic> state = {
@@ -50,6 +51,28 @@ class _Host implements WindowsHost {
   }) async {
     calls.add(command);
     argumentsByCommand[command] = arguments;
+    if (command == HostCommand.history) {
+      if (failHistory) {
+        throw const HostFailure('offline', 'Moteur indisponible');
+      }
+      return {
+        'items': [
+          {
+            'operation_id': 'sale-1',
+            'number': 'HL-1',
+            'server_number': 'V-1',
+            'total_label': '2 000 F',
+            'server_status': 'integree',
+          },
+        ],
+      };
+    }
+    if (command == HostCommand.reprint) {
+      return {
+        'operation_id': arguments['operation_id'],
+        'lines': ['DUPLICATA', 'HL-1'],
+      };
+    }
     if (command == HostCommand.view && pendingView != null) {
       return pendingView!.future;
     }
@@ -95,6 +118,62 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets(
+    'history and duplicate never resubmit or edit the current basket',
+    (tester) async {
+      final host = _Host();
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Ventes de ce poste'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Intégrée au serveur'), findsOneWidget);
+      await tester.tap(find.text('V-1 · 2 000 F'));
+      await tester.pumpAndSettle();
+      expect(find.text('DUPLICATA\nHL-1'), findsOneWidget);
+      expect(host.argumentsByCommand[HostCommand.reprint], {
+        'operation_id': 'sale-1',
+      });
+      expect(
+        host.calls.every(
+          (command) => [
+            HostCommand.view,
+            HostCommand.history,
+            HostCommand.reprint,
+          ].contains(command),
+        ),
+        isTrue,
+      );
+      await tester.tap(find.text('Fermer'));
+      await tester.pumpAndSettle();
+      expect(c.lines.single['id'], 'l1');
+    },
+  );
+
+  testWidgets('failed history remains closable and retry is read only', (
+    tester,
+  ) async {
+    final host = _Host()..failHistory = true;
+    final c = WindowsRegisterController(host);
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Ventes de ce poste'));
+    await tester.pumpAndSettle();
+    expect(find.text('Moteur indisponible'), findsOneWidget);
+    host.failHistory = false;
+    await tester.tap(find.text('Actualiser'));
+    await tester.pumpAndSettle();
+    expect(find.text('V-1 · 2 000 F'), findsOneWidget);
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+  });
   testWidgets(
     'quantity stays an engine command and clearing requires confirmation',
     (tester) async {

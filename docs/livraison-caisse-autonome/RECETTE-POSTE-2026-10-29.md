@@ -63,3 +63,9 @@ La fenêtre utilisateur reste pour l'instant sur Cocody. Sa fermeture automatis�
 Suite après confirmation utilisateur « fenêtre fermée » : absence des processus vérifiée, dossiers absolus contrôlés sous LocalAppData/ShopiKaiss, absence d'intention en attente vérifiée. Base Cocody déplacée sans suppression vers `caisse-cocody-conservee-20261029` ; base Tablette déplacée vers `caisse` pour devenir la base active du bootstrap. Relecture en mode lecture seule : Plateau avec une vente, Cocody avec zéro opération. Aucun compteur PIN ni donnée métier modifié par ce changement de dossiers.
 
 Build Release propre `ddf3a74` compilé et installé par utilisateur sous `Programs/Shopikaiss-Recette/ddf3a746fcff`, raccourcis mis à jour. Il comprend le correctif PIN non défini. Application relancée sur la base active Plateau/Tablette Pâtisserie ; connexion caissier à effectuer dans l'interface. La vente et les tests ci-dessus restent ceux du moteur réel installé, sans prétendre à une recette complète de l'interface, de l'imprimante ou à un mode v2 déjà raccordé.
+
+## Historique accessible dans la caisse Windows
+
+Ajout du bouton « Ventes de ce poste » : consultation des 200 ventes locales les plus récentes, état serveur et affichage du duplicata calculé par le moteur. Aucun paiement renvoyé, aucun calcul financier côté écran, aucune impression physique déclenchée. En cas d'erreur, la consultation peut être fermée ou rechargée sans toucher au panier.
+
+Validation : 43/43 tests Windows réussis, dont deux nouveaux scénarios d'interface (historique/duplicata sans mutation et reprise après erreur). Les deux remarques de style de l'analyse initiale ont été corrigées ; analyse ciblée finale sans anomalie. B reste au commit cb10844 ; le raccordement v2 de l'hôte n'est pas livré. Pas de nouveau test réseau réel ni de vente démo dans ce lot.
