@@ -25,3 +25,11 @@ B est au commit local `f5247a4` lors de la vérification. Son client v2 et son e
 Attente des informations de test demandées à l'utilisateur : boutique/caisse de démonstration, code d'appairage récent, caissier de test. Aucune vente distante effectuée. Les contrôles suivants restent à exécuter après appairage : téléchargement du catalogue, PIN et session, scan/recherche, quantités, paiement, reprise de panier après fermeture, vente avec perte de réponse, synchronisation après coupure, stock sans double déduction, impression réelle. L'ouverture de session Windows et les capacités de paiement encore absentes ne doivent pas être présentées comme terminées.
 
 B doit reprendre au minimum le correctif transport `9f079ed` avant sa prochaine validation de l'hôte v2 (les fichiers sont exclusivement Windows).
+
+## Suite : appairage Cocody et panier durable
+
+Avec le nouveau code fourni par l'utilisateur, appairage réussi via le véritable hôte installé, dans le dossier de données de l'application. Boutique renvoyée : Cocody ; état prêt, aucune raison de blocage, session ouverte, sept produits téléchargés. Aucun code, PIN ni jeton n'est enregistré dans ce compte rendu.
+
+Sur un panier initialement vide : ajout d'un produit puis quantité passée à deux, total calculé par le moteur 2 360 F. Arrêt propre de l'hôte et relance : même UUID de brouillon, même ligne et quantité deux. Panier de test vidé ensuite ; aucune vente et aucun paiement enregistrés. L'application installée a été relancée et son arbre d'accessibilité montre désormais le choix du caissier et le PIN, sans erreur de démarrage.
+
+Deux opérateurs sont proposés, Administrateur et Gérante Démo. La correspondance du PIN fourni a été demandée à l'utilisateur avant toute tentative, sans essai successif sur plusieurs comptes. La suite d'encaissement reste en attente de cette précision. Ces contrôles utilisent toujours l'hôte v1 ; l'activation v2 serveur ne change pas le protocole du binaire installé.
