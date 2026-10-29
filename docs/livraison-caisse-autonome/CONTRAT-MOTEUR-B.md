@@ -92,5 +92,14 @@ Montants et libellés calculés par le moteur ; Windows n'en recalcule aucun.
 - Paiement unique par vente (espèces avec monnaie, ou un moyen autorisé) ; multi-paiement : version suivante.
 - Remises de ligne non exposées (le moteur les sait valider) ; ouverture de session hors ligne non exposée
   (`engine.openSession`) : à ajouter si Windows doit ouvrir sa session hors ligne.
-- Pas d'hôte exécutable fourni par B tant que le `WindowsHostServer` de C n'est pas intégré : l'entrée
-  `bin/`/`main` de l'hôte se fera sur le commit intégré (B), avec `sqflite_common_ffi` en dépendance normale.
+- Hôte exécutable livré (voir ci-dessous) ; l'interface Windows ne le lance pas encore (bootstrap de C).
+
+## Hôte exécutable (livré sur le commit intégré)
+
+`tool/windows/moteur/Build-Moteur.ps1 -FlutterRoot C:/dev/flutter` produit `build/windows-moteur/bundle/` :
+`bin/shopikaiss_moteur.exe` et `lib/sqlite3.dll` (garder cette structure), plus `integration-only.json` (empreintes,
+`production_ready:false`). Lancement : `shopikaiss_moteur.exe [--dossier <absolu>] [--version <app>]` ; dossier par défaut
+`%LOCALAPPDATA%\ShopiKaiss\caisse`. stdout = trames IPC v1 ; stderr = messages courts sans donnée. Sortie : 0 après EOF
+(commandes et synchronisation en cours terminées, base fermée, verrou libéré), 2 argument invalide, 3 base déjà possédée
+par un autre hôte (verrou système sur `caisse.lock`, y compris autre session Windows), 1 démarrage impossible.
+`sqflite_common_ffi` reste propre à ce paquet : l'APK Android n'embarque pas SQLite natif.

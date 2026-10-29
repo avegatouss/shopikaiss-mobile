@@ -59,7 +59,10 @@ class LocalRegisterAdapter {
     _started = true;
   }
 
+  /// Attend la synchronisation en cours (jamais interrompue au milieu d'une écriture), puis se détache du moteur.
   Future<void> close() async {
+    await _syncTask;
+    await _queue;
     engine.removeListener(_engineChanged);
     await _changes.close();
   }
@@ -122,7 +125,7 @@ class LocalRegisterAdapter {
       case 'reprint':
         return _reprint(_requireOperationId(operationId));
       case 'synchronize':
-        unawaited(_synchronize());
+        scheduleSynchronization();
         return {'scheduled': true};
       default:
         throw AdapterFailure('commande_inconnue', 'Commande locale non reconnue : $command.');
@@ -409,6 +412,13 @@ class LocalRegisterAdapter {
         duplicate: true,
       ),
     };
+  }
+
+  Future<void>? _syncTask;
+
+  /// Planifie une synchronisation (une seule à la fois) ; l'hôte l'appelle aussi périodiquement.
+  void scheduleSynchronization() {
+    _syncTask ??= _synchronize().whenComplete(() => _syncTask = null);
   }
 
   /// Planifiée, jamais attendue par la commande : le réseau ne bloque pas la file des commandes locales.
