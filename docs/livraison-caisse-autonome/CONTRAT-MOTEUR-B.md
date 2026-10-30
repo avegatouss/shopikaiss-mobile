@@ -176,3 +176,7 @@ par un autre hôte (verrou système sur `caisse.lock`, y compris autre session W
 ## Activation du contrat 2.1
 
 `contract21: true` est activé sur Android (`terminal_session.dart`) et sur l'hôte Windows (`engine_host.dart`). Le format 2.1 ne s'applique que si le serveur rend `contrat.2_1` ; sinon le terminal reste en 2.0, avec les motifs d'indisponibilité.
+
+## Catalogue 2.1 : badges et image (lot 1b bis de A)
+
+Par produit dans la vue : `favorite`, `promotion` (libellé ou null, présentation seule, aucun prix ne change), `is_new`, `low_stock`, `image` ({uuid, hash, width, height} ou null). La date du jour vient de l'horloge du terminal, pas du fuseau de la boutique.

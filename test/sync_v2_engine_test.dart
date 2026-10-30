@@ -408,7 +408,7 @@ void main() {
     Map<String, dynamic> produit21(String nom, String? ref, int prix, bool illimite, String categorie, String? marque) => {
       'nom': nom, 'reference': ref, 'categorie': null, 'prix': prix, 'stock_illimite': illimite, 'actif': true, 'vente_locale': true,
       'categorie_uuid': categorie, 'marque': marque, 'fournisseur': 'Grossiste Plateau', 'unite': {'code': 'pce', 'nom': 'Pièce'},
-      'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null, 'cree_le': null,
+      'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null, 'cree_le': null, 'favori': false, 'promotions': <Map<String, dynamic>>[], 'image': null,
     };
     Map<String, dynamic> operateur21(String id, String nom, String? pin, List<String> droits, String? pourcent, int? montant) => {
       'operateur_id': id, 'nom': nom, 'pin_empreinte': pin, 'droits': droits,
@@ -422,14 +422,24 @@ void main() {
           'remise_pourcentage_arrondi': 'down', 'arrondi_especes': null, 'trop_percu': 'cash_change', 'moins_a_un': 'refuse',
           'livraison_droit': null, 'ouverture_session': 'automatic', 'survente': 'refuse',
           'gros': {'actif': false, 'mode': 'cart', 'quantite_min': null, 'droit': null, 'remises': 'refuse', 'prix_lot': 'refuse'},
-          'fuseau': 'Africa/Abidjan',
+          'fuseau': 'Africa/Abidjan', 'nouveau_jours': 7,
         },
         'ticket': {'raison_sociale': null, 'adresse': null, 'telephone': null, 'ncc': null, 'entete': null, 'pied': null, 'largeur_papier': 80},
         'devise_secondaire': {'libelle': 'EUR', 'taux': '655.957000'},
       }, critical: true)
       ..put('categorie', hygiene, {'nom': 'Hygiène', 'ordre': 2, 'actif': true})
       ..put('categorie', services, {'nom': 'Services', 'ordre': 1, 'actif': true})
-      ..put('produit', fakeSavon, produit21('Savon', 'SAV', 500, false, hygiene, 'Dove'))
+      ..put('produit', fakeSavon, {
+        ...produit21('Savon', 'SAV', 500, false, hygiene, 'Dove'),
+        'favori': true,
+        'seuil_alerte': '1000.000000',
+        'cree_le': '${DateTime.now().toUtc().subtract(const Duration(days: 3)).toIso8601String().substring(0, 19)}Z',
+        'promotions': [
+          {'libelle': 'Ancien bon', 'du': null, 'au': '2020-01-01', 'exclusions': <Map<String, String>>[]},
+          {'libelle': 'Bon -10 %', 'du': '2020-01-02', 'au': '2099-12-31', 'exclusions': [{'du': '2030-01-01', 'au': '2030-01-31'}]},
+        ],
+        'image': {'uuid': '0d000000-0000-4000-8000-000000000001', 'empreinte': 'a' * 64, 'octets': 2048, 'largeur': 640, 'hauteur': 480},
+      })
       ..put('produit', fakeService, produit21('Emballage', null, 100, true, services, null))
       ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
       ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
@@ -474,6 +484,12 @@ void main() {
     await adapter.start();
     final view = await adapter.execute('search', {'query': '', 'category': 'Hygiène'}, null);
     expect((view['products'] as List).single, containsPair('brand', 'Dove'));
+    // Badges : présentation seule, le prix ne change pas ; le premier bon valide à la date du jour.
+    final card = (view['products'] as List).single as Map;
+    expect([card['favorite'], card['promotion'], card['is_new'], card['low_stock'], card['price_label']], [isTrue, 'Bon -10 %', isTrue, isTrue, '500 F']);
+    expect(card['image'], {'uuid': '0d000000-0000-4000-8000-000000000001', 'hash': 'a' * 64, 'width': 640, 'height': 480});
+    final bon = savonProduct.promotions.last;
+    expect([bon.activeOn('2030-01-15'), bon.activeOn('2030-02-01'), bon.activeOn('2020-01-01')], [isFalse, isTrue, isFalse]);
     final prepared = await adapter.execute('preparePayment', {}, null);
     expect([for (final m in prepared['methods'] as List) m['reference']]..sort(), ['aucune', 'obligatoire']);
     await adapter.execute('scan', {'code': '6190000000011'}, null);
@@ -586,7 +602,7 @@ void serve21(FakeV2Server server, {bool vatIncluded = true, Map<String, dynamic>
   Map<String, dynamic> product(String nom, String? ref, int prix, bool illimite) => {
     'nom': nom, 'reference': ref, 'categorie': null, 'prix': prix, 'stock_illimite': illimite, 'actif': true, 'vente_locale': true,
     'categorie_uuid': null, 'marque': null, 'fournisseur': null, 'unite': null,
-    'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null, 'cree_le': null,
+    'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null, 'cree_le': null, 'favori': false, 'promotions': <Map<String, dynamic>>[], 'image': null,
   };
   server
     ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1']
@@ -596,7 +612,7 @@ void serve21(FakeV2Server server, {bool vatIncluded = true, Map<String, dynamic>
         'remise_pourcentage_arrondi': 'down', 'arrondi_especes': null, 'trop_percu': 'refuse', 'moins_a_un': 'refuse',
         'livraison_droit': null, 'ouverture_session': 'automatic', 'survente': 'refuse',
         'gros': {'actif': false, 'mode': 'cart', 'quantite_min': null, 'droit': null, 'remises': 'refuse', 'prix_lot': 'refuse'},
-        'fuseau': 'Africa/Abidjan',
+        'fuseau': 'Africa/Abidjan', 'nouveau_jours': null,
         ...rules,
       },
       'ticket': {'raison_sociale': null, 'adresse': null, 'telephone': null, 'ncc': null, 'entete': null, 'pied': null, 'largeur_papier': 80},
