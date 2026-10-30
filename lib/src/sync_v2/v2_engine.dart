@@ -164,7 +164,7 @@ class V2Engine extends CaisseEngine {
       capabilities: [
         ...CaisseV2Client.defaultCapabilities,
         if (declaredPayments) CaisseV2Client.declaredPaymentCapability,
-        if (contract21) CaisseV2Client.contract21Capability,
+        if (contract21) ...[CaisseV2Client.contract21Capability, CaisseV2Client.customerReadCapability, CaisseV2Client.customerCreateCapability],
       ],
     );
     _sync = V2Sync(_client!, v2);
@@ -410,6 +410,88 @@ class V2Engine extends CaisseEngine {
   @override
   String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
 
+  bool _serverOffers(String capability) => (_state?['capacites_serveur'] as List?)?.contains(capability) ?? false;
+
+  @override
+  bool get customersSupported => saleExtrasSupported && _serverOffers(CaisseV2Client.customerReadCapability);
+
+  @override
+  bool canCreateCustomer(Operator operator) =>
+      customersSupported && _serverOffers(CaisseV2Client.customerCreateCapability) && hasRight(operator, 'clients_creer');
+
+  /// Clients publiés et créations en cours ; rechargés après chaque synchronisation.
+  List<Customer>? _customers;
+
+  /// Uuid créés sur ce terminal, encore valables après une fusion : le serveur les garde en alias, sans limite.
+  Set<String> _ownCustomers = const {};
+
+  Future<List<Customer>> _loadCustomers() async {
+    if (_customers != null) return _customers!;
+    final customers = [
+      for (final e in (await v2.entities('client')).entries)
+        if (e.value['actif'] == true && e.value['type'] != 'passage') Customer(uuid: e.key, name: e.value['nom'] as String, phone: e.value['telephone'] as String?),
+    ];
+    final published = {for (final c in customers) c.uuid};
+    final own = <String>{};
+    for (final row in await v2.operationRows()) {
+      final operation = row['operation'] as Map;
+      if (operation['type'] != 'creation_client' || row['etat'] == V2OperationState.rejected) continue;
+      final content = operation['contenu'] as Map;
+      own.add(content['client_uuid'] as String);
+      // Intégrée : la fiche arrive par le journal, sous cet uuid ou sous celui de la fiche fusionnée.
+      if (row['etat'] == V2OperationState.integrated || row['etat'] == V2OperationState.resolved || published.contains(content['client_uuid'])) continue;
+      customers.add(Customer(uuid: content['client_uuid'] as String, name: content['nom'] as String, phone: content['telephone'] as String?, pending: true));
+    }
+    customers.sort((a, b) => fold(a.name).compareTo(fold(b.name)));
+    _ownCustomers = own;
+    return _customers = customers;
+  }
+
+  @override
+  Future<List<Customer>> searchCustomers(String query, {int limit = 30}) async {
+    if (!customersSupported) return const [];
+    final text = fold(query.trim());
+    final digits = query.replaceAll(RegExp(r'\D'), '');
+    final hits = (await _loadCustomers()).where(
+      (c) => text.isEmpty || fold(c.name).contains(text) || (digits.isNotEmpty && (c.phone ?? '').replaceAll(RegExp(r'\D'), '').contains(digits)),
+    );
+    return hits.take(limit).toList();
+  }
+
+  @override
+  Future<Customer> createCustomer(Operator operator, {required String name, String? phone, String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) {
+        final content = (existing['operation'] as Map)['contenu'] as Map;
+        return Customer(uuid: content['client_uuid'] as String, name: content['nom'] as String, phone: content['telephone'] as String?, pending: true);
+      }
+    }
+    _requireSelling(allowWithoutSession: true);
+    if (!customersSupported || !_serverOffers(CaisseV2Client.customerCreateCapability)) throw const OfflineRefusal('Création de client non disponible sur ce terminal.');
+    _requireRight(operator, 'clients_creer', 'créer un client');
+    final nom = name.trim();
+    if (nom.isEmpty || nom.length > 160) throw const OfflineRefusal('Indiquez le nom du client (160 caractères au plus).');
+    final entered = phone?.trim() ?? '';
+    final normalized = normalizePhone(entered);
+    if (entered.isNotEmpty && (normalized == null || entered.length > 40)) throw const OfflineRefusal('Numéro de téléphone illisible.');
+    if (normalized != null) {
+      final same = (await _loadCustomers()).where((c) => normalizePhone(c.phone) == normalized).firstOrNull;
+      if (same != null) return same;
+    }
+    final uuid = _newUuid();
+    await _record(operationUuid ?? _newUuid(), 'creation_client', operator, (_) => {
+      'client_uuid': uuid,
+      'nom': nom,
+      'telephone': entered.isEmpty ? null : entered,
+      'type': 'particulier',
+    });
+    _customers = null;
+    await _afterWrite();
+    return Customer(uuid: uuid, name: nom, phone: entered.isEmpty ? null : entered, pending: true);
+  });
+
   static const _imagesPerPass = 30;
   DateTime? _imagesPausedUntil;
 
@@ -475,6 +557,11 @@ class V2Engine extends CaisseEngine {
         }
         final s = _requireSelling();
         if (!extras.isEmpty && !saleExtrasSupported) throw const OfflineRefusal('Remise globale, livraison et note : disponibles avec le contrat 2.1.');
+        if (extras.customer != null) {
+          final uuid = extras.customer!.uuid;
+          final known = customersSupported && ((await _loadCustomers()).any((c) => c.uuid == uuid) || _ownCustomers.contains(uuid));
+          if (!known) throw OfflineRefusal('Le client « ${extras.customer!.name} » n’est plus disponible : choisissez-en un autre.');
+        }
         checkSale(s, lines, payments, extras);
         _requireRight(operator, 'vente', 'vendre');
         if (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) _requireRight(operator, 'remise', 'accorder une remise');
@@ -654,6 +741,7 @@ class V2Engine extends CaisseEngine {
               for (final p in (content['paiements'] as List).cast<Map>()) {'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu'], 'reference': p['reference']},
             ],
             'total': (content['totaux'] as Map)['a_payer'],
+            if (content['client_nom'] != null) 'client_nom': content['client_nom'],
           }
         : content;
     final finalState = state == V2OperationState.integrated || state == V2OperationState.resolved;
@@ -683,6 +771,7 @@ class V2Engine extends CaisseEngine {
 
   /// Catalogue présenté, reconstruit depuis la projection (après chaque synchronisation et au chargement).
   Future<void> _rebuild() async {
+    _customers = null;
     _blocked = await v2.read(V2Keys.blocked);
     final device = await v2.read(V2Keys.device);
     _device = device == null ? const {} : {...Map<String, dynamic>.from(jsonDecode(device) as Map), 'epoque': int.tryParse(await v2.read(V2Keys.epoch) ?? '')};

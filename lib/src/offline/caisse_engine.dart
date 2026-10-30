@@ -178,6 +178,19 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
+  bool get customersSupported => false;
+
+  /// [operator] peut-il créer un client (capacité `client.creation`, droit `clients_creer`) ?
+  bool canCreateCustomer(Operator operator) => false;
+
+  /// Clients dont le nom ou le téléphone contient [query], par ordre alphabétique.
+  Future<List<Customer>> searchCustomers(String query, {int limit = 30}) async => const [];
+
+  /// Crée un client sur le terminal, ou rend celui qui a déjà ce téléphone.
+  Future<Customer> createCustomer(Operator operator, {required String name, String? phone, String? operationUuid}) =>
+      throw const OfflineRefusal('Création de client non disponible sur ce terminal.');
+
   /// Plafonds de saisie : ceux du rôle ; s'il existe un responsable pour autoriser, seul celui de la boutique reste
   /// (le code ne lève que le seuil du rôle). L'autorisation est demandée à l'encaissement, panier définitif.
   int enterableLineDiscount(Operator operator, int base) =>

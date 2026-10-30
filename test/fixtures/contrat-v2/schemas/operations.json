@@ -61,6 +61,11 @@
             }
           ]
         },
+        "details": {
+          "description": "creation_client intégrée seulement : uuid à utiliser, différent de celui du terminal après fusion. L'ancien reste accepté sans limite de durée.",
+          "type": "object", "required": ["client_uuid_canonique"], "additionalProperties": false,
+          "properties": { "client_uuid_canonique": { "$ref": "commun.json#/$defs/uuid" } }
+        },
         "mouvements": {
           "description": "Mouvements serveur créés pour l'opération (UUID des mouvements locaux repris quand ils correspondent).",
           "type": "array", "maxItems": 400, "items": { "$ref": "commun.json#/$defs/uuid" }

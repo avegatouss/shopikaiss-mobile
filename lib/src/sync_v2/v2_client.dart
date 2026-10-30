@@ -94,6 +94,10 @@ class CaisseV2Client {
   /// Formes 2.1 des données (REVISION-2.1 §7.1) : rendues seulement si le client l'annonce ET que le serveur la rend.
   static const contract21Capability = 'contrat.2_1';
 
+  /// Clients publiés et création hors ligne (2.1, lot 2).
+  static const customerReadCapability = 'client.lecture';
+  static const customerCreateCapability = 'client.creation';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;

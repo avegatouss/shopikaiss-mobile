@@ -195,3 +195,11 @@ Au-delà du seuil du rôle du caissier, la saisie reste possible jusqu'au plafon
 - Échecs comptés par responsable, gardés sur le terminal : 3 essais, puis 30 s doublées à chaque échec, 15 min au plus.
 - La vente porte `autorisations[]` (`type: remise`, `approbateur_id`, `motif`, `preuve: code_local|<horodatage>`) seulement si le seuil du caissier est dépassé.
 - Ne couvre pas `survente` ni `prix_manuel`.
+
+## Clients (2.1, lot 2)
+
+Capacités `client.lecture` et `client.creation` annoncées avec `contrat.2_1`. La première obtention de `client.lecture` déclenche un seul instantané (`reparation`). Le client de passage n'est pas proposé ; aucune fonction de solde.
+
+- Adaptateur : `searchCustomers` {query}, `createCustomer` {name, phone}, `setCustomer` {uuid, name}. Vue : `customer`. Capacités : `customer`, `customer_create`. Erreur : `client_refuse`.
+- `createCustomer` rend la fiche existante si le téléphone normalisé est déjà connu, refuse un numéro illisible, exige le droit `clients_creer`.
+- La création précède toujours la vente dans la file. Une fois intégrée, le client créé disparaît de la liste locale au profit de la fiche du journal ; son uuid reste accepté dans les paniers conservés. `details.client_uuid_canonique` n'est pas utilisé.

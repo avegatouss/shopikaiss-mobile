@@ -205,6 +205,19 @@ class Operator {
   final String? approvalCodeHash;
 }
 
+/// Client de la boutique (contrat 2.1, aucun solde) ; [pending] = créé sur ce terminal, pas encore reçu du serveur.
+class Customer {
+  const Customer({required this.uuid, required this.name, this.phone, this.pending = false});
+
+  final String uuid;
+  final String name;
+  final String? phone;
+  final bool pending;
+}
+
+/// Client d'un panier conservé (clé `client`), ou null.
+Customer? customerFromDraft(Object? raw) => raw is Map ? Customer(uuid: raw['uuid'] as String, name: raw['nom'] as String) : null;
+
 /// Autorisation d'une remise par un responsable, code vérifié sur le terminal. Jamais le code ni son empreinte.
 class SaleApproval {
   const SaleApproval({required this.approverId, required this.reason, required this.verifiedAt});
@@ -351,7 +364,7 @@ class DiscountEntry {
 
 /// Éléments de vente du contrat 2.1 hors lignes et paiements : remise globale, livraison, note.
 class SaleExtras {
-  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval});
+  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval, this.customer});
 
   final int globalDiscount;
   final DiscountEntry? globalEntry;
@@ -361,7 +374,10 @@ class SaleExtras {
   /// Autorisation d'un responsable : remise au-delà du seuil du caissier, jamais du plafond de la boutique.
   final SaleApproval? approval;
 
-  bool get isEmpty => globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null;
+  /// Client de la vente ; null = client de passage.
+  final Customer? customer;
+
+  bool get isEmpty => globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null && customer == null;
 }
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.

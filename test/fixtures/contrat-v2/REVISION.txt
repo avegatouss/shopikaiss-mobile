@@ -1,5 +1,5 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commit : 8b7ddd3f (révision 2.1, lot 1c : code d’autorisation de 8 chiffres, operateur.code_autorisation_empreinte)
+Commit : 12d3f0b0 (révision 2.1, lot 2 : clients, creation_client, capacités client.lecture et client.creation)
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

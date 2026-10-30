@@ -891,6 +891,19 @@
                             "$ref": "commun.json#/$defs/raison"
                         }
                     ]
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Présent sur une creation_client intégrée, pour les terminaux qui annoncent client.creation.",
+                    "required": [
+                        "client_uuid_canonique"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    }
                 }
             }
         },
@@ -911,6 +924,49 @@
                 },
                 "ordre": {
                     "type": "integer"
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "client": {
+            "description": "Client actif de la boutique (capacité client.lecture). Aucun solde : crédit, points et avoirs restent en ligne.",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "type",
+                "tarif",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "pattern": "^\\+[1-9][0-9]{7,14}$",
+                    "description": "E.164 ; null si absent ou illisible."
+                },
+                "type": {
+                    "enum": [
+                        "particulier",
+                        "professionnel",
+                        "passage"
+                    ]
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros"
+                    ]
                 },
                 "actif": {
                     "type": "boolean"

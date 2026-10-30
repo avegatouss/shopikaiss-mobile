@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 1c) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 2) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -1112,6 +1112,19 @@ const contractV2Schemas = <String, String>{
                             "$ref": "commun.json#/$defs/raison"
                         }
                     ]
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Présent sur une creation_client intégrée, pour les terminaux qui annoncent client.creation.",
+                    "required": [
+                        "client_uuid_canonique"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    }
                 }
             }
         },
@@ -1132,6 +1145,49 @@ const contractV2Schemas = <String, String>{
                 },
                 "ordre": {
                     "type": "integer"
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "client": {
+            "description": "Client actif de la boutique (capacité client.lecture). Aucun solde : crédit, points et avoirs restent en ligne.",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "type",
+                "tarif",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "pattern": "^\\+[1-9][0-9]{7,14}$",
+                    "description": "E.164 ; null si absent ou illisible."
+                },
+                "type": {
+                    "enum": [
+                        "particulier",
+                        "professionnel",
+                        "passage"
+                    ]
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros"
+                    ]
                 },
                 "actif": {
                     "type": "boolean"
@@ -1491,6 +1547,9 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/ouverture_session"
+        },
+        {
+            "$ref": "#/$defs/creation_client"
         }
     ],
     "$defs": {
@@ -2040,6 +2099,83 @@ const contractV2Schemas = <String, String>{
                     }
                 }
             }
+        },
+        "creation_client": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "creation_client"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "client_uuid",
+                        "nom",
+                        "telephone",
+                        "type"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "UUID v4 choisi par le terminal."
+                        },
+                        "nom": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                        },
+                        "telephone": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 40,
+                            "description": "Tel que saisi ; normalisé par le serveur."
+                        },
+                        "type": {
+                            "enum": [
+                                "particulier",
+                                "professionnel"
+                            ]
+                        }
+                    }
+                }
+            },
+            "description": "Client créé sur le terminal (REVISION-2.1 §3.2, capacité client.creation). À émettre AVANT toute vente qui cite ce client_uuid."
         }
     }
 }
@@ -2106,6 +2242,11 @@ const contractV2Schemas = <String, String>{
               }
             }
           ]
+        },
+        "details": {
+          "description": "creation_client intégrée seulement : uuid à utiliser, différent de celui du terminal après fusion. L'ancien reste accepté sans limite de durée.",
+          "type": "object", "required": ["client_uuid_canonique"], "additionalProperties": false,
+          "properties": { "client_uuid_canonique": { "$ref": "commun.json#/$defs/uuid" } }
         },
         "mouvements": {
           "description": "Mouvements serveur créés pour l'opération (UUID des mouvements locaux repris quand ils correspondent).",

@@ -164,6 +164,7 @@ class FakeV2Server implements V2Transport {
         _requireBody(payload, 'instantanes.json#/\$defs/demande');
         final all = entities.values.where((e) => e['action'] == 'upsert').map((e) => {...e}..remove('operations_couvertes')).toList();
         _snapshot = all;
+        snapshotReasons.add((payload as Map)['raison'] as String);
         final integrated = [for (final e in received.entries) if (e.value['etat'] == 'integree') e.key];
         return _ok({
           'uuid': '99999999-9999-4999-8999-999999999999',
@@ -211,6 +212,7 @@ class FakeV2Server implements V2Transport {
   }
 
   List<Map<String, dynamic>>? _snapshot;
+  final snapshotReasons = <String>[];
   Map<String, dynamic>? lastAck;
 
   Map<String, dynamic> _result(String uuid) {

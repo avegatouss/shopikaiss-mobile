@@ -56,6 +56,20 @@ int enteredDiscount({required String type, required String value, required int b
   return amount;
 }
 
+/// Téléphone au format E.164, indicatif 225 par défaut, ou null s'il est illisible (`ClientsCaisse::telephone` du serveur).
+String? normalizePhone(String? entered) {
+  final text = (entered ?? '').trim();
+  final digits = text.replaceAll(RegExp(r'\D'), '');
+  final full = text.startsWith('+')
+      ? digits
+      : digits.startsWith('00')
+      ? digits.substring(2)
+      : digits.startsWith('225') && digits.length > 10
+      ? digits
+      : '225$digits';
+  return digits.length >= 8 && RegExp(r'^[1-9]\d{7,14}$').hasMatch(full) ? '+$full' : null;
+}
+
 /// Seuil d'un rôle (`remise_max_pourcent`, millionièmes de pourcent) : dépassé si `remise × 100 > base × seuil`
 /// (comparaison exacte du web, E11).
 bool exceedsPercent(int discount, int base, BigInt percentMicros) =>

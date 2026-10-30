@@ -140,7 +140,7 @@ class V2SaleBuilder {
       'numero_local': numberLocal,
       'brouillon_uuid': draftUuid,
       'session_uuid': sessionUuid,
-      'client_uuid': null,
+      'client_uuid': extras.customer?.uuid,
       'tva': {'taux': vat.rate, 'incluse': vat.included},
       'lignes': lines,
       'remise_globale': extras.globalDiscount,
@@ -160,6 +160,7 @@ class V2SaleBuilder {
       ],
       if (revision21) 'remise_globale_saisie': extras.globalDiscount == 0 ? null : extras.globalEntry?.toJson(),
       if (revision21) 'note': extras.note == null || extras.note!.isEmpty ? null : extras.note,
+      if (revision21) 'client_nom': extras.customer?.name,
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[if (approval != null) approval.toJson()],
     };

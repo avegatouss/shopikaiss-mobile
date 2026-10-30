@@ -9,6 +9,9 @@
         },
         {
             "$ref": "#/$defs/ouverture_session"
+        },
+        {
+            "$ref": "#/$defs/creation_client"
         }
     ],
     "$defs": {
@@ -558,6 +561,83 @@
                     }
                 }
             }
+        },
+        "creation_client": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "creation_client"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "client_uuid",
+                        "nom",
+                        "telephone",
+                        "type"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "UUID v4 choisi par le terminal."
+                        },
+                        "nom": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                        },
+                        "telephone": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 40,
+                            "description": "Tel que saisi ; normalisé par le serveur."
+                        },
+                        "type": {
+                            "enum": [
+                                "particulier",
+                                "professionnel"
+                            ]
+                        }
+                    }
+                }
+            },
+            "description": "Client créé sur le terminal (REVISION-2.1 §3.2, capacité client.creation). À émettre AVANT toute vente qui cite ce client_uuid."
         }
     }
 }

@@ -34,6 +34,9 @@ class AdapterFailure implements Exception {
 /// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
 /// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, reprint, synchronize.
 ///
+/// Clients (contrat 2.1) : searchCustomers {query}, createCustomer {name, phone}, setCustomer {uuid, name} ; uuid absent =
+/// client de passage. La vue donne `customer`.
+///
 /// Remise au-delà du seuil du caissier : la vue donne `discount_approval` {required, approvers} ; `commitSale` reçoit
 /// alors `approval` {approver_id, code, reason}. Le code n'est jamais conservé.
 ///
@@ -171,6 +174,12 @@ class LocalRegisterAdapter {
         final list = args['payments'];
         if (list is! List || list.any((p) => p is! Map)) throw const AdapterFailure('argument_invalide', 'Argument « payments » invalide.');
         return _setPayments([for (final p in list) Map<String, dynamic>.from(p as Map)]);
+      case 'searchCustomers':
+        return {'customers': [for (final c in await engine.searchCustomers(_text(args, 'query', max: 100))) _customerJson(c)]};
+      case 'createCustomer':
+        return _createCustomer(args, operationId);
+      case 'setCustomer':
+        return _setCustomer(args);
       case 'commitSale':
         return _commit(_requireOperationId(operationId), args);
       case 'saleStatus':
@@ -232,6 +241,8 @@ class LocalRegisterAdapter {
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
+      'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
+      'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
       'global_discount': {...cap(_extrasRefusal() ?? _globalDiscountRefusal()), 'max_percent': rules?.maxGlobalDiscountPercent ?? 0},
       'delivery': cap(_extrasRefusal() ?? _deliveryRefusal()),
@@ -305,6 +316,7 @@ class LocalRegisterAdapter {
     final carts = resolved.map((r) => r.$2).whereType<CartLine>().toList();
     final overLimit = _operator != null && !engine.withinDiscountLimits(_operator!, carts, _draft.globalDiscount);
     return {
+      'customer': _draft.customer == null ? null : _customerJson(_draft.customer!),
       'discount_approval': {
         'required': overLimit,
         'approvers': [
@@ -869,7 +881,7 @@ class LocalRegisterAdapter {
         operator,
         draftUuid: _draft.uuid,
         operationUuid: operationId,
-        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval),
+        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval, customer: _draft.customer),
       );
     } on OfflineRefusal catch (e) {
       // Refus d'une règle, levé avant toute écriture : la vente n'existe pas, le panier reste.
@@ -878,6 +890,27 @@ class LocalRegisterAdapter {
     _draft = _Draft(_newUuid());
     _emit('vente');
     return _committed(sale);
+  }
+
+  Map<String, dynamic> _customerJson(Customer c) => {'uuid': c.uuid, 'name': c.name, 'phone': c.phone, 'pending': c.pending};
+
+  Future<Map<String, dynamic>> _createCustomer(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.');
+    try {
+      final phone = args['phone'] == null ? null : _text(args, 'phone', max: 40);
+      return _customerJson(await engine.createCustomer(operator, name: _text(args, 'name', max: 160), phone: phone, operationUuid: operationId));
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('client_refuse', e.message);
+    }
+  }
+
+  Future<Map<String, dynamic>> _setCustomer(Map<String, dynamic> args) async {
+    final uuid = args['uuid'] == null ? null : _text(args, 'uuid', max: 36);
+    final customer = uuid == null ? null : Customer(uuid: uuid, name: _text(args, 'name', max: 160), phone: args['phone'] as String?);
+    return _mutate(() {
+      _draft.customer = customer;
+    });
   }
 
   /// Autorisation d'un responsable si les remises dépassent le seuil du caissier, sinon null.
@@ -1059,6 +1092,7 @@ class _Draft {
     globalEntry = global is Map ? DiscountEntry.fromJson(global) : null;
     delivery = (stored.content['livraison'] as num?)?.toInt() ?? 0;
     note = stored.content['note'] as String?;
+    customer = customerFromDraft(stored.content['client']);
     // `paiement` : panier conservé avant les paiements multiples.
     final raw = stored.content['paiements'] ?? [if (stored.content['paiement'] != null) stored.content['paiement']];
     for (final p in (raw as List).cast<Map>()) {
@@ -1087,6 +1121,7 @@ class _Draft {
   DiscountEntry? globalEntry;
   int delivery = 0;
   String? note;
+  Customer? customer;
 
   _Draft copy() => _Draft(uuid)
     ..revision = revision
@@ -1099,7 +1134,8 @@ class _Draft {
     ..globalDiscount = globalDiscount
     ..globalEntry = globalEntry
     ..delivery = delivery
-    ..note = note;
+    ..note = note
+    ..customer = customer;
 
   Map<String, dynamic> toJson() => {
     'lignes': [
@@ -1117,6 +1153,7 @@ class _Draft {
     if (globalEntry != null) 'remise_globale_saisie': globalEntry!.toJson(),
     if (delivery != 0) 'livraison': delivery,
     if (note != null) 'note': note,
+    if (customer != null) 'client': {'uuid': customer!.uuid, 'nom': customer!.name},
     'paiements': [
       for (final p in payments) {'moyen': p.methodCode, 'montant': p.amount, 'recu': p.received, 'reference': p.reference},
     ],

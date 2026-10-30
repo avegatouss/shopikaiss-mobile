@@ -56,6 +56,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   DiscountEntry? _globalEntry;
   int _delivery = 0;
   String? _note;
+  Customer? _customer;
 
   /// Paniers mis en attente sur ce terminal.
   int _suspendedCount = 0;
@@ -106,6 +107,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _globalEntry = null;
     _delivery = 0;
     _note = null;
+    _customer = null;
   }
 
   /// Sous-total du panier (après remises de ligne) : base de la remise globale.
@@ -308,6 +310,102 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (text != null) setState(() => _delivery = int.tryParse(text) ?? 0);
   }
 
+  /// Choix du client de la vente : recherche par nom ou téléphone, création si le caissier en a le droit.
+  Future<void> _pickCustomer() async {
+    var results = await _engine.searchCustomers('');
+    if (!mounted) return;
+    final creatable = _operator != null && _engine.canCreateCustomer(_operator!);
+    final result = await showDialog<(Customer?,)>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Client de la vente'),
+          content: SizedBox(
+            width: 360,
+            height: 320,
+            child: Column(
+              children: [
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: 'Nom ou téléphone'),
+                  onChanged: (text) async {
+                    final found = await _engine.searchCustomers(text);
+                    setLocal(() => results = found);
+                  },
+                ),
+                Expanded(
+                  child: results.isEmpty
+                      ? const Center(child: Text('Aucun client.'))
+                      : ListView(
+                          children: [
+                            for (final c in results)
+                              ListTile(
+                                dense: true,
+                                title: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                subtitle: Text('${c.phone ?? 'Sans téléphone'}${c.pending ? ' · en attente d’envoi' : ''}'),
+                                onTap: () => Navigator.pop(context, (c,)),
+                              ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, (null,)), child: const Text('Client de passage')),
+            if (creatable)
+              TextButton(
+                onPressed: () async {
+                  final created = await _askNewCustomer();
+                  if (created != null && context.mounted) Navigator.pop(context, (created,));
+                },
+                child: const Text('Nouveau client'),
+              ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+          ],
+        ),
+      ),
+    );
+    if (result != null) setState(() => _customer = result.$1);
+  }
+
+  Future<Customer?> _askNewCustomer() {
+    final name = TextEditingController();
+    final phone = TextEditingController();
+    String? error;
+    return showDialog<Customer>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Nouveau client'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: name, autofocus: true, maxLength: 160, decoration: const InputDecoration(labelText: 'Nom')),
+                TextField(controller: phone, keyboardType: TextInputType.phone, maxLength: 40, decoration: InputDecoration(labelText: 'Téléphone', errorText: error)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                try {
+                  final customer = await _engine.createCustomer(_operator!, name: name.text, phone: phone.text);
+                  if (context.mounted) Navigator.pop(context, customer);
+                } on OfflineRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Créer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _editNote() async {
     final text = await _askText('Note du ticket', _note ?? '', maxLength: 2000);
     if (text != null) setState(() => _note = text.trim().isEmpty ? null : text.trim());
@@ -351,6 +449,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (_globalEntry != null) 'remise_globale_saisie': _globalEntry!.toJson(),
     if (_delivery != 0) 'livraison': _delivery,
     if (_note != null) 'note': _note,
+    if (_customer != null) 'client': {'uuid': _customer!.uuid, 'nom': _customer!.name},
     'paiements': const [],
     'suspendu': true,
   };
@@ -420,6 +519,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       _globalEntry = global == null ? null : DiscountEntry.fromJson(global);
       _delivery = draft.content['livraison'] as int? ?? 0;
       _note = draft.content['note'] as String?;
+      _customer = customerFromDraft(draft.content['client']);
     });
     await _refreshSuspended();
     if (missing > 0) _toast('$missing article(s) retiré(s) du catalogue : non repris.');
@@ -431,6 +531,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     return Wrap(
       spacing: 4,
       children: [
+        if (extras && _engine.customersSupported) ActionChip(label: Text(_customer?.name ?? 'Client'), onPressed: _pickCustomer),
         if (extras) ActionChip(label: const Text('Remise globale'), onPressed: _editGlobalDiscount),
         if (extras) ActionChip(label: const Text('Livraison'), onPressed: _editDelivery),
         if (extras) ActionChip(label: Text(_note == null ? 'Note' : 'Note ✓'), onPressed: _editNote),
@@ -1163,7 +1264,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         payments,
         _operator!,
         draftUuid: _draftUuid,
-        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval),
+        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer),
       );
     } on OfflineRefusal catch (e) {
       _toast(e.message);

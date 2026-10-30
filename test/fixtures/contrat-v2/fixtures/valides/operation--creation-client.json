@@ -1,0 +1,23 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000004",
+    "type": "creation_client",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 42,
+    "cree_le": "2026-10-29T08:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "client_uuid": "c1000000-0000-4000-8000-000000000001",
+        "nom": "Awa Koné",
+        "telephone": "07 07 07 07 07",
+        "type": "particulier"
+    },
+    "empreinte": "39775defbf44ca2d8f4d043537f2ef2d850f47d3ec69ec8b3404e743ad7c35fe"
+}

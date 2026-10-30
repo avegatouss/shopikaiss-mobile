@@ -580,6 +580,65 @@ void main() {
     final committed = await adapter.execute('commitSale', {'approval': {'approver_id': 9, 'code': '12345678', 'reason': 'Client fidèle'}}, operation);
     expect(committed['state'], 'committed');
     expect((await authorizations(operation) as List).single, containsPair('approbateur_id', '9'));
+
+    // Lot 2 : clients. Première obtention de client.lecture : nouvel instantané, une fois.
+    const publishedCustomer = 'c1000000-0000-4000-8000-000000000001';
+    server
+      ..capabilities = [...server.capabilities, 'client.lecture', 'client.creation']
+      ..put('client', publishedCustomer, {'nom': 'Éléonore Koné', 'telephone': '+2250707070707', 'type': 'particulier', 'tarif': 'detail', 'actif': true})
+      ..put('client', 'c1000000-0000-4000-8000-000000000002', {'nom': 'Client de passage', 'telephone': null, 'type': 'passage', 'tarif': 'detail', 'actif': true});
+    expect(e.customersSupported, isFalse);
+    final snapshotsBefore = server.snapshotReasons.length;
+    await e.sync();
+    expect(e.blockReason, isNull);
+    await e.sync();
+    expect(server.snapshotReasons.skip(snapshotsBefore), ['reparation'], reason: 'un seul instantané pour les clients');
+    expect(e.customersSupported, isTrue);
+    expect([for (final c in await e.searchCustomers('')) c.name], ['Éléonore Koné'], reason: 'le client de passage n’est pas proposé');
+    expect((await e.searchCustomers('eleonore')).single.uuid, publishedCustomer);
+    expect((await e.searchCustomers('07 07')).single.uuid, publishedCustomer);
+
+    final cashier = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    await expectLater(e.createCustomer(cashier, name: 'Nouveau'), refused('n’a pas le droit de créer un client'));
+    server.publish([
+      {'type': 'operateur', 'critique': true, 'cle': 'operateur:7', 'revision': '3', 'action': 'upsert',
+       'donnees': operateur21('7', 'Awa', 'empreinte', ['clients_creer', 'ouverture_session', 'remise', 'vente'], '5.000000', 40)},
+    ]);
+    await e.sync();
+    final creator = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.canCreateCustomer(creator), isTrue);
+    await expectLater(e.createCustomer(creator, name: 'Sans nom', phone: 'abc'), refused('illisible'));
+    expect((await e.createCustomer(creator, name: 'Doublon', phone: '07 07 07 07 07')).uuid, publishedCustomer, reason: 'même téléphone : fiche existante');
+    final created = await e.createCustomer(creator, name: '  Bintou  ', phone: '05 05 05 05 05', operationUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
+    expect((created.name, created.pending), ('Bintou', true));
+    final replay = await e.createCustomer(creator, name: 'Bintou', operationUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
+    expect(replay.uuid, created.uuid);
+    expect((await e.searchCustomers('bintou')).single.pending, isTrue);
+
+    final customerSale = await e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], creator, extras: SaleExtras(customer: created));
+    final saleContent = (await e.v2.operation(customerSale.uuid))!['operation']['contenu'] as Map;
+    expect([saleContent['client_uuid'], saleContent['client_nom']], [created.uuid, 'Bintou']);
+    expect(customerSale.content['client_nom'], 'Bintou');
+    await expectLater(
+      e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], creator, extras: const SaleExtras(customer: Customer(uuid: 'c1000000-0000-4000-8000-0000000000ff', name: 'Inconnu'))),
+      refused('plus disponible'),
+    );
+    await e.sync();
+    final order = [for (final r in server.received.values) (r['operation'] as Map)['type']];
+    expect(order.indexOf('creation_client') < order.lastIndexOf('vente'), isTrue, reason: 'la création précède la vente qui la cite');
+    expect(await e.searchCustomers('bintou'), isEmpty, reason: 'intégrée : la fiche vient du journal, sous l’uuid fusionné s’il y a lieu');
+    final afterMerge = await e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], creator, extras: SaleExtras(customer: created));
+    expect(afterMerge.isSale, isTrue, reason: 'l’uuid du terminal reste accepté');
+
+    // Adaptateur : client du panier conservé et transmis à la vente.
+    final found = await adapter.execute('searchCustomers', {'query': 'koné'}, null);
+    expect(((found['customers'] as List).single as Map)['uuid'], publishedCustomer);
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    final withCustomer = await adapter.execute('setCustomer', {'uuid': publishedCustomer, 'name': 'Éléonore Koné'}, null);
+    expect((withCustomer['customer'] as Map)['name'], 'Éléonore Koné');
+    await adapter.execute('setPayment', {'method': 'especes', 'received': 500}, null);
+    await adapter.execute('commitSale', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000e3');
+    expect((await e.v2.operation('aaaaaaaa-bbbb-4ccc-8ddd-0000000000e3'))!['operation']['contenu']['client_uuid'], publishedCustomer);
     await adapter.close();
   });
 

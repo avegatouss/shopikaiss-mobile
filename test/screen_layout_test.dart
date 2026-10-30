@@ -75,6 +75,13 @@ class _ApprovalEngine extends OfflineEngine {
   bool get saleExtrasSupported => true;
 
   @override
+  bool get customersSupported => true;
+
+  @override
+  Future<List<Customer>> searchCustomers(String query, {int limit = 30}) async =>
+      [const Customer(uuid: 'c1000000-0000-4000-8000-000000000001', name: 'Bintou Traoré', phone: '+2250505050505')];
+
+  @override
   bool hasRight(Operator operator, String right) => true;
 
   @override
@@ -339,6 +346,24 @@ void main() {
       await tester.pumpAndSettle();
       final approval = (session.offline as _ApprovalEngine).recorded!.approval!;
       expect([approval.approverId, approval.reason], [8, 'Client fidèle']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('client de la vente : choisi dans la liste, transmis à l’encaissement', (tester) async {
+      final session = await _session(inches: 8.0, approver: true);
+      await _pump(tester, const Size(800, 1280), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      await tester.tap(find.text('Client'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bintou Traoré'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ActionChip, 'Bintou Traoré'), findsOneWidget);
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      expect((session.offline as _ApprovalEngine).recorded!.customer!.name, 'Bintou Traoré');
       expect(tester.takeException(), isNull);
     });
 
