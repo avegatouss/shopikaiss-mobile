@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,8 @@ import 'screen_settings.dart';
 import 'sale_options_preview.dart';
 import 'quantity_step.dart';
 import 'multiple_payments.dart';
+import 'searchable_choice.dart';
+import 'calculator.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -139,26 +142,17 @@ class _RegisterState extends State<_Register> {
   Widget _catalogueFilter(String field, String label, String all) {
     final values = (c.view['${field}s'] as List? ?? const []).cast<String>();
     final selected = c.view[field] as String? ?? '';
-    return DropdownButtonFormField<String>(
-      key: ValueKey('$field-$selected'),
-      initialValue: values.contains(selected) ? selected : '',
-      isExpanded: true,
-      decoration: InputDecoration(labelText: label, isDense: true),
-      items: [
-        DropdownMenuItem(value: '', child: Text(all)),
-        for (final value in values.toSet())
-          if (value.isNotEmpty)
-            DropdownMenuItem(
-              value: value,
-              child: Text(value, overflow: TextOverflow.ellipsis),
-            ),
-      ],
+    return SearchableChoice(
+      label: label,
+      all: all,
+      values: values,
+      selected: selected,
       onChanged: _canEdit
           ? (value) {
               if (field == 'brand') {
-                _searchCatalogue(brand: value ?? '');
+                _searchCatalogue(brand: value);
               } else {
-                _searchCatalogue(supplier: value ?? '');
+                _searchCatalogue(supplier: value);
               }
             }
           : null,
@@ -169,7 +163,10 @@ class _RegisterState extends State<_Register> {
   final _screen = ScreenSettings.load();
   ColorScheme get _palette =>
       ColorScheme.fromSeed(seedColor: _screen.accentColor);
-  Widget _imageSlot({bool large = false}) => Container(
+  Widget _imageSlot({
+    bool large = false,
+    Map<String, dynamic>? product,
+  }) => Container(
     width: large ? double.infinity : 30,
     height: large ? 60 : 30,
     alignment: Alignment.center,
@@ -177,11 +174,21 @@ class _RegisterState extends State<_Register> {
       color: _palette.primary.withValues(alpha: .06),
       borderRadius: BorderRadius.circular(4),
     ),
-    child: Icon(
-      Icons.inventory_2_outlined,
-      size: large ? 32 : 19,
-      color: _palette.primary,
-    ),
+    child:
+        product?['image'] is Map && (product!['image'] as Map)['path'] is String
+        ? Image.file(
+            File((product['image'] as Map)['path'] as String),
+            fit: _screen.imageFit == 'cover' ? BoxFit.cover : BoxFit.contain,
+            width: large ? double.infinity : 30,
+            height: large ? 60 : 30,
+            errorBuilder: (_, _, _) =>
+                const Icon(Icons.image_not_supported_outlined),
+          )
+        : Icon(
+            Icons.inventory_2_outlined,
+            size: large ? 32 : 19,
+            color: _palette.primary,
+          ),
   );
   bool get _compact => _screen.compact;
   Timer? _saveSettings;
@@ -588,8 +595,27 @@ class _RegisterState extends State<_Register> {
                   if (value == 'back') _backOffice();
                   if (value == 'help') _shortcuts();
                   if (value == 'session') _session();
+                  if (value == 'lock' || value == 'logout') {
+                    widget.onConnection?.call();
+                  }
                 },
                 itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'lock',
+                    enabled:
+                        widget.onConnection != null &&
+                        !c.busy &&
+                        c.uncertainOperation == null,
+                    child: const Text('Verrouiller'),
+                  ),
+                  PopupMenuItem(
+                    value: 'logout',
+                    enabled:
+                        widget.onConnection != null &&
+                        !c.busy &&
+                        c.uncertainOperation == null,
+                    child: const Text('Se déconnecter'),
+                  ),
                   PopupMenuItem(
                     value: 'session',
                     enabled: !c.busy,
@@ -676,38 +702,85 @@ class _RegisterState extends State<_Register> {
                     horizontal: 12,
                     vertical: 2,
                   ),
-                  child: Row(
-                    children: [
-                      SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment(
-                            value: false,
-                            icon: Icon(Icons.grid_view),
-                            label: Text('Visuelle'),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        SegmentedButton<bool>(
+                          segments: const [
+                            ButtonSegment(
+                              value: false,
+                              icon: Icon(Icons.grid_view),
+                              label: Text('Visuelle'),
+                            ),
+                            ButtonSegment(
+                              value: true,
+                              icon: Icon(Icons.view_list),
+                              label: Text('Compacte'),
+                            ),
+                          ],
+                          selected: {_compact},
+                          onSelectionChanged: (value) =>
+                              _setCatalogueMode(value.single),
+                        ),
+                        const SizedBox(width: 12),
+                        TextButton.icon(
+                          onPressed: c.ready && !c.busy
+                              ? () => showDialog<void>(
+                                  context: context,
+                                  builder: (_) =>
+                                      SalesHistoryDialog(host: c.host),
+                                )
+                              : null,
+                          icon: const Icon(Icons.history),
+                          label: const Text('Ventes récentes'),
+                        ),
+                        TextButton.icon(
+                          onPressed: c.ready && !c.busy
+                              ? () => showDialog<void>(
+                                  context: context,
+                                  builder: (_) =>
+                                      SalesHistoryDialog(host: c.host),
+                                )
+                              : null,
+                          icon: const Icon(Icons.receipt_long_outlined),
+                          label: const Text('Reçu'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _canEdit
+                              ? () => showDialog<void>(
+                                  context: context,
+                                  builder: (_) =>
+                                      SaleOptionsPreview(controller: c),
+                                )
+                              : null,
+                          icon: const Icon(Icons.note_alt_outlined),
+                          label: const Text('Note'),
+                        ),
+                        TextButton.icon(
+                          onPressed: !c.busy ? _session : null,
+                          icon: const Icon(Icons.point_of_sale),
+                          label: Text(
+                            c.sessionOpen == false
+                                ? 'Ouvrir la session'
+                                : 'Session de caisse',
                           ),
-                          ButtonSegment(
-                            value: true,
-                            icon: Icon(Icons.view_list),
-                            label: Text('Compacte'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => showDialog<void>(
+                            context: context,
+                            builder: (_) => const DeskCalculator(),
                           ),
-                        ],
-                        selected: {_compact},
-                        onSelectionChanged: (value) =>
-                            _setCatalogueMode(value.single),
-                      ),
-                      const SizedBox(width: 12),
-                      TextButton.icon(
-                        onPressed: c.ready && !c.busy
-                            ? () => showDialog<void>(
-                                context: context,
-                                builder: (_) =>
-                                    SalesHistoryDialog(host: c.host),
-                              )
-                            : null,
-                        icon: const Icon(Icons.history),
-                        label: const Text('Ventes récentes'),
-                      ),
-                    ],
+                          icon: const Icon(Icons.calculate_outlined),
+                          label: const Text('Calculatrice'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _shortcuts,
+                          icon: const Icon(Icons.help_outline),
+                          label: const Text('Aide'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -908,7 +981,7 @@ class _RegisterState extends State<_Register> {
                       dense: true,
                       leading: _screen.imageLayout == 'hidden'
                           ? null
-                          : _imageSlot(),
+                          : _imageSlot(product: p),
                       title: Text(p['name'] as String? ?? ''),
                       subtitle: Text(
                         'Stock : ${p['stock_label'] ?? "à vérifier"}',
@@ -943,7 +1016,7 @@ class _RegisterState extends State<_Register> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               if (_screen.imageLayout == 'top') ...[
-                                _imageSlot(large: true),
+                                _imageSlot(large: true, product: p),
                                 const SizedBox(height: 8),
                               ],
                               Expanded(
@@ -956,7 +1029,7 @@ class _RegisterState extends State<_Register> {
                                           right: 6,
                                           top: 2,
                                         ),
-                                        child: _imageSlot(),
+                                        child: _imageSlot(product: p),
                                       ),
                                     Expanded(
                                       child: Text(
@@ -1038,6 +1111,10 @@ class _RegisterState extends State<_Register> {
             ],
           ),
           const Divider(height: 18),
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Client de passage'),
+          ),
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(

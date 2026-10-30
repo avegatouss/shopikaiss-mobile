@@ -130,7 +130,7 @@ void main() {
     'missing server PIN is configuration failure without consuming attempts',
     () async {
       final operators = transport.snapshotBody['caissiers'] as List;
-    (operators.first as Map).remove('pin');
+      (operators.first as Map).remove('pin');
       await inner.engine.refreshSnapshot();
       final before = await store.read('${StoreKeys.pinFailures}7');
       await expectLater(
@@ -197,6 +197,17 @@ void main() {
         arguments: {'operation_id': operation},
       );
       expect((receipt['lines'] as List).join('\n'), contains('REIMPRESSION'));
+      final original = await host.call(
+        HostCommand.printTicket,
+        operationId: operation,
+      );
+      expect(original['duplicate'], false);
+      final printedAgain = await host.call(
+        HostCommand.printTicket,
+        operationId: operation,
+      );
+      expect(printedAgain['duplicate'], true);
+      expect(await store.operations(), hasLength(1));
     },
   );
 

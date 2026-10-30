@@ -77,4 +77,17 @@ class ReceiptPrinting {
         ? 'Ticket transmis au pilote. Vérifiez la sortie papier.'
         : 'Impression annulée ou non confirmée. Vente conservée.';
   }
+
+  /// Check before requesting an original ticket (which records its issuance).
+  static Future<String?> unavailableReason() async {
+    if (!await _file.exists()) {
+      return 'Choisissez une imprimante de caisse dans les réglages.';
+    }
+    final saved = jsonDecode(await _file.readAsString()) as Map;
+    final printers = await Printing.listPrinters();
+    if (!printers.any((p) => p.url == saved['url'] && p.isAvailable)) {
+      return 'Imprimante choisie indisponible. Aucun ticket demandé au moteur.';
+    }
+    return null;
+  }
 }

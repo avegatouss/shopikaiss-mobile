@@ -241,3 +241,12 @@ Contrat 2.1 active par B dans l'hote, selon les capacites serveur ; pas de modif
 Moteur et schemas B integres pour accepter favoris, promotions, nouveautes, stock faible et metadonnees image du serveur 198a26d7. Aucun changement de prix ni telechargement image automatique. Le raccordement visuel des nouveaux badges et le cache image restent distincts de cette mise a jour de compatibilite.
 
 Validation : 64 tests Windows + moteur v2 reussis, analyse Windows sans remarque. La fixture FakeV2Server avait une autorisation fixe expirant le 30 octobre a 08:00 UTC ; sa valeur par defaut est maintenant relative a la date du test, les scenarios explicites d'expiration restent inchanges. Aucun controle metier affaibli. Installation a relancer avant deploiement du nouveau catalogue : un processus deja ouvert reste sur son ancien moteur.
+
+## Acces caisse et listes recherchables
+
+Fournisseur/Marque : selection avec recherche integree locale, effacement du filtre, resultat vide explicite. Aucun plugin web Select2 ni dependance ajoutee dans Flutter. Barre horizontale defilante : Recu, Note, Session, Calculatrice, Aide et ventes recentes ; menu Verrouiller/Se deconnecter via logout existant, PIN et selection operateur effaces, panier conserve. Client de passage affiche par defaut (aucun client nominatif encore pris en charge).
+
+B 9f87858 integre : printTicket raccorde via identifiant d'operation ; bouton imprimante dans la liste des ventes. Verification imprimante disponible avant demande original. Le moteur marque le ticket emis avant retour IPC : une panne papier peut donc conduire a une reimpression, sans jamais recreer la vente. Affichage des fichiers images locaux uniquement, avec remplacement visuel si fichier indisponible. Cache B par lots de 30 apres synchro panier vide ; politique nocturne et interruption quand un panier commence demandees a B, non declarees realisees.
+
+Restent explicitement absents : tarif gros, ventes du jour/X consolidees, livre de caisse, historique des modifications du panier, cloture complete et selection/creation de client. Ouverture de session actuelle = fond simple et conservation session existante ; comptage par coupure/report et horaires restent absents du contrat. Demandes inscrites au journal A/B.
+Validation : 53 tests Windows (dont rendu fictif), analyse sans remarque ; 62 tests Windows/adaptateur au passage precedent. Rendu inspecte. Impression papier et essai des images sur demo non effectues.

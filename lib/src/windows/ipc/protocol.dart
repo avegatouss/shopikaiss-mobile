@@ -34,6 +34,7 @@ enum HostCommand {
   saleStatus,
   history,
   reprint,
+  printTicket,
   synchronize,
 }
 

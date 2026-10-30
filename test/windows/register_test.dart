@@ -164,6 +164,17 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Toutes les marques'));
       await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Rechercher : Marque'),
+        'introuvable',
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Aucun résultat'), findsOneWidget);
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Rechercher : Marque'),
+        'marque a',
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Marque A').last);
       await tester.pumpAndSettle();
       expect(host.argumentsByCommand[HostCommand.search], {

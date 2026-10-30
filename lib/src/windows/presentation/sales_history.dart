@@ -18,6 +18,40 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
   List<Map<String, dynamic>> _sales = [];
   List<String>? _ticket;
 
+  Future<void> _printOriginal(String operation) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      final unavailable = await ReceiptPrinting.unavailableReason();
+      if (unavailable != null) {
+        if (mounted) _error = unavailable;
+        return;
+      }
+      final result = await widget.host.call(
+        HostCommand.printTicket,
+        operationId: operation,
+        arguments: {'operation_id': operation},
+      );
+      final lines = result['lines'];
+      if (result['operation_id'] != operation ||
+          lines is! List ||
+          lines.any((v) => v is! String)) {
+        throw const FormatException();
+      }
+      final message = await ReceiptPrinting.printLines(lines.cast<String>());
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+    } catch (_) {
+      if (mounted) _error = 'Impression à vérifier. La vente est conservée ; aucun renvoi automatique.';
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -104,7 +138,13 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
                   ),
                   subtitle: Text('${sale['date'] ?? ""}\n${_status(sale)}'),
                   isThreeLine: true,
-                  trailing: const Icon(Icons.receipt_long_outlined),
+                  trailing: IconButton(
+                    tooltip: 'Imprimer le reçu',
+                    icon: const Icon(Icons.print_outlined),
+                    onPressed: id is String && !_busy
+                        ? () => _printOriginal(id)
+                        : null,
+                  ),
                   onTap: id is String ? () => _load(id) : null,
                 );
               },

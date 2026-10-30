@@ -134,6 +134,8 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
       return WindowsRegisterApp(
         controller: controller,
         onConnection: () {
+          pin.clear();
+          operatorId = null;
           setState(() => entered = false);
           _run(() async {
             await host!.call(HostCommand.logout);
