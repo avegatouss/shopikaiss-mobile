@@ -82,6 +82,7 @@ class EngineHost {
         newUuid: newUuid,
         pinVerifier: pinVerifier,
         declaredPayments: true,
+        contract21: true,
       );
       final origin = await engine.storedOrigin();
       if (origin != null) await engine.load(origin);

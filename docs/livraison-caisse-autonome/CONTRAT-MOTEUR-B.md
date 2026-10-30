@@ -166,3 +166,13 @@ part exacte, le tiroir reçoit le montant arrondi (`arrondi_especes`), la monnai
 (commandes et synchronisation en cours terminées, base fermée, verrou libéré), 2 argument invalide, 3 base déjà possédée
 par un autre hôte (verrou système sur `caisse.lock`, y compris autre session Windows), 1 démarrage impossible.
 `sqflite_common_ffi` reste propre à ce paquet : l'APK Android n'embarque pas SQLite natif.
+
+## Catalogue complet (filtres et pages)
+
+- `search` accepte `brand` et `supplier` en plus de `query` et `category`. Absents ou vides : aucun filtre. Les filtres portent sur tout le catalogue et restent actifs jusqu'à la prochaine recherche.
+- `moreProducts` ajoute une page de 60 produits à la recherche courante ; `search` revient à la première page.
+- Vue : `brand`, `brands[]`, `supplier`, `suppliers[]` (listes du catalogue complet, triées), `products_total`, `has_more`.
+
+## Activation du contrat 2.1
+
+`contract21: true` est activé sur Android (`terminal_session.dart`) et sur l'hôte Windows (`engine_host.dart`). Le format 2.1 ne s'applique que si le serveur rend `contrat.2_1` ; sinon le terminal reste en 2.0, avec les motifs d'indisponibilité.

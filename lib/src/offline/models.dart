@@ -50,11 +50,14 @@ class Snapshot {
   /// Produit (et conditionnement) d'un code-barres scanné.
   (Product, int?)? byCode(String code) => _byCode[code.trim()];
 
-  /// Recherche par nom, référence ou code (insensible aux accents et à la casse), restreinte à [category] si donnée.
-  List<Product> search(String query, {int limit = 60, String? category}) {
+  /// Recherche par nom, référence ou code (insensible aux accents et à la casse) sur tout le catalogue, restreinte à
+  /// [category], [brand] et [supplier] si donnés ; [limit] null = tous les résultats.
+  List<Product> search(String query, {int? limit = 60, String? category, String? brand, String? supplier}) {
     final q = fold(query.trim());
-    return products
+    final hits = products
         .where((p) => category == null || p.category == category)
+        .where((p) => brand == null || p.brand == brand)
+        .where((p) => supplier == null || p.supplier == supplier)
         .where(
           (p) =>
               q.isEmpty ||
@@ -62,9 +65,19 @@ class Snapshot {
               fold(p.reference ?? '').contains(q) ||
               fold(p.brand ?? '').contains(q) ||
               p.codes.any((c) => c.code.contains(query.trim())),
-        )
-        .take(limit)
-        .toList();
+        );
+    return (limit == null ? hits : hits.take(limit)).toList();
+  }
+
+  /// Marques du catalogue complet, par ordre alphabétique (sans accents ni casse).
+  List<String> get brands => _sortedValues((p) => p.brand);
+
+  /// Fournisseurs du catalogue complet, par ordre alphabétique (sans accents ni casse).
+  List<String> get suppliers => _sortedValues((p) => p.supplier);
+
+  List<String> _sortedValues(String? Function(Product) of) {
+    final values = {for (final p in products) if (of(p) case final v? when v.isNotEmpty) v}.toList();
+    return values..sort((a, b) => fold(a).compareTo(fold(b)));
   }
 
   /// Catégories du catalogue : ordre de la boutique (contrat 2.1), sinon ordre alphabétique (sans accents ni casse).
