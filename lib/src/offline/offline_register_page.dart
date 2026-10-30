@@ -202,7 +202,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       return e.message;
     }
     if (amount > max) return 'Remise au-delà du maximum autorisé (${formatFcfa(max)}).';
-    final saleCap = _engine.maxSaleDiscountFor(_operator!);
+    final saleCap = _engine.enterableSaleDiscount(_operator!);
     if (saleCap != null && others + amount > saleCap) return 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).';
     return null;
   }
@@ -217,9 +217,86 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final result = await _askDiscount(
       'Remise globale',
       _globalEntry,
-      (entry) => _checkDiscount(entry, subtotal, _engine.maxGlobalDiscountFor(operator, subtotal), lines),
+      (entry) => _checkDiscount(entry, subtotal, _engine.enterableGlobalDiscount(operator, subtotal), lines),
     );
     if (result != null) setState(() => _globalEntry = result.$1);
+  }
+
+  /// Autorisation d'un responsable, panier définitif : remises au-delà du seuil du caissier. Null si elle est abandonnée.
+  Future<SaleApproval?> _askApproval(int globalDiscount) async {
+    final cashier = _operator!;
+    final lines = List.of(_cart);
+    final approvers = _engine.approversFor(cashier, lines, globalDiscount);
+    if (approvers.isEmpty) {
+      _toast('Remises au-delà du seuil de ${cashier.name} et de celui des responsables : corrigez-les.');
+      return null;
+    }
+    final code = TextEditingController();
+    final reason = TextEditingController();
+    var approver = approvers.first;
+    var busy = false;
+    String? error;
+    return showDialog<SaleApproval>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Autorisation d’un responsable'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Remise au-delà du seuil de ${cashier.name}.'),
+                DropdownButton<Operator>(
+                  value: approver,
+                  isExpanded: true,
+                  items: [for (final o in approvers) DropdownMenuItem(value: o, child: Text(o.name))],
+                  onChanged: (o) => setLocal(() => approver = o ?? approver),
+                ),
+                TextField(
+                  controller: code,
+                  autofocus: true,
+                  obscureText: true,
+                  maxLength: 8,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(labelText: 'Code du responsable (8 chiffres)', errorText: error),
+                ),
+                TextField(controller: reason, maxLength: 500, decoration: const InputDecoration(labelText: 'Motif de la remise')),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      setLocal(() => busy = true);
+                      try {
+                        final approval = await _engine.authorizeDiscount(
+                          cashier: cashier,
+                          approver: approver,
+                          code: code.text.trim(),
+                          reason: reason.text,
+                          lines: lines,
+                          globalDiscount: globalDiscount,
+                        );
+                        if (context.mounted) Navigator.pop(context, approval);
+                      } on OfflineRefusal catch (e) {
+                        code.clear();
+                        setLocal(() {
+                          busy = false;
+                          error = e.message;
+                        });
+                      }
+                    },
+              child: const Text('Autoriser'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _editDelivery() async {
@@ -1019,7 +1096,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                       final result = await _askDiscount(
                         line.label,
                         line.discountEntry,
-                        (entry) => _checkDiscount(entry, base, _engine.maxLineDiscountFor(_operator!, base), others, label: line.label),
+                        (entry) => _checkDiscount(entry, base, _engine.enterableLineDiscount(_operator!, base), others, label: line.label),
                       );
                       if (result == null) return;
                       final entry = result.$1;
@@ -1059,6 +1136,12 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Future<void> _checkout(Snapshot snapshot, int payable) async {
+    final globalDiscount = _totals(snapshot).globalDiscount;
+    SaleApproval? approval;
+    if (!_engine.withinDiscountLimits(_operator!, _cart, globalDiscount)) {
+      approval = await _askApproval(globalDiscount);
+      if (approval == null || !mounted) return;
+    }
     final payments = _compact
         ? await Navigator.of(context).push<List<CartPayment>>(
             MaterialPageRoute(
@@ -1080,7 +1163,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         payments,
         _operator!,
         draftUuid: _draftUuid,
-        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note),
+        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval),
       );
     } on OfflineRefusal catch (e) {
       _toast(e.message);

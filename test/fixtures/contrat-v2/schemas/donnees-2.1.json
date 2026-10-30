@@ -423,6 +423,12 @@
                 },
                 "approbateur_remise": {
                     "type": "boolean"
+                },
+                "code_autorisation_empreinte": {
+                    "description": "Empreinte bcrypt (coût ≥ 12) du code de 8 chiffres d’un approbateur. Clé absente : pas de code publiable, autorisation hors ligne impossible pour lui. Jamais le PIN.",
+                    "type": "string",
+                    "minLength": 59,
+                    "maxLength": 60
                 }
             }
         },

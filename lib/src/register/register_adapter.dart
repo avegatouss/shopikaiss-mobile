@@ -34,6 +34,9 @@ class AdapterFailure implements Exception {
 /// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
 /// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, reprint, synchronize.
 ///
+/// Remise au-delà du seuil du caissier : la vue donne `discount_approval` {required, approvers} ; `commitSale` reçoit
+/// alors `approval` {approver_id, code, reason}. Le code n'est jamais conservé.
+///
 /// Paniers en attente : un seul panier courant ; les autres sont suspendus, conservés sur le terminal et repris par
 /// leur identifiant. Un panier encaissé est consommé par la transaction de la vente (une seule vente par panier).
 class LocalRegisterAdapter {
@@ -169,7 +172,7 @@ class LocalRegisterAdapter {
         if (list is! List || list.any((p) => p is! Map)) throw const AdapterFailure('argument_invalide', 'Argument « payments » invalide.');
         return _setPayments([for (final p in list) Map<String, dynamic>.from(p as Map)]);
       case 'commitSale':
-        return _commit(_requireOperationId(operationId));
+        return _commit(_requireOperationId(operationId), args);
       case 'saleStatus':
         return _saleStatus(_requireOperationId(operationId));
       case 'history':
@@ -299,7 +302,16 @@ class LocalRegisterAdapter {
         ? 'La remise globale dépasse le montant du panier.'
         : _discountIssue(snapshot, resolved);
     final suspended = (await engine.openDrafts()).where((d) => d.content['suspendu'] == true).length;
+    final carts = resolved.map((r) => r.$2).whereType<CartLine>().toList();
+    final overLimit = _operator != null && !engine.withinDiscountLimits(_operator!, carts, _draft.globalDiscount);
     return {
+      'discount_approval': {
+        'required': overLimit,
+        'approvers': [
+          if (overLimit)
+            for (final o in engine.approversFor(_operator!, carts, _draft.globalDiscount)) {'id': o.id, 'name': o.name},
+        ],
+      },
       'schema': 1,
       'revision': _revision,
       'ready': ready,
@@ -409,19 +421,23 @@ class LocalRegisterAdapter {
     for (final (_, cart) in resolved) {
       if (cart == null || cart.discount == 0) continue;
       if (!engine.hasRight(_operator!, 'remise')) return '${_operator!.name} n’a pas le droit d’accorder une remise : retirez celle de « ${cart.label} ».';
-      final max = engine.maxLineDiscountFor(_operator!, cart.base);
+      final max = engine.enterableLineDiscount(_operator!, cart.base);
       if (cart.discount > max) return 'Remise sur « ${cart.label} » au-delà du maximum (${formatFcfa(max)}) : corrigez-la.';
     }
     final subtotal = resolved.fold<int>(0, (sum, r) => sum + (r.$2 == null ? 0 : r.$2!.base - r.$2!.discount));
     if (_draft.globalDiscount > 0) {
       if (!engine.hasRight(_operator!, 'remise')) return '${_operator!.name} n’a pas le droit d’accorder une remise : retirez la remise globale.';
-      final max = engine.maxGlobalDiscountFor(_operator!, subtotal);
+      final max = engine.enterableGlobalDiscount(_operator!, subtotal);
       if (_draft.globalDiscount > max) return 'Remise globale au-delà du maximum (${formatFcfa(max)}) : corrigez-la.';
     }
     if (_draft.delivery > 0 && _deliveryRefusal() != null) return _deliveryRefusal();
-    final saleCap = engine.maxSaleDiscountFor(_operator!);
+    final saleCap = engine.enterableSaleDiscount(_operator!);
     final total = resolved.fold<int>(0, (sum, r) => sum + (r.$2?.discount ?? 0)) + _draft.globalDiscount;
     if (saleCap != null && total > saleCap) return 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).';
+    final carts = resolved.map((r) => r.$2).whereType<CartLine>().toList();
+    if (!engine.withinDiscountLimits(_operator!, carts, _draft.globalDiscount) && engine.approversFor(_operator!, carts, _draft.globalDiscount).isEmpty) {
+      return 'Remises au-delà du seuil de ${_operator!.name} et de celui des responsables : corrigez-les.';
+    }
     return null;
   }
 
@@ -552,11 +568,11 @@ class LocalRegisterAdapter {
       final cart = line.materialize(snapshot);
       if (cart == null) throw const AdapterFailure('panier_invalide', 'Article retiré du catalogue : retirez-le du panier.');
       amount = _amountOf(entry, cart.base, label: cart.label);
-      final max = engine.maxLineDiscountFor(_operator!, cart.base);
+      final max = engine.enterableLineDiscount(_operator!, cart.base);
       if (amount > max) {
         throw AdapterFailure('remise_refusee', 'Remise au-delà du maximum autorisé (${formatFcfa(max)} sur cette ligne).');
       }
-      final saleCap = engine.maxSaleDiscountFor(_operator!);
+      final saleCap = engine.enterableSaleDiscount(_operator!);
       final others = _draft.lines.where((l) => l.id != lineId).fold<int>(0, (sum, l) => sum + l.discount);
       if (saleCap != null && others + amount > saleCap) {
         throw AdapterFailure('remise_refusee', 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).');
@@ -607,9 +623,9 @@ class LocalRegisterAdapter {
       } on WebRuleRefusal {
         throw const AdapterFailure('remise_refusee', 'La remise globale dépasse le montant du panier.');
       }
-      final max = engine.maxGlobalDiscountFor(_operator!, subtotal);
+      final max = engine.enterableGlobalDiscount(_operator!, subtotal);
       if (amount > max) throw AdapterFailure('remise_refusee', 'Remise globale au-delà du maximum autorisé (${formatFcfa(max)}).');
-      final saleCap = engine.maxSaleDiscountFor(_operator!);
+      final saleCap = engine.enterableSaleDiscount(_operator!);
       final lines = _draft.lines.fold<int>(0, (sum, l) => sum + l.discount);
       if (saleCap != null && lines + amount > saleCap) {
         throw AdapterFailure('remise_refusee', 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).');
@@ -821,7 +837,7 @@ class LocalRegisterAdapter {
   }
 
   /// Encaissement idempotent par [operationId] : rejoué (réponse perdue, hôte redémarré), il rend la même vente.
-  Future<Map<String, dynamic>> _commit(String operationId) async {
+  Future<Map<String, dynamic>> _commit(String operationId, Map<String, dynamic> args) async {
     final already = await engine.saleStatus(operationId);
     if (already != null) return _committed(already);
     final snapshot = _snapshot();
@@ -835,6 +851,7 @@ class LocalRegisterAdapter {
     if (payments.isEmpty) throw const AdapterFailure('paiement_requis', 'Préparez le paiement avant d’encaisser.');
     final error = _paymentsError(snapshot, payments, _payable(snapshot));
     if (error != null) throw AdapterFailure('paiement_invalide', error);
+    final approval = await _approval(lines.cast<CartLine>(), operator, args);
     final OfflineOperation sale;
     try {
       sale = await engine.recordSale(
@@ -852,7 +869,7 @@ class LocalRegisterAdapter {
         operator,
         draftUuid: _draft.uuid,
         operationUuid: operationId,
-        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note),
+        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval),
       );
     } on OfflineRefusal catch (e) {
       // Refus d'une règle, levé avant toute écriture : la vente n'existe pas, le panier reste.
@@ -861,6 +878,28 @@ class LocalRegisterAdapter {
     _draft = _Draft(_newUuid());
     _emit('vente');
     return _committed(sale);
+  }
+
+  /// Autorisation d'un responsable si les remises dépassent le seuil du caissier, sinon null.
+  Future<SaleApproval?> _approval(List<CartLine> lines, Operator operator, Map<String, dynamic> args) async {
+    if (engine.withinDiscountLimits(operator, lines, _draft.globalDiscount)) return null;
+    final raw = args['approval'];
+    if (raw is! Map) throw const AdapterFailure('autorisation_requise', 'Remise au-delà du seuil du caissier : autorisation d’un responsable requise.');
+    final fields = raw.cast<String, dynamic>();
+    final approver = engine.approversFor(operator, lines, _draft.globalDiscount).where((o) => '${o.id}' == '${fields['approver_id']}').firstOrNull;
+    if (approver == null) throw const AdapterFailure('autorisation_refusee', 'Ce responsable ne peut pas autoriser cette remise.');
+    try {
+      return await engine.authorizeDiscount(
+        cashier: operator,
+        approver: approver,
+        code: _text(fields, 'code', max: 8),
+        reason: _text(fields, 'reason', max: 500),
+        lines: lines,
+        globalDiscount: _draft.globalDiscount,
+      );
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('autorisation_refusee', e.message);
+    }
   }
 
   Map<String, dynamic> _committed(OfflineOperation sale) => {
