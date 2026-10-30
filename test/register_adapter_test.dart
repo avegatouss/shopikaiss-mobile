@@ -113,6 +113,19 @@ void main() {
     await expectLater(run('search', {'query': '', 'brand': 12}), throwsA(isA<AdapterFailure>()));
   });
 
+  test('printTicket : original à la première impression, réimpression ensuite, sans nouvelle vente', () async {
+    await cartOf2Soaps();
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000a1';
+    await run('commitSale', {}, id);
+    final first = await run('printTicket', {}, id);
+    expect(first['duplicate'], isFalse);
+    expect((first['lines'] as List).join('\n'), isNot(contains('REIMPRESSION')));
+    final second = await run('printTicket', {}, id);
+    expect(second['duplicate'], isTrue);
+    expect((second['lines'] as List).join('\n'), contains('REIMPRESSION'));
+    expect(await store.operations(), hasLength(1));
+  });
+
   test('C-REQ-004 : le panier est conservé et retrouvé après redémarrage de l’hôte', () async {
     await cartOf2Soaps();
     final draft = (await run('view'))['draft_id'];
@@ -183,7 +196,7 @@ void main() {
     expect((history['items'] as List).single, containsPair('operation_id', op));
     final ticket = (await run('reprint', const {}, op))['lines'] as List;
     expect(ticket.join('\n'), contains('HL-001-000042'));
-    expect(ticket.join('\n'), contains('DUPLICATA'));
+    expect(ticket.join('\n'), contains('REIMPRESSION'));
   });
 
   test('pair : appairage d’un poste neuf par commande (Windows), code refusé puis accepté', () async {

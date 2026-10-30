@@ -32,7 +32,7 @@ class AdapterFailure implements Exception {
 ///
 /// Commandes (`execute`) : status, pair, login, logout, openSession, view, search, addProduct, scan, changeQuantity,
 /// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
-/// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, reprint, synchronize.
+/// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, reprint, synchronize.
 ///
 /// Paniers en attente : un seul panier courant ; les autres sont suspendus, conservés sur le terminal et repris par
 /// leur identifiant. Un panier encaissé est consommé par la transaction de la vente (une seule vente par panier).
@@ -174,8 +174,10 @@ class LocalRegisterAdapter {
         return _saleStatus(_requireOperationId(operationId));
       case 'history':
         return _history(args);
+      case 'printTicket':
+        return _printTicket(_requireOperationId(operationId));
       case 'reprint':
-        return _reprint(_requireOperationId(operationId));
+        return _ticket(_requireOperationId(operationId), duplicate: true);
       case 'synchronize':
         scheduleSynchronization();
         return {'scheduled': true};
@@ -376,7 +378,9 @@ class LocalRegisterAdapter {
               'promotion': p.promotionLabel(today),
               'is_new': p.isNew(engine.newBadgeDays, now),
               'low_stock': _lowStock(p, sold[p.id] ?? BigInt.zero),
-              'image': p.image == null ? null : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height},
+              'image': p.image == null
+                  ? null
+                  : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height, 'path': engine.imagePath(p.image!)},
               'price_label': formatFcfa(p.price, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'packagings': [for (final k in p.packagings) {'id': k.id, 'name': k.name, 'price_label': formatFcfa(k.price, currency)}],
@@ -891,7 +895,15 @@ class LocalRegisterAdapter {
     };
   }
 
-  Future<Map<String, dynamic>> _reprint(String operationId) async {
+  /// Première impression sans mention, « REIMPRESSION » ensuite (comme le web, §5.3) ; retenue par vente sur le terminal.
+  Future<Map<String, dynamic>> _printTicket(String operationId) async {
+    final key = 'ticket_imprime.$operationId';
+    final ticket = await _ticket(operationId, duplicate: await engine.store.read(key) != null);
+    await engine.store.write(key, '1');
+    return ticket;
+  }
+
+  Future<Map<String, dynamic>> _ticket(String operationId, {required bool duplicate}) async {
     final sale = await engine.saleStatus(operationId);
     if (sale == null || !sale.isSale) throw const AdapterFailure('vente_inconnue', 'Vente introuvable sur ce terminal.');
     final snapshot = _snapshot();
@@ -899,6 +911,7 @@ class LocalRegisterAdapter {
     final operatorName = snapshot.operatorById(sale.operatorId)?.name ?? 'Caissier ${sale.operatorId}';
     return {
       'operation_id': sale.uuid,
+      'duplicate': duplicate,
       'lines': offlineTicketLines(
         snapshot: snapshot,
         operation: sale,
@@ -906,7 +919,7 @@ class LocalRegisterAdapter {
         payments: payments,
         operatorName: operatorName,
         paperWidth: paperWidth,
-        duplicate: true,
+        duplicate: duplicate,
       ),
     };
   }
@@ -926,6 +939,8 @@ class LocalRegisterAdapter {
       if (await engine.probe()) {
         await engine.sync();
         if (engine.snapshotStale) await engine.refreshSnapshot();
+        // Images : hors vente seulement, pour ne jamais ralentir un encaissement.
+        if (_draft.lines.isEmpty) await engine.downloadImages();
       }
     } catch (_) {
       // Panne réseau ou serveur : la file reste en place, l'état est relu par la vue.

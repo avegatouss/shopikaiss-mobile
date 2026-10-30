@@ -178,6 +178,12 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// Fichier local de [image] s'il est déjà téléchargé, sinon null (contrat 2.1).
+  String? imagePath(ProductImage image) => null;
+
+  /// Télécharge les images manquantes, hors vente ; rend le nombre de fichiers ajoutés.
+  Future<int> downloadImages() async => 0;
+
   /// Badge « Nouveau » : nombre de jours depuis la création, null = désactivé (contrat 2.1).
   int? get newBadgeDays => null;
 

@@ -180,3 +180,8 @@ par un autre hôte (verrou système sur `caisse.lock`, y compris autre session W
 ## Catalogue 2.1 : badges et image (lot 1b bis de A)
 
 Par produit dans la vue : `favorite`, `promotion` (libellé ou null, présentation seule, aucun prix ne change), `is_new`, `low_stock`, `image` ({uuid, hash, width, height} ou null). La date du jour vient de l'horloge du terminal, pas du fuseau de la boutique.
+
+## Ticket original et images
+
+- `printTicket` (identifiant d'opération) : première impression sans mention, puis « REIMPRESSION » ; rend `duplicate`. `reprint` force toujours la réimpression. Aucune des deux ne crée de vente.
+- `image.path` (vue produit) : fichier JPEG local, ou null tant qu'il n'est pas téléchargé. Le téléchargement se fait après une synchronisation, panier vide, 30 images par passage, et respecte `Retry-After`.

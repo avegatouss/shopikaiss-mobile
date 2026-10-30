@@ -50,7 +50,7 @@ class FakeV2Server implements V2Transport {
 
   /// Autorisation de vente locale rendue par `/etat`.
   bool authorized = true;
-  String authorizationExpires = '2026-10-30T08:00:00Z';
+  String authorizationExpires = '2036-10-30T08:00:00Z'; // loin devant : les tests d'expiration la fixent eux-mêmes
 
   /// Entité de l'instantané (avant l'appairage du client).
   void put(String type, String key, Map<String, dynamic> data, {bool critical = false}) =>
@@ -103,6 +103,19 @@ class FakeV2Server implements V2Transport {
   void _requireBody(Object? body, String schema) {
     final errors = fakeValidator.validate(body, schema);
     if (errors.isNotEmpty) throw StateError('Requête non conforme au contrat ($schema) : $errors');
+  }
+
+  /// Images servies par `GET /images/{uuid}` ; statut forcé par [imageStatus].
+  final images = <String, List<int>>{};
+  int? imageStatus;
+
+  @override
+  Future<V2Response> fetchBytes(String apiBase, String path, {Map<String, String> headers = const {}, Duration? timeout}) async {
+    requests.add((method: 'GET', path: path, headers: headers, body: null));
+    final status = imageStatus;
+    if (status != null) return V2Response(status, null, retryAfter: status == 429 ? 30 : null);
+    final bytes = images[path.substring('/images/'.length)];
+    return bytes == null ? const V2Response(404, null) : V2Response(200, null, bytes: bytes);
   }
 
   @override

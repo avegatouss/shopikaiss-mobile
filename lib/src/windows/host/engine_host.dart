@@ -83,6 +83,7 @@ class EngineHost {
         pinVerifier: pinVerifier,
         declaredPayments: true,
         contract21: true,
+        imageDirectory: p.join(directory, 'images'),
       );
       final origin = await engine.storedOrigin();
       if (origin != null) await engine.load(origin);

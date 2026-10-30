@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 
 /// Réponse brute de l'API v2. `status == 0` : aucune réponse (réseau, délai, corps tronqué) — résultat inconnu.
 class V2Response {
-  const V2Response(this.status, this.body, {this.retryAfter, this.raw});
+  const V2Response(this.status, this.body, {this.retryAfter, this.raw, this.bytes});
 
   final int status;
 
@@ -20,6 +20,9 @@ class V2Response {
   /// Texte exact du corps (pages d'instantané : l'empreinte se vérifie sur le contenu décodé, le texte sert au diagnostic).
   final String? raw;
 
+  /// Corps binaire exact ([V2Transport.fetchBytes]).
+  final List<int>? bytes;
+
   bool get ok => status >= 200 && status < 300;
 }
 
@@ -27,6 +30,9 @@ class V2Response {
 abstract class V2Transport {
   /// [path] relatif au préfixe v2 (`/etat`, `/operations`…), requête déjà construite.
   Future<V2Response> send(String method, String apiBase, String path, {Map<String, String> headers, Object? body, Duration? timeout});
+
+  /// GET d'un contenu binaire (images) : corps non décodé dans [V2Response.bytes].
+  Future<V2Response> fetchBytes(String apiBase, String path, {Map<String, String> headers, Duration? timeout});
 }
 
 class HttpV2Transport implements V2Transport {
@@ -35,6 +41,22 @@ class HttpV2Transport implements V2Transport {
   final http.Client _client;
 
   static const defaultTimeout = Duration(seconds: 45);
+
+  @override
+  Future<V2Response> fetchBytes(String apiBase, String path, {Map<String, String> headers = const {}, Duration? timeout}) async {
+    try {
+      final response = await _client.get(Uri.parse('$apiBase$path'), headers: headers).timeout(timeout ?? defaultTimeout);
+      return V2Response(response.statusCode, null, retryAfter: int.tryParse(response.headers['retry-after'] ?? ''), bytes: response.bodyBytes);
+    } on TimeoutException {
+      return const V2Response(0, null);
+    } on SocketException {
+      return const V2Response(0, null);
+    } on http.ClientException {
+      return const V2Response(0, null);
+    } on HandshakeException {
+      return const V2Response(0, null);
+    }
+  }
 
   @override
   Future<V2Response> send(String method, String apiBase, String path, {Map<String, String> headers = const {}, Object? body, Duration? timeout}) async {

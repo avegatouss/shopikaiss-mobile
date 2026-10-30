@@ -187,6 +187,9 @@ class CaisseV2Client {
     if (errors.isNotEmpty) throw V2Failure(V2FailureKind.invalid, 'requete_non_conforme', 'Requête non conforme au contrat v2 : ${errors.first}');
   }
 
+  /// Image d'un produit (`GET /images/{uuid}`, révision 2.1) ; réponse brute, l'appelant gère 404 et 429.
+  Future<V2Response> image(String uuid) => transport.fetchBytes(apiBase, '/images/$uuid', headers: _headers);
+
   Future<Object?> _call(
     String method,
     String path, {
