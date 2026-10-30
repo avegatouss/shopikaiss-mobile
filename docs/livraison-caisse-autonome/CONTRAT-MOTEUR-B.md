@@ -203,3 +203,12 @@ Capacités `client.lecture` et `client.creation` annoncées avec `contrat.2_1`. 
 - Adaptateur : `searchCustomers` {query}, `createCustomer` {name, phone}, `setCustomer` {uuid, name}. Vue : `customer`. Capacités : `customer`, `customer_create`. Erreur : `client_refuse`.
 - `createCustomer` rend la fiche existante si le téléphone normalisé est déjà connu, refuse un numéro illisible, exige le droit `clients_creer`.
 - La création précède toujours la vente dans la file. Une fois intégrée, le client créé disparaît de la liste locale au profit de la fiche du journal ; son uuid reste accepté dans les paniers conservés. `details.client_uuid_canonique` n'est pas utilisé.
+
+## Clôture de session (2.1, lot 3)
+
+Capacité `session.cloture`, droit `caisse_cloturer`, comptage à l'aveugle : l'attendu n'est ni affiché ni exposé par l'adaptateur.
+
+- Adaptateur : `closeSession` {cash, comment, counts: [{method, amount, justification}]}, panier vide. Capacité `close_session`. Erreurs `panier_en_cours`, `cloture_refusee`. `status.last_closure` est à brancher par C si l'écran en a besoin (`engine.lastClosure()`).
+- Le terminal calcule un attendu si l'ouverture de la session est dans sa file (fond + encaissements, arrondi compris). Un écart exige alors un commentaire ou une justification. Session ouverte en ligne : attendu inconnu, commentaire facultatif, risque d'arbitrage côté serveur.
+- La session se ferme aussitôt sur le terminal. Une ouverture est refusée tant que la clôture précédente est `a_arbitrer`. Rejet protocole : la session du serveur reprend.
+- Le Z (`details.z`) est conservé et visible dans le journal des opérations. Pas d'impression du Z.

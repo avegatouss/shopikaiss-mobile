@@ -34,6 +34,9 @@ class FakeV2Server implements V2Transport {
   /// Réponse perdue APRÈS traitement (le serveur a COMMIT, le client ne le sait pas).
   bool loseNextOperationsResponse = false;
   String Function(Map<String, dynamic> op)? verdict;
+
+  /// `details` du résultat d'une opération intégrée.
+  Map<String, dynamic>? Function(Map<String, dynamic> op)? resultDetails;
   bool corruptPage = false;
   int? failStatus;
   String failCode = 'indisponible';
@@ -227,6 +230,10 @@ class FakeV2Server implements V2Transport {
       'vente': integrated && r['operation']['type'] == 'vente' ? {'uuid': uuid, 'numero': r['numero']} : null,
       'mouvements': integrated && r['operation']['type'] == 'vente' ? [for (final m in r['operation']['contenu']['mouvements'] as List) m['mouvement_uuid']] : [],
       'couverture': {'curseur': integrated ? _cursor(sequence) : null},
+      if (integrated) ...?switch (resultDetails?.call(Map<String, dynamic>.from(r['operation'] as Map))) {
+        final details? => {'details': details},
+        _ => null,
+      },
     };
   }
 

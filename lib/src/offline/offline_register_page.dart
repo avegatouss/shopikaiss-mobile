@@ -310,6 +310,80 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (text != null) setState(() => _delivery = int.tryParse(text) ?? 0);
   }
 
+  /// Clôture à l'aveugle : aucun attendu affiché. Le terminal exige un commentaire s'il constate un écart, car le contenu
+  /// d'une opération ne se corrige plus.
+  Future<void> _closeSession() async {
+    final operator = _operator!;
+    final methods = _snapshot!.methods.where((m) => !m.isCash).toList();
+    final cash = TextEditingController();
+    final comment = TextEditingController();
+    final amounts = {for (final m in methods) m.code: TextEditingController()};
+    final notes = {for (final m in methods) m.code: TextEditingController()};
+    String? error;
+    final closed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Clôturer la session'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: cash,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(labelText: 'Espèces comptées (F)'),
+                ),
+                for (final m in methods) ...[
+                  TextField(
+                    controller: amounts[m.code],
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: InputDecoration(labelText: '${m.name} compté (facultatif)'),
+                  ),
+                  TextField(controller: notes[m.code], maxLength: 500, decoration: InputDecoration(labelText: 'Justification ${m.name}')),
+                ],
+                TextField(
+                  controller: comment,
+                  maxLength: 500,
+                  decoration: InputDecoration(labelText: 'Commentaire (obligatoire s’il y a un écart)', errorText: error, errorMaxLines: 3),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                final counted = int.tryParse(cash.text);
+                if (counted == null) return setLocal(() => error = 'Indiquez les espèces comptées.');
+                final others = [
+                  for (final m in methods)
+                    if (int.tryParse(amounts[m.code]!.text) case final amount?)
+                      SessionCount(method: m.code, amount: amount, justification: notes[m.code]!.text.trim().isEmpty ? null : notes[m.code]!.text.trim()),
+                ];
+                try {
+                  await _engine.closeSession(operator, cash: counted, comment: comment.text, others: others);
+                  if (context.mounted) Navigator.pop(context, true);
+                } on OfflineRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Clôturer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (closed == true) {
+      _changed();
+      _toast('Session clôturée. Le Z arrivera à la prochaine synchronisation.');
+    }
+  }
+
   /// Choix du client de la vente : recherche par nom ou téléphone, création si le caissier en a le droit.
   Future<void> _pickCustomer() async {
     var results = await _engine.searchCustomers('');
@@ -738,11 +812,15 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   _openJournal();
                 } else if (choice == 'caissier') {
                   setState(() => _operator = null);
+                } else if (choice == 'cloture') {
+                  _closeSession();
                 }
               },
               itemBuilder: (context) => [
                 if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
                 const PopupMenuItem(value: 'journal', child: Text('Opérations hors ligne')),
+                if (_operator != null && _engine.canCloseSession(_operator!))
+                  PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
                 if (_operator != null)
                   PopupMenuItem(
                     value: 'caissier',

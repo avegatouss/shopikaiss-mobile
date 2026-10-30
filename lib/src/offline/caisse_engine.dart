@@ -178,6 +178,19 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// [operator] peut-il clôturer la session ouverte (capacité `session.cloture`, droit `caisse_cloturer`) ?
+  bool canCloseSession(Operator operator) => false;
+
+  /// Écarts au regard de ce que le terminal sait de la session ; aucun si l'attendu est inconnu (session ouverte en ligne).
+  Future<ClosingGaps> closingGaps(int cash, List<SessionCount> others) async => const ClosingGaps();
+
+  /// Clôture la session, comptée à l'aveugle : le théorique et l'écart reviennent du serveur dans le Z.
+  Future<OfflineOperation> closeSession(Operator operator, {required int cash, String? comment, List<SessionCount> others = const [], String? operationUuid}) =>
+      throw const OfflineRefusal('Clôture non disponible sur ce terminal.');
+
+  /// Dernière clôture émise par ce terminal, ou null ; son contenu porte `z` une fois intégrée.
+  Future<OfflineOperation?> lastClosure() async => null;
+
   /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
   bool get customersSupported => false;
 

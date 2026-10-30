@@ -639,6 +639,46 @@ void main() {
     await adapter.execute('setPayment', {'method': 'especes', 'received': 500}, null);
     await adapter.execute('commitSale', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000e3');
     expect((await e.v2.operation('aaaaaaaa-bbbb-4ccc-8ddd-0000000000e3'))!['operation']['contenu']['client_uuid'], publishedCustomer);
+
+    // Lot 3 : clôture à l'aveugle, droit et capacité exigés, session fermée sans attendre le serveur, Z conservé.
+    final noRight = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.canCloseSession(noRight), isFalse);
+    await expectLater(e.closeSession(noRight, cash: 1000), refused('non disponible'));
+    server.capabilities = [...server.capabilities, 'session.cloture'];
+    server.publish([
+      {'type': 'operateur', 'critique': true, 'cle': 'operateur:7', 'revision': '4', 'action': 'upsert',
+       'donnees': operateur21('7', 'Awa', 'empreinte', ['caisse_cloturer', 'clients_creer', 'ouverture_session', 'remise', 'vente'], '5.000000', 40)},
+      {'type': 'politique', 'critique': false, 'cle': 'session.ouverture_locale', 'revision': '2', 'action': 'upsert',
+       'donnees': {'cle_politique': 'session.ouverture_locale', 'valeur': true, 'source': 'boutique', 'verrouillee': false}},
+    ]);
+    await e.sync();
+    final closer = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.canCloseSession(closer), isTrue);
+    await expectLater(adapter.execute('closeSession', {'cash': 0}, null), completes);
+    expect(e.sessionOpen, isFalse, reason: 'fermée sur le terminal avant toute réponse du serveur');
+    final closure = await e.lastClosure();
+    expect(closure!.content['session_uuid'], fakeSession);
+    expect(closure.content['commentaire'], isNull, reason: 'session ouverte en ligne : attendu inconnu, commentaire facultatif');
+    server.resultDetails = (op) => op['type'] == 'cloture_session'
+        ? {'z': {'cloture_uuid': 'c2000000-0000-4000-8000-000000000001', 'compte': 0, 'theorique': 0, 'ecart': 0, 'mode': 'V1'}}
+        : null;
+    await e.sync();
+    expect((await e.lastClosure())!.content['z'], containsPair('mode', 'V1'));
+    expect(e.sessionOpen, isFalse, reason: 'intégrée : pas de réouverture avant la publication de la session close');
+
+    // Session ouverte sur ce terminal : attendu connu, l'écart exige un commentaire, jamais de montant rendu.
+    await e.openSession(1000, closer);
+    final cashSale = await e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], closer);
+    expect(cashSale.isSale, isTrue);
+    expect((await e.closingGaps(1500, const [])).cash, isFalse);
+    expect((await e.closingGaps(1400, const [])).cash, isTrue);
+    await expectLater(e.closeSession(closer, cash: 1400), refused('indiquez un commentaire'));
+    await expectLater(e.closeSession(closer, cash: 1500, others: const [SessionCount(method: 'wave', amount: 300)]), refused('justification'));
+    await e.closeSession(closer, cash: 1400, comment: 'Erreur de monnaie');
+    expect(e.sessionOpen, isFalse);
+    server.verdict = (op) => op['type'] == 'cloture_session' ? 'a_arbitrer' : 'integree';
+    await e.sync();
+    await expectLater(e.openSession(0, closer), refused('arbitrage'));
     await adapter.close();
   });
 

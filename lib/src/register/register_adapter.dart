@@ -34,6 +34,9 @@ class AdapterFailure implements Exception {
 /// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
 /// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, reprint, synchronize.
 ///
+/// Clôture (contrat 2.1) : closeSession {cash, comment, counts: [{method, amount, justification}]}, panier vide, identifiant
+/// d'opération facultatif. L'attendu n'est jamais exposé.
+///
 /// Clients (contrat 2.1) : searchCustomers {query}, createCustomer {name, phone}, setCustomer {uuid, name} ; uuid absent =
 /// client de passage. La vue donne `customer`.
 ///
@@ -114,6 +117,8 @@ class LocalRegisterAdapter {
         _operator = null;
         _emit('caissier');
         return _status();
+      case 'closeSession':
+        return _closeSession(args, operationId);
       case 'openSession':
         return _openSession(args);
       case 'view':
@@ -241,6 +246,7 @@ class LocalRegisterAdapter {
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
+      'close_session': cap(_operator == null ? 'Identifiez le caissier.' : (engine.canCloseSession(_operator!) ? null : 'Clôture non autorisée sur ce terminal.')),
       'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
       'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
@@ -525,6 +531,28 @@ class LocalRegisterAdapter {
     }
     _operator = operator;
     _emit('caissier');
+    return _status();
+  }
+
+  /// Clôture de la session par le caissier identifié, comptée à l'aveugle ; le Z arrive du serveur.
+  Future<Map<String, dynamic>> _closeSession(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant de clôturer.');
+    if (_draft.lines.isNotEmpty) throw const AdapterFailure('panier_en_cours', 'Terminez ou videz le panier avant de clôturer.');
+    final counts = [
+      for (final raw in (args['counts'] as List? ?? const []).cast<Map>())
+        SessionCount(
+          method: _text(raw.cast<String, dynamic>(), 'method', max: 32),
+          amount: _int(raw.cast<String, dynamic>(), 'amount'),
+          justification: raw['justification'] as String?,
+        ),
+    ];
+    try {
+      await engine.closeSession(operator, cash: _int(args, 'cash'), comment: args['comment'] as String?, others: counts, operationUuid: operationId);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('cloture_refusee', e.message);
+    }
+    _emit('session');
     return _status();
   }
 

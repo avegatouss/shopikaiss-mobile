@@ -98,6 +98,9 @@ class CaisseV2Client {
   static const customerReadCapability = 'client.lecture';
   static const customerCreateCapability = 'client.creation';
 
+  /// Clôture de session hors ligne (2.1, lot 3).
+  static const sessionCloseCapability = 'session.cloture';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;

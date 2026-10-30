@@ -71,8 +71,16 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
               String two(int v) => v.toString().padLeft(2, '0');
               return ListTile(
                 leading: Icon(icon, color: color),
-                title: Text(o.isSale ? 'Vente ${o.number}' : 'Ouverture de session (fond ${formatFcfa((o.content['fond'] as num?)?.toInt() ?? 0)})'),
-                subtitle: Text('${two(d.day)}/${two(d.month)} ${two(d.hour)}:${two(d.minute)} · $label'),
+                title: Text(switch (o.type) {
+                  'vente' => 'Vente ${o.number}',
+                  'creation_client' => 'Nouveau client : ${o.content['nom']}',
+                  'cloture_session' => 'Clôture de session (compté ${formatFcfa((o.content['compte'] as num?)?.toInt() ?? 0)})',
+                  _ => 'Ouverture de session (fond ${formatFcfa((o.content['fond'] as num?)?.toInt() ?? 0)})',
+                }),
+                subtitle: Text('${two(d.day)}/${two(d.month)} ${two(d.hour)}:${two(d.minute)} · $label${switch (o.content['z']) {
+                  final Map z => ' · théorique ${formatFcfa(z['theorique'] as int)}, écart ${formatFcfa(z['ecart'] as int)}',
+                  _ => '',
+                }}'),
                 trailing: !o.isSale
                     ? null
                     : Row(

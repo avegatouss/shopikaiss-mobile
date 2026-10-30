@@ -215,6 +215,25 @@ class Customer {
   final bool pending;
 }
 
+/// Montant compté à la clôture pour un moyen autre que les espèces.
+class SessionCount {
+  const SessionCount({required this.method, required this.amount, this.justification});
+
+  final String method;
+  final int amount;
+  final String? justification;
+
+  Map<String, dynamic> toJson() => {'moyen': method, 'montant': amount, 'justification': justification};
+}
+
+/// Écarts constatés par le terminal à la clôture, sans montant : le comptage reste à l'aveugle.
+class ClosingGaps {
+  const ClosingGaps({this.cash = false, this.methods = const {}});
+
+  final bool cash;
+  final Set<String> methods;
+}
+
 /// Client d'un panier conservé (clé `client`), ou null.
 Customer? customerFromDraft(Object? raw) => raw is Map ? Customer(uuid: raw['uuid'] as String, name: raw['nom'] as String) : null;
 

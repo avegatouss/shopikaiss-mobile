@@ -73,6 +73,12 @@ class V2Keys {
 
   /// Révision des formes de données de la projection (`2.0` ou `2.1`) : un changement impose un nouvel instantané.
   static const contractRevision = 'v2.revision_contrat';
+
+  /// Dernière `cloture_session` émise par ce terminal.
+  static const closingOperation = 'v2.cloture_operation';
+
+  /// Préfixe du Z rendu par le serveur pour une clôture (`details.z`).
+  static const zPrefix = 'v2.z.';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
@@ -442,6 +448,8 @@ class V2Store {
     if (!V2OperationState.unsent.contains(known) && BigInt.parse(version) < BigInt.parse(row['version_etat'] as String)) return;
     final sale = r['vente'] as Map?;
     final cursor = (r['couverture'] as Map?)?['curseur'] as String?;
+    final z = (r['details'] as Map?)?['z'];
+    if (z != null) await write('${V2Keys.zPrefix}$uuid', jsonEncode(z), txn);
     await txn.update(
       'v2_operations',
       {

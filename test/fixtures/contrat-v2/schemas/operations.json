@@ -1,85 +1,218 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "operations.json",
-  "title": "POST /operations et POST /operations/etats : lots bornés, résultat individuel, aucun acquittement implicite du lot.",
-  "$defs": {
-    "demande": {
-      "description": "Le lot n'est validé que dans sa forme ; chaque élément est ensuite validé seul contre operation.json.",
-      "type": "object",
-      "required": ["operations"],
-      "additionalProperties": false,
-      "properties": {
-        "operations": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "object" } }
-      }
-    },
-    "reponse": {
-      "type": "object",
-      "required": ["recu_le", "resultats"],
-      "additionalProperties": false,
-      "properties": {
-        "recu_le": { "$ref": "commun.json#/$defs/horodatage" },
-        "resultats": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/resultat" } }
-      }
-    },
-    "demande_etats": {
-      "type": "object",
-      "required": ["uuids"],
-      "additionalProperties": false,
-      "properties": {
-        "uuids": { "type": "array", "minItems": 1, "maxItems": 200, "uniqueItems": true, "items": { "$ref": "commun.json#/$defs/uuid" } }
-      }
-    },
-    "reponse_etats": {
-      "type": "object",
-      "required": ["etats"],
-      "additionalProperties": false,
-      "properties": {
-        "etats": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "$ref": "#/$defs/resultat" } }
-      }
-    },
-    "resultat": {
-      "description": "État persistant d'une opération. /operations ne rend jamais « inconnue » ; /operations/etats la rend pour un UUID absent ou d'un autre terminal.",
-      "type": "object",
-      "required": ["uuid", "etat", "version_etat", "raison", "vente", "mouvements", "couverture"],
-      "additionalProperties": false,
-      "properties": {
-        "uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "etat": { "enum": ["recue", "integree", "a_arbitrer", "resolue", "rejet_protocole", "inconnue"] },
-        "version_etat": { "$ref": "commun.json#/$defs/version" },
-        "raison": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/raison" }] },
-        "vente": {
-          "oneOf": [
-            { "type": "null" },
-            {
-              "type": "object",
-              "required": ["uuid", "numero"],
-              "additionalProperties": false,
-              "properties": {
-                "uuid": { "$ref": "commun.json#/$defs/uuid" },
-                "numero": { "type": "string", "minLength": 1, "maxLength": 40 }
-              }
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "operations.json",
+    "title": "POST /operations et POST /operations/etats : lots bornés, résultat individuel, aucun acquittement implicite du lot.",
+    "$defs": {
+        "demande": {
+            "description": "Le lot n'est validé que dans sa forme ; chaque élément est ensuite validé seul contre operation.json.",
+            "type": "object",
+            "required": [
+                "operations"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                        "type": "object"
+                    }
+                }
             }
-          ]
         },
-        "details": {
-          "description": "creation_client intégrée seulement : uuid à utiliser, différent de celui du terminal après fusion. L'ancien reste accepté sans limite de durée.",
-          "type": "object", "required": ["client_uuid_canonique"], "additionalProperties": false,
-          "properties": { "client_uuid_canonique": { "$ref": "commun.json#/$defs/uuid" } }
+        "reponse": {
+            "type": "object",
+            "required": [
+                "recu_le",
+                "resultats"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "recu_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "resultats": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                        "$ref": "#/$defs/resultat"
+                    }
+                }
+            }
         },
-        "mouvements": {
-          "description": "Mouvements serveur créés pour l'opération (UUID des mouvements locaux repris quand ils correspondent).",
-          "type": "array", "maxItems": 400, "items": { "$ref": "commun.json#/$defs/uuid" }
+        "demande_etats": {
+            "type": "object",
+            "required": [
+                "uuids"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                }
+            }
         },
-        "couverture": {
-          "description": "Curseur à partir duquel le changement de stock couvrant l'opération est visible ; null tant qu'il n'est pas publié. Ne retirer la consommation locale qu'après avoir appliqué ce changement.",
-          "type": "object",
-          "required": ["curseur"],
-          "additionalProperties": false,
-          "properties": {
-            "curseur": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/curseur" }] }
-          }
+        "reponse_etats": {
+            "type": "object",
+            "required": [
+                "etats"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "etats": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/resultat"
+                    }
+                }
+            }
+        },
+        "resultat": {
+            "description": "État persistant d'une opération. /operations ne rend jamais « inconnue » ; /operations/etats la rend pour un UUID absent ou d'un autre terminal.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "etat",
+                "version_etat",
+                "raison",
+                "vente",
+                "mouvements",
+                "couverture"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "etat": {
+                    "enum": [
+                        "recue",
+                        "integree",
+                        "a_arbitrer",
+                        "resolue",
+                        "rejet_protocole",
+                        "inconnue"
+                    ]
+                },
+                "version_etat": {
+                    "$ref": "commun.json#/$defs/version"
+                },
+                "raison": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/raison"
+                        }
+                    ]
+                },
+                "vente": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "uuid",
+                                "numero"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "numero": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                }
+                            }
+                        }
+                    ]
+                },
+                "details": {
+                    "description": "Sur une creation_client intégrée : uuid à utiliser, l'ancien reste accepté sans limite. Sur une cloture_session intégrée : le Z.",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "z": {
+                            "type": "object",
+                            "description": "Z de la clôture intégrée.",
+                            "required": [
+                                "cloture_uuid",
+                                "compte",
+                                "theorique",
+                                "ecart",
+                                "mode"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "cloture_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "compte": {
+                                    "$ref": "commun.json#/$defs/montant"
+                                },
+                                "theorique": {
+                                    "type": "integer"
+                                },
+                                "ecart": {
+                                    "type": "integer"
+                                },
+                                "mode": {
+                                    "enum": [
+                                        "V1",
+                                        "COMPLETE"
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "mouvements": {
+                    "description": "Mouvements serveur créés pour l'opération (UUID des mouvements locaux repris quand ils correspondent).",
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "couverture": {
+                    "description": "Curseur à partir duquel le changement de stock couvrant l'opération est visible ; null tant qu'il n'est pas publié. Ne retirer la consommation locale qu'après avoir appliqué ce changement.",
+                    "type": "object",
+                    "required": [
+                        "curseur"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "curseur": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/curseur"
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
         }
-      }
     }
-  }
 }

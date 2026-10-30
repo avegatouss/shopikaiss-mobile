@@ -894,14 +894,43 @@
                 },
                 "details": {
                     "type": "object",
-                    "description": "Présent sur une creation_client intégrée, pour les terminaux qui annoncent client.creation.",
-                    "required": [
-                        "client_uuid_canonique"
-                    ],
+                    "description": "Sur une creation_client intégrée (capacité client.creation) ou une cloture_session intégrée (capacité session.cloture).",
                     "additionalProperties": false,
                     "properties": {
                         "client_uuid_canonique": {
                             "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "z": {
+                            "type": "object",
+                            "description": "Z de la clôture intégrée.",
+                            "required": [
+                                "cloture_uuid",
+                                "compte",
+                                "theorique",
+                                "ecart",
+                                "mode"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "cloture_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "compte": {
+                                    "$ref": "commun.json#/$defs/montant"
+                                },
+                                "theorique": {
+                                    "type": "integer"
+                                },
+                                "ecart": {
+                                    "type": "integer"
+                                },
+                                "mode": {
+                                    "enum": [
+                                        "V1",
+                                        "COMPLETE"
+                                    ]
+                                }
+                            }
                         }
                     }
                 }

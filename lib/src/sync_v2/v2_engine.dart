@@ -164,7 +164,12 @@ class V2Engine extends CaisseEngine {
       capabilities: [
         ...CaisseV2Client.defaultCapabilities,
         if (declaredPayments) CaisseV2Client.declaredPaymentCapability,
-        if (contract21) ...[CaisseV2Client.contract21Capability, CaisseV2Client.customerReadCapability, CaisseV2Client.customerCreateCapability],
+        if (contract21) ...[
+          CaisseV2Client.contract21Capability,
+          CaisseV2Client.customerReadCapability,
+          CaisseV2Client.customerCreateCapability,
+          CaisseV2Client.sessionCloseCapability,
+        ],
       ],
     );
     _sync = V2Sync(_client!, v2);
@@ -381,6 +386,10 @@ class V2Engine extends CaisseEngine {
     if (!s.rules.sessionOpening) throw const OfflineRefusal('L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.');
     if (sessionOpen) throw const OfflineRefusal('Une session est déjà ouverte sur ce terminal.');
     if (float < 0) throw const OfflineRefusal('Fond de caisse invalide.');
+    final closing = await v2.read(V2Keys.closingOperation);
+    if (closing != null && (await v2.operation(closing))?['etat'] == V2OperationState.arbitration) {
+      throw const OfflineRefusal('La clôture précédente attend un arbitrage de la boutique : faites-la traiter avant d’ouvrir une session.');
+    }
     _requireRight(operator, 'ouverture_session', 'ouvrir une session');
     final uuid = _newUuid();
     final operation = await _record(uuid, 'ouverture_session', operator, (_) => {'fond': float});
@@ -409,6 +418,88 @@ class V2Engine extends CaisseEngine {
 
   @override
   String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
+
+  @override
+  bool canCloseSession(Operator operator) =>
+      saleExtrasSupported && sessionOpen && _serverOffers(CaisseV2Client.sessionCloseCapability) && hasRight(operator, 'caisse_cloturer');
+
+  /// Attendu de la session d'après les opérations du terminal, par moyen de paiement ; null si son ouverture n'y figure pas.
+  Future<Map<String, int>?> _expectedCounts() async {
+    final expected = <String, int>{};
+    for (final row in await v2.operationRows()) {
+      if (row['etat'] == V2OperationState.rejected) continue;
+      final operation = row['operation'] as Map;
+      final content = operation['contenu'] as Map;
+      switch (operation['type']) {
+        case 'vente':
+          for (final p in (content['paiements'] as List).cast<Map>()) {
+            final amount = (p['montant'] as int) + (p['ecart_arrondi'] as int? ?? 0);
+            expected.update(p['moyen'] as String, (v) => v + amount, ifAbsent: () => amount);
+          }
+        case 'ouverture_session':
+          final cash = (await v2.entities('moyen_paiement')).values.where((m) => m['especes'] == true).map((m) => m['code'] as String).firstOrNull ?? 'especes';
+          expected.update(cash, (v) => v + (content['fond'] as int), ifAbsent: () => content['fond'] as int);
+          return expected;
+        case 'cloture_session':
+          return null;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<ClosingGaps> closingGaps(int cash, List<SessionCount> others) async {
+    final expected = await _expectedCounts();
+    if (expected == null) return const ClosingGaps();
+    final cashCodes = {for (final m in snapshot?.methods ?? const <PaymentMethodInfo>[]) if (m.isCash) m.code};
+    final cashExpected = expected.entries.where((e) => cashCodes.contains(e.key)).fold<int>(0, (sum, e) => sum + e.value);
+    return ClosingGaps(cash: cash != cashExpected, methods: {for (final c in others) if (c.amount != (expected[c.method] ?? 0)) c.method});
+  }
+
+  @override
+  Future<OfflineOperation> closeSession(Operator operator, {required int cash, String? comment, List<SessionCount> others = const [], String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) return _view(existing);
+    }
+    if (!sessionOpen || _sessionUuid == null) throw const OfflineRefusal('Aucune session de caisse ouverte sur ce terminal.');
+    if (!_serverOffers(CaisseV2Client.sessionCloseCapability) || !saleExtrasSupported) throw const OfflineRefusal('Clôture non disponible sur ce terminal : clôturez en ligne.');
+    _requireRight(operator, 'caisse_cloturer', 'clôturer la session');
+    if (cash < 0 || others.any((c) => c.amount < 0)) throw const OfflineRefusal('Montant compté invalide.');
+    final remark = comment?.trim() ?? '';
+    if (remark.length > 500) throw const OfflineRefusal('Commentaire trop long (500 caractères au plus).');
+    final known = {for (final m in snapshot!.methods) if (!m.isCash) m.code};
+    for (final c in others) {
+      if (!known.contains(c.method)) throw OfflineRefusal('Moyen « ${c.method} » non compté sur ce terminal.');
+      if ((c.justification?.length ?? 0) > 500) throw const OfflineRefusal('Justification trop longue (500 caractères au plus).');
+    }
+    final gaps = await closingGaps(cash, others);
+    if (gaps.cash && remark.isEmpty) throw const OfflineRefusal('Écart constaté : indiquez un commentaire.');
+    for (final c in others) {
+      if (gaps.methods.contains(c.method) && (c.justification ?? '').trim().isEmpty) throw OfflineRefusal('Écart constaté sur « ${c.method} » : indiquez une justification.');
+    }
+    final session = _sessionUuid!;
+    final uuid = operationUuid ?? _newUuid();
+    final operation = await _record(uuid, 'cloture_session', operator, (_) => {
+      'session_uuid': session,
+      'compte': cash,
+      'comptage': others.isEmpty ? null : [for (final c in others) c.toJson()],
+      'commentaire': remark.isEmpty ? null : remark,
+    });
+    await v2.write(V2Keys.closingOperation, uuid);
+    await v2.write(V2Keys.localSession, null);
+    await _rebuild();
+    await _afterWrite();
+    return operation;
+  });
+
+  @override
+  Future<OfflineOperation?> lastClosure() async {
+    final uuid = await v2.read(V2Keys.closingOperation);
+    final row = uuid == null ? null : await v2.operation(uuid);
+    return row == null ? null : _view(row);
+  }
 
   bool _serverOffers(String capability) => (_state?['capacites_serveur'] as List?)?.contains(capability) ?? false;
 
@@ -743,7 +834,7 @@ class V2Engine extends CaisseEngine {
             'total': (content['totaux'] as Map)['a_payer'],
             if (content['client_nom'] != null) 'client_nom': content['client_nom'],
           }
-        : content;
+        : {...content, if (await v2.read('${V2Keys.zPrefix}${op['uuid']}') case final z?) 'z': jsonDecode(z)};
     final finalState = state == V2OperationState.integrated || state == V2OperationState.resolved;
     return OfflineOperation(
       uuid: op['uuid'] as String,
@@ -892,7 +983,9 @@ class V2Engine extends CaisseEngine {
   /// pas intégrée (une fois intégrée ou résolue, le serveur fait foi, y compris pour sa clôture).
   Future<Map<String, dynamic>?> _ownSession() async {
     final server = (await v2.entities('session'))['session:${_device['terminal_uuid']}'];
-    if (server?['ouverte'] == true) return {'session_uuid': server!['session_uuid'], 'operateur_id': server['operateur_id']};
+    if (server?['ouverte'] == true && !await _closedLocally(server!['session_uuid'] as String)) {
+      return {'session_uuid': server['session_uuid'], 'operateur_id': server['operateur_id']};
+    }
     final local = await v2.read(V2Keys.localSession);
     if (local == null) return null;
     final opening = await v2.operation(local);
@@ -902,6 +995,15 @@ class V2Engine extends CaisseEngine {
       return null;
     }
     return {'session_uuid': local, 'locale': true};
+  }
+
+  /// Clôture émise par ce terminal que le serveur n'a pas encore reflétée : la session ne se rouvre pas d'elle-même.
+  Future<bool> _closedLocally(String serverSession) async {
+    final uuid = await v2.read(V2Keys.closingOperation);
+    final row = uuid == null ? null : await v2.operation(uuid);
+    final state = row?['etat'] as String?;
+    if (state == null || state == V2OperationState.rejected || state == V2OperationState.resolved) return false;
+    return state != V2OperationState.integrated || ((row!['operation'] as Map)['contenu'] as Map)['session_uuid'] == serverSession;
   }
 
   Future<int> _unsentCount() async {
