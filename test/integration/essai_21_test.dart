@@ -19,7 +19,7 @@ import 'package:uuid/uuid.dart';
 ///
 /// Phases : `appairage` (SK_CODE, instantané 2.0, relevé sans vente) ; `vente_declaree` (moitié espèces, moitié Wave
 /// avec référence) ; `contrat21` (annonce contrat.2_1, nouvel instantané, relevé) ; `vente21` (remise %, remise globale,
-/// arrondi espèces ; SK_REMISE_LIGNE et SK_REMISE_GLOBALE en %) ; `etat` (synchronisation et sort des ventes).
+/// arrondi espèces ; SK_REMISE_LIGNE et SK_REMISE_GLOBALE en %) ; `catalogue` (badges et images, sans vente) ; `etat` (synchronisation et sort des ventes).
 void main() {
   final env = Platform.environment;
   final origin = env['SK_ORIGINE'] ?? 'https://demo.khoga.ci';
@@ -35,7 +35,8 @@ void main() {
     Directory(dir).createSync(recursive: true);
     final store = await SqfliteOfflineStore.open(name: p.join(dir, 'caisse.db'), factory: databaseFactoryFfi);
     final engine = V2Engine.onStore(store, transport: HttpV2Transport(), appVersion: 'essai-B-2.1', platform: 'windows',
-        declaredPayments: true, contract21: phase == 'contrat21' || phase == 'vente21' || env['SK_21'] == '1');
+        declaredPayments: true, contract21: phase == 'contrat21' || phase == 'vente21' || phase == 'catalogue' || env['SK_21'] == '1',
+        imageDirectory: p.join(dir, 'images'));
     await engine.load(origin);
     if (phase == 'appairage') {
       expect(await engine.pair(env['SK_CODE']!, model: 'Essai B (poste de dev)', appVersion: 'essai-B-2.1'), isNull);
@@ -94,6 +95,16 @@ void main() {
       note('synchro : envoyées ${after.sent}, intégrées ${after.integrated}, à arbitrer ${after.pending}, refusées ${after.refused}');
       final status = await engine.saleStatus(operationId);
       note('sort : ${status!.serverStatus} · numéro serveur ${status.serverNumber} · ${status.message ?? ''}');
+    }
+    if (phase == 'catalogue') {
+      final day = DateTime.now().toIso8601String().substring(0, 10);
+      note('badge Nouveau : ${engine.newBadgeDays} jours · produits ${s.products.length}');
+      note('favoris ${s.products.where((x) => x.favorite).length} · promotions ${s.products.where((x) => x.promotions.isNotEmpty).length}, '
+          'actives ${s.products.where((x) => x.promotionLabel(day) != null).length} · nouveaux '
+          '${s.products.where((x) => x.isNew(engine.newBadgeDays, DateTime.now())).length} · seuil ${s.products.where((x) => x.alertThreshold != null).length} · '
+          'images ${s.products.where((x) => x.image != null).length}');
+      note('téléchargées : ${await engine.downloadImages()}, puis ${await engine.downloadImages()}');
+      note('en cache : ${s.products.where((x) => x.image != null && engine.imagePath(x.image!) != null).length}');
     }
     if (phase == 'etat') {
       for (final o in (await engine.history()).reversed.take(5)) {
