@@ -438,7 +438,7 @@ void main() {
         paperWidth: 58,
         duplicate: true,
       );
-      expect(ticket.join('\n'), contains('DUPLICATA'));
+      expect(ticket.join('\n'), contains('REIMPRESSION'));
       expect(ticket.join('\n'), contains(sale.number));
     });
   });

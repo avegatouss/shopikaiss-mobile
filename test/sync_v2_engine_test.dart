@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
@@ -487,7 +489,7 @@ void main() {
     // Badges : présentation seule, le prix ne change pas ; le premier bon valide à la date du jour.
     final card = (view['products'] as List).single as Map;
     expect([card['favorite'], card['promotion'], card['is_new'], card['low_stock'], card['price_label']], [isTrue, 'Bon -10 %', isTrue, isTrue, '500 F']);
-    expect(card['image'], {'uuid': '0d000000-0000-4000-8000-000000000001', 'hash': 'a' * 64, 'width': 640, 'height': 480});
+    expect(card['image'], {'uuid': '0d000000-0000-4000-8000-000000000001', 'hash': 'a' * 64, 'width': 640, 'height': 480, 'path': null});
     final bon = savonProduct.promotions.last;
     expect([bon.activeOn('2030-01-15'), bon.activeOn('2030-02-01'), bon.activeOn('2020-01-01')], [isFalse, isTrue, isFalse]);
     final prepared = await adapter.execute('preparePayment', {}, null);
@@ -503,6 +505,49 @@ void main() {
       throwsA(isA<AdapterFailure>().having((f) => f.message, 'message', 'Trop-perçu électronique : en ligne seulement. Saisissez le montant exact.')),
     );
     await adapter.close();
+  });
+
+  test('images : téléchargées hors vente, empreinte vérifiée, 429 respecté, fichiers périmés retirés', () async {
+    final cache = Directory.systemTemp.createTempSync('images_');
+    var moment = DateTime.now();
+    addTearDown(() => cache.deleteSync(recursive: true));
+    const uuid = '0d000000-0000-4000-8000-000000000001';
+    final bytes = utf8.encode('image jpeg');
+    final hash = sha256.convert(bytes).toString();
+    serve21(server);
+    server.put('produit', fakeSavon, {
+      ...(server.entities['produit|$fakeSavon']!['donnees'] as Map).cast<String, dynamic>(),
+      'image': {'uuid': uuid, 'empreinte': hash, 'octets': bytes.length, 'largeur': 10, 'hauteur': 10},
+    });
+    File(p.join(cache.path, '${'b' * 64}.jpg')).writeAsBytesSync([1]);
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, contract21: true, imageDirectory: cache.path, clock: () => moment);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'x', appVersion: 'essai'), isNull);
+    await e.sync();
+    final image = e.snapshot!.products.firstWhere((x) => x.image != null).image!;
+    expect(e.imagePath(image), isNull);
+
+    // Contenu altéré : jamais gardé.
+    server.images[uuid] = utf8.encode('autre contenu');
+    expect(await e.downloadImages(), 0);
+    expect(e.imagePath(image), isNull);
+
+    // 429 : pause, aucune autre requête d'image avant la fin du délai.
+    server.imageStatus = 429;
+    expect(await e.downloadImages(), 0);
+    final calls = server.requests.length;
+    server.imageStatus = null;
+    server.images[uuid] = bytes;
+    expect(await e.downloadImages(), 0);
+    expect(server.requests.length, calls);
+
+    // Après le délai : téléchargée une seule fois, fichier périmé retiré.
+    moment = moment.add(const Duration(seconds: 31));
+    expect(await e.downloadImages(), 1);
+    expect(File(e.imagePath(image)!).readAsBytesSync(), bytes);
+    expect(File(p.join(cache.path, '${'b' * 64}.jpg')).existsSync(), isFalse);
+    expect(await e.downloadImages(), 0);
   });
 
   test('contrat 2.1 (lot 1b) : remise %, remise globale, livraison, note, arrondi espèces — intégrée au franc près', () async {

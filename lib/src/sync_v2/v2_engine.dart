@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../offline/money.dart';
@@ -42,7 +45,11 @@ class V2Engine extends CaisseEngine {
     super.pinVerifier,
     this.declaredPayments = false,
     this.contract21 = false,
+    this.imageDirectory,
   }) : _newUuid = newUuid ?? (() => const Uuid().v4());
+
+  /// Dossier du cache d'images (fichiers nommés par empreinte) ; null : aucune image téléchargée.
+  final String? imageDirectory;
 
   /// Annonce `contrat.2_1` : formes 2.1 des données (catégories ordonnées, marque, fournisseur, unité, plafonds de
   /// remise par opérateur, référence de paiement selon le moyen). Sans effet si le serveur ne la rend pas.
@@ -102,6 +109,7 @@ class V2Engine extends CaisseEngine {
     Future<bool> Function(String pin, String hash)? pinVerifier,
     bool declaredPayments = false,
     bool contract21 = false,
+    String? imageDirectory,
   }) => V2Engine(
     store: store,
     v2: V2Store(store.database, SchemaValidator((file) => contractV2Schemas[file] ?? (throw SchemaProfileError('Schéma inconnu : $file')))),
@@ -114,6 +122,7 @@ class V2Engine extends CaisseEngine {
     pinVerifier: pinVerifier,
     declaredPayments: declaredPayments,
     contract21: contract21,
+    imageDirectory: imageDirectory,
   );
 
   static String apiBaseFor(String origin) => '$origin/api/caisse/v2';
@@ -400,6 +409,51 @@ class V2Engine extends CaisseEngine {
 
   @override
   String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
+
+  static const _imagesPerPass = 30;
+  DateTime? _imagesPausedUntil;
+
+  File _imageFile(String hash) => File(p.join(imageDirectory!, '$hash.jpg'));
+
+  @override
+  String? imagePath(ProductImage image) {
+    if (imageDirectory == null) return null;
+    final file = _imageFile(image.hash);
+    return file.existsSync() ? file.path : null;
+  }
+
+  /// Le journal sert de manifeste : une nouvelle empreinte = nouveau fichier. S'arrête sur 429 (Retry-After respecté) ou
+  /// sans réseau ; un contenu dont l'empreinte diffère n'est jamais gardé ; les fichiers qui ne servent plus sont retirés.
+  @override
+  Future<int> downloadImages() async {
+    final directory = imageDirectory;
+    final client = _client;
+    final s = snapshot;
+    if (directory == null || client == null || s == null || !paired) return 0;
+    final paused = _imagesPausedUntil;
+    if (paused != null && now.isBefore(paused)) return 0;
+    Directory(directory).createSync(recursive: true);
+    final wanted = {for (final x in s.products) ?x.image?.hash: ?x.image};
+    var added = 0;
+    for (final image in wanted.values.where((i) => !_imageFile(i.hash).existsSync()).take(_imagesPerPass)) {
+      final response = await client.image(image.uuid);
+      if (response.status == 429) {
+        _imagesPausedUntil = now.add(Duration(seconds: response.retryAfter ?? 60));
+        break;
+      }
+      if (response.status == 0) break;
+      final bytes = response.bytes;
+      if (!response.ok || bytes == null || sha256.convert(bytes).toString() != image.hash) continue;
+      final temporary = File('${_imageFile(image.hash).path}.tmp');
+      await temporary.writeAsBytes(bytes, flush: true);
+      await temporary.rename(_imageFile(image.hash).path);
+      added++;
+    }
+    for (final file in Directory(directory).listSync().whereType<File>()) {
+      if (p.extension(file.path) == '.jpg' && !wanted.containsKey(p.basenameWithoutExtension(file.path))) file.deleteSync();
+    }
+    return added;
+  }
 
   /// Badge « Nouveau » : produit créé depuis N jours au plus (`regles.nouveau_jours`), null = désactivé.
   @override

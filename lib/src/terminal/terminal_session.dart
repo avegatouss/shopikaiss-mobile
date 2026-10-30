@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
-import 'package:sqflite/sqflite.dart' show databaseFactory;
+import 'package:path/path.dart' as p;
+import 'package:sqflite/sqflite.dart' show databaseFactory, getDatabasesPath;
 
 import '../app_settings.dart';
 import '../offline/api.dart';
@@ -50,6 +51,7 @@ class TerminalSession extends ChangeNotifier {
       legacyTransport: HttpRegisterTransport(appVersion: package.version),
       declaredPayments: true,
       contract21: true,
+      imageDirectory: p.join(await getDatabasesPath(), 'images'),
     );
     if (settings.configured) await offline.load(settings.origin);
     final session = TerminalSession._(settings, TerminalInfo.unsupported, package.version, offline);

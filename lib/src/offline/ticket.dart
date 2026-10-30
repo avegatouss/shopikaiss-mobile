@@ -53,7 +53,7 @@ List<String> offlineTicketLines({
   if (store.taxId != null && store.taxId!.isNotEmpty) wrap(store.taxId!);
   if (store.header != null && store.header!.isNotEmpty) wrap(store.header!);
   out.add('-' * cols);
-  out.add(center(duplicate ? 'DUPLICATA - VENTE HORS LIGNE' : 'VENTE HORS LIGNE'));
+  out.add(center(duplicate ? 'REIMPRESSION - VENTE HORS LIGNE' : 'VENTE HORS LIGNE'));
   out.add(pair('Ticket', operation.number ?? ''));
   final d = operation.date;
   String two(int v) => v.toString().padLeft(2, '0');

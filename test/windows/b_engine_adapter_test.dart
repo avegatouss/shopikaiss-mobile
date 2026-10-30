@@ -196,7 +196,7 @@ void main() {
         HostCommand.reprint,
         arguments: {'operation_id': operation},
       );
-      expect((receipt['lines'] as List).join('\n'), contains('DUPLICATA'));
+      expect((receipt['lines'] as List).join('\n'), contains('REIMPRESSION'));
     },
   );
 

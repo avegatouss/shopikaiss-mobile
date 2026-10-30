@@ -107,6 +107,19 @@ class FakeV2Server implements V2Transport {
     if (errors.isNotEmpty) throw StateError('Requête non conforme au contrat ($schema) : $errors');
   }
 
+  /// Images servies par `GET /images/{uuid}` ; statut forcé par [imageStatus].
+  final images = <String, List<int>>{};
+  int? imageStatus;
+
+  @override
+  Future<V2Response> fetchBytes(String apiBase, String path, {Map<String, String> headers = const {}, Duration? timeout}) async {
+    requests.add((method: 'GET', path: path, headers: headers, body: null));
+    final status = imageStatus;
+    if (status != null) return V2Response(status, null, retryAfter: status == 429 ? 30 : null);
+    final bytes = images[path.substring('/images/'.length)];
+    return bytes == null ? const V2Response(404, null) : V2Response(200, null, bytes: bytes);
+  }
+
   @override
   Future<V2Response> send(String method, String apiBase, String path, {Map<String, String> headers = const {}, Object? body, Duration? timeout}) async {
     final payload = body == null ? null : jsonDecode(jsonEncode(body));
