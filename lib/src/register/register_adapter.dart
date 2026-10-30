@@ -275,6 +275,8 @@ class LocalRegisterAdapter {
     final hits = snapshot == null
         ? const <Product>[]
         : snapshot.search(_query, limit: null, category: _category, brand: _brand, supplier: _supplier);
+    final now = DateTime.now();
+    final today = now.toIso8601String().substring(0, 10);
     final payments = _draft.payments;
     final payment = payments.firstOrNull;
     final paymentValid = totals != null && payments.isNotEmpty && _paymentsError(snapshot!, payments, totals.payable) == null;
@@ -370,6 +372,11 @@ class LocalRegisterAdapter {
               'brand': p.brand,
               'supplier': p.supplier,
               'unit': p.unit,
+              'favorite': p.favorite,
+              'promotion': p.promotionLabel(today),
+              'is_new': p.isNew(engine.newBadgeDays, now),
+              'low_stock': _lowStock(p, sold[p.id] ?? BigInt.zero),
+              'image': p.image == null ? null : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height},
               'price_label': formatFcfa(p.price, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'packagings': [for (final k in p.packagings) {'id': k.id, 'name': k.name, 'price_label': formatFcfa(k.price, currency)}],
@@ -435,6 +442,13 @@ class LocalRegisterAdapter {
     final central = p.negativeStock ? -p.stockMicros : p.stockMicros;
     final estimated = central - sold;
     return estimated.isNegative ? '-${formatMicros(-estimated)}' : formatMicros(estimated);
+  }
+
+  /// Stock estimé au seuil d'alerte du produit ou en dessous (jamais pour un stock illimité).
+  bool _lowStock(Product p, BigInt sold) {
+    final threshold = p.alertThreshold;
+    if (p.unlimitedStock || threshold == null) return false;
+    return (p.negativeStock ? -p.stockMicros : p.stockMicros) - sold <= threshold;
   }
 
   String _syncLabel() {

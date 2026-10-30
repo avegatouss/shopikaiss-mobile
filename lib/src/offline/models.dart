@@ -216,6 +216,37 @@ class ProductCode {
   final int? packagingId;
 }
 
+/// Bon affiché en badge « Promotion » : [activeOn] compare des dates AAAA-MM-JJ, bornes comprises.
+class Promotion {
+  Promotion(Map<String, dynamic> m)
+    : label = m['libelle'] as String,
+      from = m['du'] as String?,
+      to = m['au'] as String,
+      exclusions = [for (final x in m['exclusions'] as List) (x['du'] as String, x['au'] as String)];
+
+  final String label;
+  final String? from;
+  final String to;
+  final List<(String, String)> exclusions;
+
+  bool activeOn(String day) =>
+      (from == null || from!.compareTo(day) <= 0) && to.compareTo(day) >= 0 && !exclusions.any((x) => x.$1.compareTo(day) <= 0 && x.$2.compareTo(day) >= 0);
+}
+
+/// Image principale d'un produit (contrat 2.1) ; [hash] change quand elle doit être retéléchargée.
+class ProductImage {
+  ProductImage(Map<String, dynamic> m)
+    : uuid = m['uuid'] as String,
+      hash = m['empreinte'] as String,
+      width = m['largeur'] as int,
+      height = m['hauteur'] as int;
+
+  final String uuid;
+  final String hash;
+  final int width;
+  final int height;
+}
+
 class Product {
   Product(Map<String, dynamic> m)
     : id = (m['id'] as num).toInt(),
@@ -225,6 +256,11 @@ class Product {
       brand = m['marque'] as String?,
       supplier = m['fournisseur'] as String?,
       unit = m['unite'] as String?,
+      favorite = m['favori'] == true,
+      promotions = [for (final x in (m['promotions'] as List? ?? const [])) Promotion(Map<String, dynamic>.from(x as Map))],
+      image = m['image'] == null ? null : ProductImage(Map<String, dynamic>.from(m['image'] as Map)),
+      createdAt = m['cree_le'] == null ? null : DateTime.tryParse(m['cree_le'] as String),
+      alertThreshold = m['seuil_alerte'] == null ? null : parseMicros(m['seuil_alerte'] as String),
       price = (m['prix'] as num?)?.toInt() ?? 0,
       unlimitedStock = m['stock_illimite'] == true,
       stockMicros = parseMicros(((m['stock'] ?? '0') as String).replaceFirst('-', '')) ?? BigInt.zero,
@@ -241,6 +277,23 @@ class Product {
 
   /// Nom de l'unité de vente (contrat 2.1), ou null.
   final String? unit;
+
+  /// Favori de caisse (contrat 2.1).
+  final bool favorite;
+
+  /// Bons affichés en badge, par priorité : présentation seule, aucun prix ne change (contrat 2.1).
+  final List<Promotion> promotions;
+  final ProductImage? image;
+  final DateTime? createdAt;
+
+  /// Seuil de stock faible (contrat 2.1), ou null.
+  final BigInt? alertThreshold;
+
+  /// Libellé du badge « Promotion » à la date [day] (AAAA-MM-JJ), ou null.
+  String? promotionLabel(String day) => promotions.where((x) => x.activeOn(day)).firstOrNull?.label;
+
+  /// Badge « Nouveau » : créé depuis [days] jours au plus à [now].
+  bool isNew(int? days, DateTime now) => days != null && createdAt != null && now.difference(createdAt!).inDays <= days;
   final int price;
   final bool unlimitedStock;
   final BigInt stockMicros;

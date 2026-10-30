@@ -1,5 +1,5 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commit : 4bb14454 (révision 2.1, lots 1a et 1b : données 2.1, vente 2.1 — remise_saisie, remise globale, note, tarif, monnaie, ecart_arrondi ; paiements minItems 0)
+Commit : 198a26d7 (révision 2.1, lot 1b bis : catalogue — favori, promotions, image, nouveau_jours, GET /images/{uuid})
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

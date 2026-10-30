@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 1b) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 1b bis) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -241,7 +241,10 @@ const contractV2Schemas = <String, String>{
                 "prix_gros",
                 "gros_quantite_min",
                 "seuil_alerte",
-                "cree_le"
+                "cree_le",
+                "favori",
+                "promotions",
+                "image"
             ],
             "additionalProperties": false,
             "properties": {
@@ -366,6 +369,106 @@ const contractV2Schemas = <String, String>{
                         },
                         {
                             "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "favori": {
+                    "type": "boolean"
+                },
+                "promotions": {
+                    "type": "array",
+                    "description": "Bons affichés en badge « Promotion », par priorité : le premier dont la période couvre la date locale de la boutique et hors exclusions. Présentation seule : aucune remise appliquée, aucun prix avant/après.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "libelle",
+                            "du",
+                            "au",
+                            "exclusions"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "libelle": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 300
+                            },
+                            "du": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "type": "string",
+                                        "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                                    }
+                                ]
+                            },
+                            "au": {
+                                "type": "string",
+                                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                            },
+                            "exclusions": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "required": [
+                                        "du",
+                                        "au"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "du": {
+                                            "type": "string",
+                                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                                        },
+                                        "au": {
+                                            "type": "string",
+                                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                "image": {
+                    "description": "Image principale ; à télécharger hors vente par GET /images/{uuid}.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "uuid",
+                                "empreinte",
+                                "octets",
+                                "largeur",
+                                "hauteur"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "empreinte": {
+                                    "type": "string",
+                                    "pattern": "^[0-9a-f]{64}$"
+                                },
+                                "octets": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "largeur": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "hauteur": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                }
+                            }
                         }
                     ]
                 }
@@ -645,7 +748,8 @@ const contractV2Schemas = <String, String>{
                         "ouverture_session",
                         "survente",
                         "gros",
-                        "fuseau"
+                        "fuseau",
+                        "nouveau_jours"
                     ],
                     "description": "Codes du web, tels quels (PARITE-CAISSE-WEB §3).",
                     "properties": {
@@ -774,6 +878,18 @@ const contractV2Schemas = <String, String>{
                         "fuseau": {
                             "type": "string",
                             "maxLength": 64
+                        },
+                        "nouveau_jours": {
+                            "description": "Badge « Nouveau » : produit créé depuis N jours au plus ; null = désactivé.",
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "type": "integer",
+                                    "minimum": 1
+                                }
+                            ]
                         }
                     }
                 },

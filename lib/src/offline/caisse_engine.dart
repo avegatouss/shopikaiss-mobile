@@ -178,6 +178,9 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// Badge « Nouveau » : nombre de jours depuis la création, null = désactivé (contrat 2.1).
+  int? get newBadgeDays => null;
+
   /// Remise globale maximale (francs) de [operator] sur un sous-total de [subtotal] : politique
   /// `remises.globale_max_pourcent` et, s'il est publié, plafond du rôle — le plus petit des deux.
   int maxGlobalDiscountFor(Operator operator, int subtotal) => maxLineDiscount(subtotal, snapshot?.rules.maxGlobalDiscountPercent ?? 0);

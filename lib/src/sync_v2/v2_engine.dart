@@ -401,6 +401,10 @@ class V2Engine extends CaisseEngine {
   @override
   String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
 
+  /// Badge « Nouveau » : produit créé depuis N jours au plus (`regles.nouveau_jours`), null = désactivé.
+  @override
+  int? get newBadgeDays => _shopRules?['nouveau_jours'] as int?;
+
   @override
   Future<OfflineOperation> recordSale(
     List<CartLine> lines,
@@ -696,6 +700,11 @@ class V2Engine extends CaisseEngine {
               'marque': e.value['marque'],
               'fournisseur': e.value['fournisseur'],
               'unite': (e.value['unite'] as Map?)?['nom'],
+              'favori': e.value['favori'] == true,
+              'promotions': e.value['promotions'],
+              'image': e.value['image'],
+              'cree_le': e.value['cree_le'],
+              'seuil_alerte': e.value['seuil_alerte'],
               'prix': e.value['prix'],
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
