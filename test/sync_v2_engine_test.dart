@@ -624,6 +624,10 @@ void main() {
     final cashPayment = (content['paiements'] as List).single as Map;
     expect([cashPayment['montant'], cashPayment['recu'], cashPayment['monnaie'], cashPayment['ecart_arrondi']], [2487, 3000, 525, -12]);
 
+    // Ticket local : la monnaie est celle rendue sur le montant arrondi, pas sur le montant exact.
+    final ticket = await adapter.execute('reprint', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
+    expect((ticket['lines'] as List).join(' '), contains('525'));
+
     // Le serveur (recoupement de CoherenceVente 4bb14454) l'intègre.
     await e.sync();
     expect((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!.serverStatus, 'integree');

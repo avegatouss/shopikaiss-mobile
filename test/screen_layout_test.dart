@@ -210,6 +210,24 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('panier en attente : mis de côté puis repris, panier vide entre-temps', (tester) async {
+      final session = await _session(inches: 8.0);
+      await _pump(tester, const Size(800, 1280), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      expect(find.text('Panier (1)'), findsOneWidget);
+      await tester.tap(find.text('Mettre en attente'));
+      await tester.pumpAndSettle();
+      expect(find.text('Panier (0)'), findsOneWidget);
+      await tester.tap(find.text('En attente (1)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('1 article(s)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Panier (1)'), findsOneWidget);
+      expect(find.textContaining('En attente ('), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('téléphone 4 pouces (320 × 568) : aucun débordement', (tester) async {
       final session = await _session(inches: 4.0);
       await _pump(tester, const Size(320, 568), session);

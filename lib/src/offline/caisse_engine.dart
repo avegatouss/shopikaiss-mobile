@@ -269,7 +269,8 @@ abstract class CaisseEngine extends EngineNotifier {
       final code = '${m['moyen']}';
       final method =
           s?.methods.where((x) => x.code == code).firstOrNull ?? PaymentMethodInfo({'code': code, 'nom': code, 'especes': code == 'especes'});
-      payments.add(CartPayment(method: method, amount: (m['montant'] as num).toInt(), received: (m['recu'] as num?)?.toInt()));
+      final amount = (m['montant'] as num).toInt();
+      payments.add(CartPayment(method: method, amount: amount, received: (m['recu'] as num?)?.toInt(), cashDue: method.isCash ? cashDue(amount) : amount));
     }
     return (lines, payments);
   }

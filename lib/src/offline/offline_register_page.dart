@@ -12,6 +12,7 @@ import 'models.dart';
 import 'money.dart';
 import 'pending_operations_page.dart';
 import 'ticket.dart';
+import 'web_rules.dart';
 
 const _brand = Color(0xFF0F3E2E);
 const _offline = Color(0xFFB45309);
@@ -51,6 +52,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   String? _supplier;
   int _productLimit = _productPage;
 
+  /// Éléments de vente hors lignes (contrat 2.1).
+  DiscountEntry? _globalEntry;
+  int _delivery = 0;
+  String? _note;
+
+  /// Paniers mis en attente sur ce terminal.
+  int _suspendedCount = 0;
+
   /// Disposition compacte (téléphone de moins de 6 pouces) : onglet affiché, 0 = articles, 1 = panier.
   int _compactTab = 0;
 
@@ -69,6 +78,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _probe = Timer.periodic(Duration(seconds: rules?.probeSeconds ?? 20), (_) => _tryOnline(automatic: true));
     if (rules != null && !rules.pinRequired) _operator = _snapshot!.operatorById(_snapshot!.lastOperatorId);
     _refreshSold();
+    _refreshSuspended();
   }
 
   @override
@@ -82,6 +92,275 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   void _changed() {
     if (mounted) setState(() {});
+  }
+
+  Future<List<StoredDraft>> _suspended() async => [for (final d in await _engine.openDrafts()) if (d.content['suspendu'] == true) d];
+
+  Future<void> _refreshSuspended() async {
+    final count = (await _suspended()).length;
+    if (mounted) setState(() => _suspendedCount = count);
+  }
+
+  void _clearCart() {
+    _cart.clear();
+    _globalEntry = null;
+    _delivery = 0;
+    _note = null;
+  }
+
+  /// Sous-total du panier (après remises de ligne) : base de la remise globale.
+  int get _subtotal => _cart.fold<int>(0, (sum, l) => sum + l.base - l.discount);
+
+  /// Remises en pourcentage recalculées sur le panier courant, comme le web ; une remise globale en montant qui dépasse
+  /// le nouveau sous-total est retirée. Rend les totaux affichés et encaissés.
+  WebTotals _totals(Snapshot snapshot) {
+    for (final line in _cart) {
+      final entry = line.discountEntry;
+      if (entry != null && entry.isPercent) line.discount = percentDiscount(line.base, parsePercent(entry.value), rounding: _engine.percentRounding);
+    }
+    final entry = _globalEntry;
+    final subtotal = _subtotal;
+    if (entry != null && !entry.isPercent && int.parse(entry.value) > subtotal) _globalEntry = null;
+    final global = _globalEntry == null
+        ? 0
+        : enteredDiscount(type: _globalEntry!.type, value: _globalEntry!.value, base: subtotal, rounding: _engine.percentRounding);
+    return webTotals(
+      lineBases: [for (final l in _cart) l.base],
+      lineDiscounts: [for (final l in _cart) l.discount],
+      globalDiscount: global,
+      vatRate: snapshot.store.vatRate,
+      vatIncluded: snapshot.store.vatIncluded,
+      delivery: _delivery,
+    );
+  }
+
+  /// Motif qui empêche d'accorder une remise de ligne, ou null.
+  String? get _discountRefusal {
+    final operator = _operator;
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!_engine.hasRight(operator, 'remise')) return '${operator.name} n’a pas le droit d’accorder une remise.';
+    if ((_snapshot?.rules.maxLineDiscountPercent ?? 0) <= 0) return 'Aucune remise autorisée hors ligne par la boutique.';
+    return null;
+  }
+
+  /// Saisie d'une remise (montant ou pourcentage) : rend la saisie validée, null si le caissier annule ; vide = retirer.
+  Future<(DiscountEntry?,)?> _askDiscount(String title, DiscountEntry? current, String? Function(DiscountEntry entry) check) {
+    final value = TextEditingController(text: current?.value.replaceFirst('.', ',') ?? '');
+    var percent = current?.isPercent ?? true;
+    String? error;
+    return showDialog<(DiscountEntry?,)>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SegmentedButton<bool>(
+                segments: const [ButtonSegment(value: true, label: Text('%')), ButtonSegment(value: false, label: Text('Montant'))],
+                selected: {percent},
+                onSelectionChanged: (s) => setLocal(() => percent = s.first),
+              ),
+              TextField(
+                controller: value,
+                autofocus: true,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: InputDecoration(labelText: percent ? 'Pourcentage' : 'Montant (F)', errorText: error),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, (null,)), child: const Text('Retirer')),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () {
+                final text = value.text.trim();
+                if (text.isEmpty) return Navigator.pop(context, (null,));
+                try {
+                  final entry = percent ? DiscountEntry('pourcentage', formatPercent(parsePercent(text))) : DiscountEntry('montant', '${int.tryParse(text) ?? 0}');
+                  final refusal = check(entry);
+                  if (refusal != null) return setLocal(() => error = refusal);
+                  Navigator.pop(context, (entry,));
+                } on WebRuleRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Valider'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Contrôles du web pour une remise de [entry] sur [base] ; [others] = remises déjà accordées sur la vente.
+  String? _checkDiscount(DiscountEntry entry, int base, int max, int others, {String? label}) {
+    final int amount;
+    try {
+      amount = enteredDiscount(type: entry.type, value: entry.value, base: base, rounding: _engine.percentRounding, label: label);
+    } on WebRuleRefusal catch (e) {
+      return e.message;
+    }
+    if (amount > max) return 'Remise au-delà du maximum autorisé (${formatFcfa(max)}).';
+    final saleCap = _engine.maxSaleDiscountFor(_operator!);
+    if (saleCap != null && others + amount > saleCap) return 'Remises au-delà du plafond de ${_operator!.name} par vente (${formatFcfa(saleCap)}).';
+    return null;
+  }
+
+  Future<void> _editGlobalDiscount() async {
+    final operator = _operator;
+    if (operator == null) return _toast('Identifiez le caissier.');
+    if (!_engine.hasRight(operator, 'remise')) return _toast('${operator.name} n’a pas le droit d’accorder une remise.');
+    if ((_snapshot?.rules.maxGlobalDiscountPercent ?? 0) <= 0) return _toast('Remise globale non autorisée hors ligne dans cette boutique.');
+    final subtotal = _subtotal;
+    final lines = _cart.fold<int>(0, (sum, l) => sum + l.discount);
+    final result = await _askDiscount(
+      'Remise globale',
+      _globalEntry,
+      (entry) => _checkDiscount(entry, subtotal, _engine.maxGlobalDiscountFor(operator, subtotal), lines),
+    );
+    if (result != null) setState(() => _globalEntry = result.$1);
+  }
+
+  Future<void> _editDelivery() async {
+    final operator = _operator;
+    if (operator == null) return _toast('Identifiez le caissier.');
+    final right = _engine.deliveryRight;
+    if (right != null && !_engine.hasRight(operator, right)) return _toast('${operator.name} n’a pas le droit de saisir une livraison.');
+    final text = await _askText('Livraison (F)', _delivery == 0 ? '' : '$_delivery', number: true);
+    if (text != null) setState(() => _delivery = int.tryParse(text) ?? 0);
+  }
+
+  Future<void> _editNote() async {
+    final text = await _askText('Note du ticket', _note ?? '', maxLength: 2000);
+    if (text != null) setState(() => _note = text.trim().isEmpty ? null : text.trim());
+  }
+
+  Future<String?> _askText(String title, String current, {bool number = false, int? maxLength}) {
+    final value = TextEditingController(text: current);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: value,
+          autofocus: true,
+          maxLength: maxLength,
+          maxLines: number ? 1 : 3,
+          keyboardType: number ? TextInputType.number : TextInputType.multiline,
+          inputFormatters: number ? [FilteringTextInputFormatter.digitsOnly] : null,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.pop(context, value.text), child: const Text('Valider')),
+        ],
+      ),
+    );
+  }
+
+  /// Contenu conservé d'un panier en attente : même forme que l'adaptateur Windows.
+  Map<String, dynamic> _draftContent() => {
+    'lignes': [
+      for (final (i, l) in _cart.indexed)
+        {
+          'id': '$i',
+          'produit_id': l.product.id,
+          'conditionnement_id': l.packaging?.id,
+          'quantite': formatMicros(l.quantity),
+          'remise': l.discount,
+          if (l.discountEntry != null) 'remise_saisie': l.discountEntry!.toJson(),
+        },
+    ],
+    if (_globalEntry != null) 'remise_globale_saisie': _globalEntry!.toJson(),
+    if (_delivery != 0) 'livraison': _delivery,
+    if (_note != null) 'note': _note,
+    'paiements': const [],
+    'suspendu': true,
+  };
+
+  Future<void> _suspendCart() async {
+    if (_cart.isEmpty) return;
+    if (!await _engine.saveDraft(_draftUuid, 1, _draftContent())) return _toast('Ce panier a déjà été enregistré.');
+    setState(() {
+      _clearCart();
+      _draftUuid = const Uuid().v4();
+    });
+    await _refreshSuspended();
+    _toast('Panier mis en attente.');
+  }
+
+  /// Reprise d'un panier en attente, au catalogue et aux prix courants ; un article disparu est signalé et retiré.
+  Future<void> _openSuspended(Snapshot snapshot) async {
+    final drafts = await _suspended();
+    if (!mounted) return;
+    final chosen = await showDialog<(StoredDraft, bool)>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Paniers en attente'),
+        children: [
+          if (drafts.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun panier en attente.')),
+          for (final d in drafts)
+            ListTile(
+              title: Text('${(d.content['lignes'] as List).length} article(s)'),
+              subtitle: Text(d.updatedAt.toLocal().toString().substring(0, 16)),
+              onTap: () => Navigator.pop(context, (d, true)),
+              trailing: IconButton(tooltip: 'Supprimer', icon: const Icon(Icons.delete_outline), onPressed: () => Navigator.pop(context, (d, false))),
+            ),
+        ],
+      ),
+    );
+    if (chosen == null || !mounted) return;
+    final (draft, resume) = chosen;
+    if (!resume) {
+      await _engine.deleteDraft(draft.uuid);
+      return _refreshSuspended();
+    }
+    if (_cart.isNotEmpty) await _suspendCart();
+    final lines = <CartLine>[];
+    var missing = 0;
+    for (final raw in (draft.content['lignes'] as List).cast<Map>()) {
+      final product = snapshot.products.where((p) => p.id == raw['produit_id']).firstOrNull;
+      final packagingId = raw['conditionnement_id'] as int?;
+      final packaging = packagingId == null ? null : product?.packaging(packagingId);
+      if (product == null || (packagingId != null && packaging == null)) {
+        missing++;
+        continue;
+      }
+      final entry = raw['remise_saisie'] as Map?;
+      lines.add(CartLine(
+        product: product,
+        packaging: packaging,
+        quantity: parseMicros(raw['quantite'] as String),
+        discount: raw['remise'] as int,
+        discountEntry: entry == null ? null : DiscountEntry.fromJson(entry),
+      ));
+    }
+    await _engine.deleteDraft(draft.uuid);
+    final global = draft.content['remise_globale_saisie'] as Map?;
+    setState(() {
+      _clearCart();
+      _cart.addAll(lines);
+      _globalEntry = global == null ? null : DiscountEntry.fromJson(global);
+      _delivery = draft.content['livraison'] as int? ?? 0;
+      _note = draft.content['note'] as String?;
+    });
+    await _refreshSuspended();
+    if (missing > 0) _toast('$missing article(s) retiré(s) du catalogue : non repris.');
+  }
+
+  /// Actions du panier : remise globale, livraison et note exigent le contrat 2.1.
+  Widget _cartActions() {
+    final extras = _engine.saleExtrasSupported && _cart.isNotEmpty;
+    return Wrap(
+      spacing: 4,
+      children: [
+        if (extras) ActionChip(label: const Text('Remise globale'), onPressed: _editGlobalDiscount),
+        if (extras) ActionChip(label: const Text('Livraison'), onPressed: _editDelivery),
+        if (extras) ActionChip(label: Text(_note == null ? 'Note' : 'Note ✓'), onPressed: _editNote),
+        if (_cart.isNotEmpty) ActionChip(label: const Text('Mettre en attente'), onPressed: _suspendCart),
+        if (_suspendedCount > 0) ActionChip(label: Text('En attente ($_suspendedCount)'), onPressed: () => _openSuspended(_snapshot!)),
+      ],
+    );
   }
 
   Future<void> _refreshSold() async {
@@ -302,7 +581,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   /// Petit téléphone : articles ou panier en plein écran, barre fixe avec le total et « Encaisser ».
   Widget _compactRegister(Snapshot snapshot) {
-    final totals = saleTotals([for (final l in _cart) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded);
+    final totals = _totals(snapshot);
     final count = _cart.length;
     return Column(
       children: [
@@ -614,7 +893,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// [footer] : total et bouton « Encaisser » sous le panier (la disposition compacte les porte dans sa barre fixe).
   Widget _cartPanel(Snapshot snapshot, {bool footer = true}) {
     final compact = _compact;
-    final totals = saleTotals([for (final l in _cart) l.total], snapshot.store.vatRate, snapshot.store.vatIncluded);
+    final totals = _totals(snapshot);
     return Material(
       color: Colors.white,
       elevation: 2,
@@ -622,7 +901,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         children: [
           ListTile(
             title: Text('Panier (${_cart.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-            trailing: _cart.isEmpty ? null : TextButton(onPressed: () => setState(_cart.clear), child: const Text('Vider')),
+            trailing: _cart.isEmpty ? null : TextButton(onPressed: () => setState(_clearCart), child: const Text('Vider')),
           ),
           const Divider(height: 1),
           Expanded(
@@ -649,7 +928,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                               onPressed: () => setState(() {
                                 line.quantity -= BigInt.from(1000000);
                                 if (line.quantity <= BigInt.zero) _cart.remove(line);
-                                line.discount = line.discount.clamp(0, maxLineDiscount(line.base, snapshot.rules.maxLineDiscountPercent));
+                                if (line.discountEntry case final entry? when !entry.isPercent && line.discount > line.base) {
+                                  line.discountEntry = null;
+                                  line.discount = 0;
+                                }
                               }),
                             ),
                             Text(formatFcfa(line.total), style: const TextStyle(fontWeight: FontWeight.w600)),
@@ -670,6 +952,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: [
+                  Align(alignment: Alignment.centerLeft, child: _cartActions()),
+                  if (totals.globalDiscount > 0)
+                    Row(children: [const Text('Remise globale'), const Spacer(), Text('− ${formatFcfa(totals.globalDiscount)}')]),
+                  if (totals.delivery > 0) Row(children: [const Text('Livraison'), const Spacer(), Text(formatFcfa(totals.delivery))]),
                   if (snapshot.store.hasVat)
                     Row(children: [Text(snapshot.store.vatIncluded ? 'dont TVA' : 'TVA'), const Spacer(), Text(formatFcfa(totals.vat))]),
                   Row(
@@ -703,8 +989,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   Future<void> _editLine(Snapshot snapshot, CartLine line) async {
     final quantity = TextEditingController(text: formatMicros(line.quantity));
-    final discount = TextEditingController(text: line.discount > 0 ? '${line.discount}' : '');
-    final maxPercent = snapshot.rules.maxLineDiscountPercent;
+    final refusal = _discountRefusal;
     String? error;
     await showDialog<void>(
       context: context,
@@ -720,12 +1005,31 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(labelText: 'Quantité'),
               ),
-              if (maxPercent > 0)
-                TextField(
-                  controller: discount,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: InputDecoration(labelText: 'Remise (F, au plus $maxPercent %)'),
+              if (refusal == null)
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.percent),
+                    label: Text(line.discount > 0 ? 'Remise : ${formatFcfa(line.discount)}' : 'Ajouter une remise'),
+                    onPressed: () async {
+                      final q = parseMicros(quantity.text);
+                      if (q == null || q <= BigInt.zero) return setLocal(() => error = 'Quantité invalide (six décimales au plus).');
+                      final base = lineBase(line.unitPrice, q);
+                      final others = _cart.where((l) => l != line).fold<int>(0, (sum, l) => sum + l.discount);
+                      final result = await _askDiscount(
+                        line.label,
+                        line.discountEntry,
+                        (entry) => _checkDiscount(entry, base, _engine.maxLineDiscountFor(_operator!, base), others, label: line.label),
+                      );
+                      if (result == null) return;
+                      final entry = result.$1;
+                      final amount = entry == null
+                          ? 0
+                          : enteredDiscount(type: entry.type, value: entry.value, base: base, rounding: _engine.percentRounding, label: line.label);
+                      setState(() => (line.discountEntry = entry, line.discount = amount));
+                      setLocal(() {});
+                    },
+                  ),
                 ),
               if (error != null)
                 Padding(
@@ -740,9 +1044,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               onPressed: () {
                 final q = parseMicros(quantity.text);
                 if (q == null || q <= BigInt.zero) return setLocal(() => error = 'Quantité invalide (six décimales au plus).');
-                final d = int.tryParse(discount.text) ?? 0;
-                if (d > maxLineDiscount(lineBase(line.unitPrice, q), maxPercent)) return setLocal(() => error = 'Remise au-delà de $maxPercent %.');
-                setState(() => (line.quantity = q, line.discount = d));
+                final base = lineBase(line.unitPrice, q);
+                final entry = line.discountEntry;
+                if (entry != null && !entry.isPercent && line.discount > base) return setLocal(() => error = 'La remise dépasse le montant de la ligne.');
+                setState(() => line.quantity = q);
                 Navigator.pop(context);
               },
               child: const Text('Valider'),
@@ -758,18 +1063,25 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         ? await Navigator.of(context).push<List<CartPayment>>(
             MaterialPageRoute(
               fullscreenDialog: true,
-              builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable, fullScreen: true),
+              builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable, cashDue: _engine.cashDue, fullScreen: true),
             ),
           )
         : await showDialog<List<CartPayment>>(
             context: context,
             barrierDismissible: false,
-            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable),
+            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable, cashDue: _engine.cashDue),
           );
     if (payments == null || !mounted) return;
     final OfflineOperation operation;
     try {
-      operation = await _engine.recordSale(List.of(_cart), payments, _operator!, draftUuid: _draftUuid);
+      final totals = _totals(snapshot);
+      operation = await _engine.recordSale(
+        List.of(_cart),
+        payments,
+        _operator!,
+        draftUuid: _draftUuid,
+        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note),
+      );
     } on OfflineRefusal catch (e) {
       _toast(e.message);
       return;
@@ -793,7 +1105,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     }
     final lines = List.of(_cart);
     setState(() {
-      _cart.clear();
+      _clearCart();
       _draftUuid = const Uuid().v4();
     });
     unawaited(_refreshSold());
@@ -1089,10 +1401,13 @@ class _SessionOpeningState extends State<_SessionOpening> {
 
 /// Encaissement : un ou plusieurs moyens autorisés hors ligne ; les espèces calculent la monnaie.
 class _PaymentDialog extends StatefulWidget {
-  const _PaymentDialog({required this.snapshot, required this.payable, this.fullScreen = false});
+  const _PaymentDialog({required this.snapshot, required this.payable, required this.cashDue, this.fullScreen = false});
 
   final Snapshot snapshot;
   final int payable;
+
+  /// Montant dû au tiroir pour une ligne d'espèces (arrondi de caisse de la boutique).
+  final int Function(int amount) cashDue;
 
   /// Petit téléphone : page plein écran qui défile, boutons en bas (au lieu d'une boîte de dialogue).
   final bool fullScreen;
@@ -1178,7 +1493,10 @@ class _PaymentDialogState extends State<_PaymentDialog> {
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: InputDecoration(
                 labelText: 'Espèces reçues',
-                helperText: received != null && received > amount ? 'Monnaie : ${formatFcfa(received - amount)}' : null,
+                helperText: [
+                  if (widget.cashDue(amount) != amount) 'À encaisser : ${formatFcfa(widget.cashDue(amount))}',
+                  if (received != null && received > widget.cashDue(amount)) 'Monnaie : ${formatFcfa(received - widget.cashDue(amount))}',
+                ].join(' · '),
               ),
               onChanged: (_) => setState(() {}),
               onSubmitted: (_) => _addPayment(),
@@ -1260,14 +1578,15 @@ class _PaymentDialogState extends State<_PaymentDialog> {
       setState(() => _error = 'Une seule ligne d’espèces par vente : retirez la précédente pour la modifier.');
       return false;
     }
-    final received = _method.isCash ? (int.tryParse(_received.text) ?? amount) : null;
-    if (received != null && received < amount) {
+    final due = widget.cashDue(amount);
+    final received = _method.isCash ? (int.tryParse(_received.text) ?? due) : null;
+    if (received != null && received < due) {
       setState(() => _error = 'Espèces reçues inférieures au montant.');
       return false;
     }
     setState(() {
       final reference = _reference.text.trim();
-      _payments.add(CartPayment(method: _method, amount: amount, received: received, reference: _method.isCash || reference.isEmpty ? null : reference));
+      _payments.add(CartPayment(method: _method, amount: amount, received: received, cashDue: due, reference: _method.isCash || reference.isEmpty ? null : reference));
       _error = null;
       _reset();
     });

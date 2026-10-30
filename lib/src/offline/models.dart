@@ -345,7 +345,7 @@ class CartLine {
     : quantity = quantity ?? BigInt.from(1000000);
 
   /// Saisie de la remise (montant ou pourcentage), figée dans la vente 2.1 ; [discount] en est le montant.
-  final DiscountEntry? discountEntry;
+  DiscountEntry? discountEntry;
 
   final Product product;
   final Packaging? packaging;
@@ -370,7 +370,7 @@ class CartLine {
 }
 
 class CartPayment {
-  CartPayment({required this.method, required this.amount, this.received, this.reference});
+  CartPayment({required this.method, required this.amount, this.received, this.reference, int? cashDue}) : cashDue = cashDue ?? amount;
 
   final PaymentMethodInfo method;
   final int amount;
@@ -378,10 +378,13 @@ class CartPayment {
   /// Espèces seulement : montant remis par le client (monnaie = reçu − montant).
   final int? received;
 
+  /// Espèces : montant dû au tiroir après arrondi de caisse ; la monnaie se calcule sur lui.
+  final int cashDue;
+
   /// Moyen déclaré (hors espèces) : référence saisie par le caissier, recopiée telle quelle dans la vente v2.
   final String? reference;
 
-  int get change => method.isCash && received != null && received! > amount ? received! - amount : 0;
+  int get change => method.isCash && received != null && received! > cashDue ? received! - cashDue : 0;
 
   Map<String, dynamic> toPayload() => {'moyen': method.code, 'montant': amount, if (method.isCash) 'recu': received ?? amount};
 }

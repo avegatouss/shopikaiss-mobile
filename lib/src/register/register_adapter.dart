@@ -841,7 +841,13 @@ class LocalRegisterAdapter {
         lines.cast<CartLine>(),
         [
           for (final p in payments)
-            CartPayment(method: snapshot.methods.firstWhere((m) => m.code == p.methodCode), amount: p.amount, received: p.received, reference: p.reference),
+            CartPayment(
+              method: snapshot.methods.firstWhere((m) => m.code == p.methodCode),
+              amount: p.amount,
+              received: p.received,
+              reference: p.reference,
+              cashDue: p.received == null ? null : engine.cashDue(p.amount),
+            ),
         ],
         operator,
         draftUuid: _draft.uuid,
