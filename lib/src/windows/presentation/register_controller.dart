@@ -174,7 +174,7 @@ class WindowsRegisterController extends ChangeNotifier {
     }
   }
 
-  Future<void> commitSale() async {
+  Future<void> commitSale({Map<String, dynamic>? approval}) async {
     if (!canPay) return;
     final operation = _checkoutId ??= const Uuid().v4();
     busy = true;
@@ -193,7 +193,11 @@ class WindowsRegisterController extends ChangeNotifier {
     try {
       final result = await host.call(
         HostCommand.commitSale,
-        arguments: {'draft_id': view['draft_id'], 'revision': view['revision']},
+        arguments: {
+          'draft_id': view['draft_id'],
+          'revision': view['revision'],
+          'approval': ?approval,
+        },
         operationId: operation,
       );
       if (result['state'] != 'committed' ||

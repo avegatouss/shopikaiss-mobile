@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
+import 'discount_approval.dart';
 
 class MultiplePayments extends StatefulWidget {
   const MultiplePayments({super.key, required this.controller});
@@ -229,10 +230,12 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
         FilledButton(
           onPressed: accepted && c.canPay && c.view['payment_valid'] == true
               ? () async {
-                  if (!accepted || !c.canPay || c.view['payment_valid'] != true) {
+                  if (!accepted ||
+                      !c.canPay ||
+                      c.view['payment_valid'] != true) {
                     return;
                   }
-                  await c.commitSale();
+                  if (!await commitWithApproval(context, c)) return;
                   if (context.mounted &&
                       c.receipt != null &&
                       c.uncertainOperation == null &&

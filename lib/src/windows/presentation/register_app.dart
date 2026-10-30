@@ -18,6 +18,7 @@ import 'quantity_step.dart';
 import 'multiple_payments.dart';
 import 'searchable_choice.dart';
 import 'calculator.dart';
+import 'discount_approval.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -1504,7 +1505,7 @@ class _PaymentState extends State<_Payment> {
                       c.view['payment_valid'] != true) {
                     return;
                   }
-                  await c.commitSale();
+                  if (!await commitWithApproval(context, c)) return;
                   if (context.mounted &&
                       c.receipt != null &&
                       c.uncertainOperation == null) {

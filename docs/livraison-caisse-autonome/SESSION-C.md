@@ -250,3 +250,10 @@ B 9f87858 integre : printTicket raccorde via identifiant d'operation ; bouton im
 
 Restent explicitement absents : tarif gros, ventes du jour/X consolidees, livre de caisse, historique des modifications du panier, cloture complete et selection/creation de client. Ouverture de session actuelle = fond simple et conservation session existante ; comptage par coupure/report et horaires restent absents du contrat. Demandes inscrites au journal A/B.
 Validation : 53 tests Windows (dont rendu fictif), analyse sans remarque ; 62 tests Windows/adaptateur au passage precedent. Rendu inspecte. Impression papier et essai des images sur demo non effectues.
+
+## Autorisation responsable (lot 1c) et monnaie du ticket
+
+205313a fusionne (inclut bcc6ee9 : monnaie du ticket calculee sur montant especes arrondi). Fenetre responsable/code masque de 8 chiffres/motif avant commitSale dans les paiements simples et multiples, seulement si discount_approval.required. Responsables proposes exclusivement par le moteur. Annuler ne soumet rien ; refus certain conserve le panier ; toute issue incertaine passe par la reconciliation existante du meme identifiant.
+
+Le code est transitoire a la tentative, jamais ajoute au journal durable, puis les champs de preuve sont effaces ; nouvelle saisie a chaque tentative. Panier/revision controles apres fermeture de la demande : changement impose une nouvelle verification. Le moteur reste autorite sur code, plafonds, verrouillage apres echecs et droits. Le lot ne couvre pas survente/prix manuel. Pas d'essai avec code reel sur la demo par C.
+Validation : 67 tests Windows/moteur v2 reussis, analyse sans remarque. Test specifique annulation/refus/code masque/effacement/nouvelle saisie ; erreur de cycle de vie du dialogue corrigee avant passe finale.

@@ -12,6 +12,7 @@ import 'package:shopikaiss_terminal/src/windows/ipc/protocol.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/register_app.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/register_controller.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/multiple_payments.dart';
+import 'package:shopikaiss_terminal/src/windows/presentation/discount_approval.dart';
 
 class _Host implements WindowsHost {
   final changes = StreamController<Map<String, dynamic>>.broadcast();
@@ -22,6 +23,8 @@ class _Host implements WindowsHost {
   bool reconciled = false;
   bool definitive = false;
   bool failHistory = false;
+  bool approvalSeen = false;
+  bool refuseApproval = false;
   String? lookupId;
   Completer<Map<String, dynamic>>? pendingView;
   final Map<String, dynamic> state = {
@@ -109,6 +112,10 @@ class _Host implements WindowsHost {
       return {'change': 3000};
     }
     if (command == HostCommand.commitSale) {
+      approvalSeen = (arguments['approval'] as Map?)?['code'] == '12345678';
+      if (refuseApproval) {
+        throw const HostFailure('autorisation_refusee', 'Autorisation refusée');
+      }
       committedId = operationId;
       if (loseReply) {
         throw const HostFailure(
@@ -139,6 +146,84 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets(
+    'approval cancelled or refused preserves basket and never retains the code',
+    (tester) async {
+      final host = _Host()..refuseApproval = true;
+      host.state['discount_approval'] = {
+        'required': true,
+        'approvers': [
+          {'id': 7, 'name': 'Responsable test'},
+        ],
+      };
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await c.refresh();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => commitWithApproval(context, c),
+                child: const Text('Essai'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Essai'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Annuler'));
+      await tester.pumpAndSettle();
+      expect(host.calls, isNot(contains(HostCommand.commitSale)));
+      await tester.tap(find.text('Essai'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(DropdownButtonFormField<Object>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Responsable test').last);
+      await tester.pumpAndSettle();
+      final codeField = find.widgetWithText(
+        TextField,
+        'Code du responsable (8 chiffres)',
+      );
+      expect(tester.widget<TextField>(codeField).obscureText, isTrue);
+      await tester.enterText(codeField, '12345678');
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Motif de la remise'),
+        'Geste commercial',
+      );
+      await tester.pump();
+      await tester.tap(find.text('Autoriser et encaisser'));
+      await tester.pumpAndSettle();
+      expect(host.approvalSeen, isTrue);
+      expect(c.message, 'Autorisation refusée');
+      expect(c.lines, isNotEmpty);
+      expect(c.uncertainOperation, isNull);
+      expect(
+        host.argumentsByCommand[HostCommand.commitSale]!['approval'],
+        isEmpty,
+      );
+      await tester.tap(find.text('Essai'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<EditableText>(
+              find.descendant(
+                of: codeField,
+                matching: find.byType(EditableText),
+              ),
+            )
+            .controller
+            .text,
+        isEmpty,
+      );
+      await tester.tap(find.text('Annuler'));
+      await tester.pumpAndSettle();
+    },
+  );
   testWidgets(
     'catalogue filters preserve each other and load more through engine',
     (tester) async {
