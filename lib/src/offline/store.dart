@@ -90,6 +90,9 @@ class StoreKeys {
 
   /// Préfixe des échecs de PIN hors ligne d'un caissier (`pin_echecs_<id>` = `nombre|fin du blocage`).
   static const pinFailures = 'pin_echecs_';
+
+  /// Préfixe des échecs de code d'autorisation d'un responsable (même forme).
+  static const approvalFailures = 'code_echecs_';
 }
 
 /// Version du schéma SQLite local. Les migrations sont additives : aucune donnée existante n'est réécrite.

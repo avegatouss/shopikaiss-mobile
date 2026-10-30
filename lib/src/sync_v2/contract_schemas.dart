@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 1b bis) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 1c) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -644,6 +644,12 @@ const contractV2Schemas = <String, String>{
                 },
                 "approbateur_remise": {
                     "type": "boolean"
+                },
+                "code_autorisation_empreinte": {
+                    "description": "Empreinte bcrypt (coût ≥ 12) du code de 8 chiffres d’un approbateur. Clé absente : pas de code publiable, autorisation hors ligne impossible pour lui. Jamais le PIN.",
+                    "type": "string",
+                    "minLength": 59,
+                    "maxLength": 60
                 }
             }
         },

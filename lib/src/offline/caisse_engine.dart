@@ -178,6 +178,62 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// Plafonds de saisie : ceux du rôle ; s'il existe un responsable pour autoriser, seul celui de la boutique reste
+  /// (le code ne lève que le seuil du rôle). L'autorisation est demandée à l'encaissement, panier définitif.
+  int enterableLineDiscount(Operator operator, int base) =>
+      approvalAvailable(operator) ? maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0) : maxLineDiscountFor(operator, base);
+
+  int enterableGlobalDiscount(Operator operator, int subtotal) =>
+      approvalAvailable(operator) ? maxLineDiscount(subtotal, snapshot?.rules.maxGlobalDiscountPercent ?? 0) : maxGlobalDiscountFor(operator, subtotal);
+
+  int? enterableSaleDiscount(Operator operator) => approvalAvailable(operator) ? null : maxSaleDiscountFor(operator);
+
+  /// Les remises de la vente sont-elles dans les seuils de [operator] ? Chaque remise, puis leur total.
+  bool withinDiscountLimits(Operator operator, List<CartLine> lines, int globalDiscount) {
+    var total = globalDiscount;
+    var subtotal = 0;
+    for (final l in lines) {
+      if (l.discount > maxLineDiscountFor(operator, l.base)) return false;
+      total += l.discount;
+      subtotal += l.base - l.discount;
+    }
+    if (globalDiscount > maxGlobalDiscountFor(operator, subtotal)) return false;
+    final cap = maxSaleDiscountFor(operator);
+    return cap == null || total <= cap;
+  }
+
+  bool _canApprove(Operator approver, Operator cashier) =>
+      saleExtrasSupported && approver.id != cashier.id && approver.approver && (approver.approvalCodeHash?.isNotEmpty ?? false) && hasRight(approver, 'remise');
+
+  /// Un responsable du terminal peut-il autoriser pour [cashier] ?
+  bool approvalAvailable(Operator cashier) => snapshot?.operators.any((o) => _canApprove(o, cashier)) ?? false;
+
+  /// Responsables dont le seuil couvre les remises de la vente.
+  List<Operator> approversFor(Operator cashier, List<CartLine> lines, int globalDiscount) => [
+    for (final o in snapshot?.operators ?? const <Operator>[])
+      if (_canApprove(o, cashier) && withinDiscountLimits(o, lines, globalDiscount)) o,
+  ];
+
+  /// Vérifie le code de [approver] pour la vente de [cashier] et rend l'autorisation à joindre à [SaleExtras].
+  Future<SaleApproval> authorizeDiscount({
+    required Operator cashier,
+    required Operator approver,
+    required String code,
+    required String reason,
+    required List<CartLine> lines,
+    required int globalDiscount,
+  }) async {
+    if (!approversFor(cashier, lines, globalDiscount).any((o) => o.id == approver.id)) {
+      throw OfflineRefusal('${approver.name} ne peut pas autoriser cette remise.');
+    }
+    final motive = reason.trim();
+    if (motive.isEmpty || motive.length > 500) throw const OfflineRefusal('Indiquez le motif de la remise (500 caractères au plus).');
+    final wait = await approvalLockedFor(approver);
+    if (wait != null) throw OfflineRefusal('Trop d’essais : réessayez dans ${wait.inSeconds + 1} s.');
+    if (!await checkApprovalCode(approver, code)) throw const OfflineRefusal('Code d’autorisation incorrect.');
+    return SaleApproval(approverId: approver.id, reason: motive, verifiedAt: now.toUtc().toIso8601String());
+  }
+
   /// Fichier local de [image] s'il est déjà téléchargé, sinon null (contrat 2.1).
   String? imagePath(ProductImage image) => null;
 
@@ -218,10 +274,18 @@ abstract class CaisseEngine extends EngineNotifier {
   Future<bool> checkPin(Operator operator, String pin) async {
     if (!pinDefined(operator)) return false;
     if (await pinLockedFor(operator) != null) return false;
-    final hash = operator.pinHash!;
-    final ok = RegExp(r'^\d{4,6}$').hasMatch(pin) && await _verifyPin(pin, hash);
-    final key = '${StoreKeys.pinFailures}${operator.id}';
-    if (ok) {
+    return _checkSecret('${StoreKeys.pinFailures}${operator.id}', RegExp(r'^\d{4,6}$').hasMatch(pin), pin, operator.pinHash!);
+  }
+
+  /// Vérifie le code de 8 chiffres d'un responsable, jamais son PIN ; échecs comptés comme ceux du PIN, par responsable.
+  Future<bool> checkApprovalCode(Operator approver, String code) async {
+    final hash = approver.approvalCodeHash;
+    if (hash == null || hash.isEmpty || await approvalLockedFor(approver) != null) return false;
+    return _checkSecret('${StoreKeys.approvalFailures}${approver.id}', RegExp(r'^\d{8}$').hasMatch(code), code, hash);
+  }
+
+  Future<bool> _checkSecret(String key, bool wellFormed, String secret, String hash) async {
+    if (wellFormed && await _verifyPin(secret, hash)) {
       await store.write(key, null);
       return true;
     }
@@ -235,8 +299,13 @@ abstract class CaisseEngine extends EngineNotifier {
   bool pinDefined(Operator operator) => operator.pinHash != null && operator.pinHash!.isNotEmpty;
 
   /// Attente restante avant un nouvel essai de PIN pour ce caissier, ou null.
-  Future<Duration?> pinLockedFor(Operator operator) async {
-    final raw = await store.read('${StoreKeys.pinFailures}${operator.id}');
+  Future<Duration?> pinLockedFor(Operator operator) => _lockedFor('${StoreKeys.pinFailures}${operator.id}');
+
+  /// Attente restante avant un nouvel essai de code pour ce responsable, ou null.
+  Future<Duration?> approvalLockedFor(Operator approver) => _lockedFor('${StoreKeys.approvalFailures}${approver.id}');
+
+  Future<Duration?> _lockedFor(String key) async {
+    final raw = await store.read(key);
     final until = DateTime.tryParse(raw?.split('|').elementAtOrNull(1) ?? '');
     if (until == null || !now.isBefore(until)) return null;
     return until.difference(now);
@@ -269,7 +338,8 @@ abstract class CaisseEngine extends EngineNotifier {
       final code = '${m['moyen']}';
       final method =
           s?.methods.where((x) => x.code == code).firstOrNull ?? PaymentMethodInfo({'code': code, 'nom': code, 'especes': code == 'especes'});
-      payments.add(CartPayment(method: method, amount: (m['montant'] as num).toInt(), received: (m['recu'] as num?)?.toInt()));
+      final amount = (m['montant'] as num).toInt();
+      payments.add(CartPayment(method: method, amount: amount, received: (m['recu'] as num?)?.toInt(), cashDue: method.isCash ? cashDue(amount) : amount));
     }
     return (lines, payments);
   }

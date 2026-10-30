@@ -66,6 +66,7 @@ class V2SaleBuilder {
     SaleExtras extras = const SaleExtras(),
     ({int step, String mode})? cashRounding,
     bool revision21 = false,
+    SaleApproval? approval,
   }) {
     if (!revision21 && !extras.isEmpty) throw const V2SaleInvalid('Remise globale, livraison et note : contrat 2.1 requis.');
     if (cart.isEmpty) throw const V2SaleInvalid('Panier vide.');
@@ -160,7 +161,7 @@ class V2SaleBuilder {
       if (revision21) 'remise_globale_saisie': extras.globalDiscount == 0 ? null : extras.globalEntry?.toJson(),
       if (revision21) 'note': extras.note == null || extras.note!.isEmpty ? null : extras.note,
       'mouvements': movements,
-      'autorisations': <Map<String, dynamic>>[],
+      'autorisations': <Map<String, dynamic>>[if (approval != null) approval.toJson()],
     };
   }
 

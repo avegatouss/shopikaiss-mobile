@@ -65,8 +65,74 @@ class _FullStore extends MemoryOfflineStore {
   Future<void> append(OfflineOperation operation) async => throw StateError('disque plein');
 }
 
-Future<TerminalSession> _session({required double inches, String layout = 'auto', MemoryOfflineStore? memory, bool permanent = false}) async {
+/// Moteur où le caissier n'a aucun seuil de remise : seul un responsable autorise. La vente est interceptée.
+class _ApprovalEngine extends OfflineEngine {
+  _ApprovalEngine({required super.store, required super.transport});
+
+  SaleExtras? recorded;
+
+  @override
+  bool get saleExtrasSupported => true;
+
+  @override
+  bool hasRight(Operator operator, String right) => true;
+
+  @override
+  int maxLineDiscountFor(Operator operator, int base) => operator.approver ? super.maxLineDiscountFor(operator, base) : 0;
+
+  @override
+  Future<bool> checkApprovalCode(Operator approver, String code) async => code == '12345678';
+
+  @override
+  Future<OfflineOperation> recordSale(
+    List<CartLine> lines,
+    List<CartPayment> payments,
+    Operator operator, {
+    String? draftUuid,
+    String? operationUuid,
+    SaleExtras extras = const SaleExtras(),
+  }) async {
+    recorded = extras;
+    throw const OfflineRefusal('Vente interceptée.');
+  }
+}
+
+Future<TerminalSession> _session({
+  required double inches,
+  String layout = 'auto',
+  MemoryOfflineStore? memory,
+  bool permanent = false,
+  bool rich = false,
+  bool approver = false,
+}) async {
   final snapshot = _snapshot();
+  if (approver) {
+    (snapshot['reglages'] as Map)['remise_ligne_max_pourcent'] = 20;
+    (snapshot['caissiers'] as List).add({'id': 8, 'nom': 'Chef', 'pin': null, 'approbateur': true, 'code_autorisation': 'empreinte'});
+  }
+  if (rich) {
+    snapshot['produits'] = [
+      for (var i = 1; i <= 70; i++)
+        {
+          'id': i,
+          'nom': 'Article $i',
+          'prix': 1000,
+          'stock': '5.000000',
+          'seuil_alerte': '10.000000',
+          'categorie': i.isEven ? 'Boissons' : 'Hygiène',
+          'marque': i <= 2 ? 'Dove' : null,
+          'fournisseur': 'Grossiste',
+          'favori': i == 1,
+          'promotions': i == 1
+              ? [
+                  {'libelle': 'Bon de réduction au nom très long pour vérifier le débordement', 'du': null, 'au': '2099-12-31', 'exclusions': <Map>[]},
+                ]
+              : <Map>[],
+          'conditionnements': [],
+          'codes': [],
+        },
+    ];
+  }
   if (permanent) (snapshot['reglages'] as Map)['vente_locale_permanente'] = true;
   final store = (memory ?? MemoryOfflineStore())
     ..values.addAll({
@@ -76,7 +142,7 @@ Future<TerminalSession> _session({required double inches, String layout = 'auto'
       StoreKeys.snapshotAt: DateTime.now().toUtc().toIso8601String(),
       StoreKeys.lastContact: DateTime.now().toUtc().toIso8601String(),
     });
-  final engine = OfflineEngine(store: store, transport: _Offline());
+  final engine = approver ? _ApprovalEngine(store: store, transport: _Offline()) : OfflineEngine(store: store, transport: _Offline());
   await engine.load('https://boutique.exemple.ci');
   final settings = AppSettings(
     shopUrl: 'https://boutique.exemple.ci/caisse',
@@ -163,6 +229,48 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('catalogue complet : badges, filtres sur tout le catalogue, Afficher plus, aucun débordement', (tester) async {
+      final session = await _session(inches: 4.0, rich: true);
+      await _pump(tester, const Size(320, 568), session);
+      expect(find.text('★ Favori'), findsOneWidget);
+      expect(find.textContaining('Bon de réduction'), findsOneWidget);
+      expect(find.text('Afficher plus (10)'), findsOneWidget);
+      await tester.tap(find.text('Marque'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dove').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Afficher plus (10)'), findsNothing);
+      expect(find.text('Article 2'), findsOneWidget);
+      expect(find.text('Article 3'), findsNothing);
+      await tester.ensureVisible(find.text('Effacer'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Effacer'));
+      await tester.pumpAndSettle();
+      expect(find.text('Afficher plus (10)'), findsOneWidget);
+      await tester.tap(find.text('Afficher plus (10)'));
+      await tester.pump();
+      expect(find.textContaining('Afficher plus'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('panier en attente : mis de côté puis repris, panier vide entre-temps', (tester) async {
+      final session = await _session(inches: 8.0);
+      await _pump(tester, const Size(800, 1280), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      expect(find.text('Panier (1)'), findsOneWidget);
+      await tester.tap(find.text('Mettre en attente'));
+      await tester.pumpAndSettle();
+      expect(find.text('Panier (0)'), findsOneWidget);
+      await tester.tap(find.text('En attente (1)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('1 article(s)'));
+      await tester.pumpAndSettle();
+      expect(find.text('Panier (1)'), findsOneWidget);
+      expect(find.textContaining('En attente ('), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('téléphone 4 pouces (320 × 568) : aucun débordement', (tester) async {
       final session = await _session(inches: 4.0);
       await _pump(tester, const Size(320, 568), session);
@@ -198,6 +306,41 @@ void main() {
         expect(tester.takeException(), isNull);
       });
     }
+
+    testWidgets('remise au-delà du seuil du caissier : code et motif du responsable à l’encaissement', (tester) async {
+      final session = await _session(inches: 8.0, approver: true);
+      await _pump(tester, const Size(800, 1280), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      await tester.tap(find.textContaining('Article numéro 1 ').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ajouter une remise'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Pourcentage'), '10');
+      await tester.tap(find.text('Valider').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider').last);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      expect(find.text('Autorisation d’un responsable'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Code du responsable (8 chiffres)'), '00000000');
+      await tester.enterText(find.widgetWithText(TextField, 'Motif de la remise'), 'Client fidèle');
+      await tester.tap(find.text('Autoriser'));
+      await tester.pumpAndSettle();
+      expect(find.text('Code d’autorisation incorrect.'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Code du responsable (8 chiffres)'), '12345678');
+      await tester.tap(find.text('Autoriser'));
+      await tester.pumpAndSettle();
+      expect(find.text('Autorisation d’un responsable'), findsNothing);
+
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      final approval = (session.offline as _ApprovalEngine).recorded!.approval!;
+      expect([approval.approverId, approval.reason], [8, 'Client fidèle']);
+      expect(tester.takeException(), isNull);
+    });
 
     testWidgets('vente non enregistrée (mémoire du terminal) : dit clairement, panier conservé, aucun ticket', (tester) async {
       SharedPreferences.setMockInitialValues({});

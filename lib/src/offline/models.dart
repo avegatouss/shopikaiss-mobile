@@ -187,11 +187,33 @@ class PaymentMethodInfo {
 }
 
 class Operator {
-  Operator(Map<String, dynamic> m) : id = (m['id'] as num).toInt(), name = (m['nom'] ?? '') as String, pinHash = m['pin'] as String?;
+  Operator(Map<String, dynamic> m)
+    : id = (m['id'] as num).toInt(),
+      name = (m['nom'] ?? '') as String,
+      pinHash = m['pin'] as String?,
+      approver = m['approbateur'] == true,
+      approvalCodeHash = m['code_autorisation'] as String?;
 
   final int id;
   final String name;
   final String? pinHash;
+
+  /// Peut autoriser une remise au-delà du seuil d'un autre opérateur (contrat 2.1 `approbateur_remise`).
+  final bool approver;
+
+  /// Empreinte de son code d'autorisation de 8 chiffres ; null = autorisation hors ligne impossible pour lui.
+  final String? approvalCodeHash;
+}
+
+/// Autorisation d'une remise par un responsable, code vérifié sur le terminal. Jamais le code ni son empreinte.
+class SaleApproval {
+  const SaleApproval({required this.approverId, required this.reason, required this.verifiedAt});
+
+  final int approverId;
+  final String reason;
+  final String verifiedAt;
+
+  Map<String, dynamic> toJson() => {'type': 'remise', 'approbateur_id': '$approverId', 'motif': reason, 'preuve': 'code_local|$verifiedAt'};
 }
 
 class Packaging {
@@ -329,14 +351,17 @@ class DiscountEntry {
 
 /// Éléments de vente du contrat 2.1 hors lignes et paiements : remise globale, livraison, note.
 class SaleExtras {
-  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note});
+  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval});
 
   final int globalDiscount;
   final DiscountEntry? globalEntry;
   final int delivery;
   final String? note;
 
-  bool get isEmpty => globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty);
+  /// Autorisation d'un responsable : remise au-delà du seuil du caissier, jamais du plafond de la boutique.
+  final SaleApproval? approval;
+
+  bool get isEmpty => globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null;
 }
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.
@@ -345,7 +370,7 @@ class CartLine {
     : quantity = quantity ?? BigInt.from(1000000);
 
   /// Saisie de la remise (montant ou pourcentage), figée dans la vente 2.1 ; [discount] en est le montant.
-  final DiscountEntry? discountEntry;
+  DiscountEntry? discountEntry;
 
   final Product product;
   final Packaging? packaging;
@@ -370,7 +395,7 @@ class CartLine {
 }
 
 class CartPayment {
-  CartPayment({required this.method, required this.amount, this.received, this.reference});
+  CartPayment({required this.method, required this.amount, this.received, this.reference, int? cashDue}) : cashDue = cashDue ?? amount;
 
   final PaymentMethodInfo method;
   final int amount;
@@ -378,10 +403,13 @@ class CartPayment {
   /// Espèces seulement : montant remis par le client (monnaie = reçu − montant).
   final int? received;
 
+  /// Espèces : montant dû au tiroir après arrondi de caisse ; la monnaie se calcule sur lui.
+  final int cashDue;
+
   /// Moyen déclaré (hors espèces) : référence saisie par le caissier, recopiée telle quelle dans la vente v2.
   final String? reference;
 
-  int get change => method.isCash && received != null && received! > amount ? received! - amount : 0;
+  int get change => method.isCash && received != null && received! > cashDue ? received! - cashDue : 0;
 
   Map<String, dynamic> toPayload() => {'moyen': method.code, 'montant': amount, if (method.isCash) 'recu': received ?? amount};
 }

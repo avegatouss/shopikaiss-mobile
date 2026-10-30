@@ -185,3 +185,13 @@ Par produit dans la vue : `favorite`, `promotion` (libellé ou null, présentati
 
 - `printTicket` (identifiant d'opération) : première impression sans mention, puis « REIMPRESSION » ; rend `duplicate`. `reprint` force toujours la réimpression. Aucune des deux ne crée de vente.
 - `image.path` (vue produit) : fichier JPEG local, ou null tant qu'il n'est pas téléchargé. Le téléchargement se fait après une synchronisation, panier vide, 30 images par passage, et respecte `Retry-After`.
+
+## Remise autorisée par un responsable (2.1, lot 1c)
+
+Au-delà du seuil du rôle du caissier, la saisie reste possible jusqu'au plafond de la boutique s'il existe un responsable publié (`approbateur_remise`, `code_autorisation_empreinte`, autre que le caissier). Le plafond de la boutique n'est jamais levé.
+
+- Vue de l'adaptateur : `discount_approval` `{required, approvers: [{id, name}]}`. Sans responsable dont le seuil couvre la vente, `can_pay` est faux avec le motif.
+- `commitSale` reçoit alors `approval` `{approver_id, code, reason}` ; erreurs `autorisation_requise`, `autorisation_refusee`. Le code n'est jamais conservé : le redemander à chaque essai.
+- Échecs comptés par responsable, gardés sur le terminal : 3 essais, puis 30 s doublées à chaque échec, 15 min au plus.
+- La vente porte `autorisations[]` (`type: remise`, `approbateur_id`, `motif`, `preuve: code_local|<horodatage>`) seulement si le seuil du caissier est dépassé.
+- Ne couvre pas `survente` ni `prix_manuel`.

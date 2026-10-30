@@ -479,21 +479,29 @@ class V2Engine extends CaisseEngine {
         _requireRight(operator, 'vente', 'vendre');
         if (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) _requireRight(operator, 'remise', 'accorder une remise');
         for (final l in lines) {
-          if (l.discount > maxLineDiscountFor(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
+          if (l.discount > enterableLineDiscount(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
           final entry = l.discountEntry;
           if (entry != null && _entered(entry, l.base) != l.discount) throw OfflineRefusal('Remise sur « ${l.label} » différente de sa saisie.');
         }
         final subtotal = lines.fold<int>(0, (sum, l) => sum + l.base - l.discount);
-        if (extras.globalDiscount > maxGlobalDiscountFor(operator, subtotal)) {
+        if (extras.globalDiscount > enterableGlobalDiscount(operator, subtotal)) {
           throw OfflineRefusal('Remise globale au-delà du maximum autorisé hors ligne pour ${operator.name}.');
         }
         if (extras.globalEntry != null && _entered(extras.globalEntry!, subtotal) != extras.globalDiscount) {
           throw const OfflineRefusal('Remise globale différente de sa saisie.');
         }
         if (extras.delivery > 0 && deliveryRight != null) _requireRight(operator, deliveryRight!, 'ajouter une livraison');
-        final saleCap = maxSaleDiscountFor(operator);
+        final saleCap = enterableSaleDiscount(operator);
         if (saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) + extras.globalDiscount > saleCap) {
           throw OfflineRefusal('Remises au-delà du plafond de ${operator.name} par vente (${formatFcfa(saleCap)}).');
+        }
+        // Une autorisation ne figure dans la vente que si les remises dépassent le seuil du caissier.
+        final overLimit = !withinDiscountLimits(operator, lines, extras.globalDiscount);
+        if (overLimit) {
+          final approval = extras.approval;
+          if (approval == null) throw OfflineRefusal('Remise au-delà du seuil de ${operator.name} : autorisation d’un responsable requise.');
+          final approvers = approversFor(operator, lines, extras.globalDiscount);
+          if (!approvers.any((o) => o.id == approval.approverId)) throw const OfflineRefusal('Ce responsable ne peut pas autoriser cette remise.');
         }
         for (final p in payments) {
           if (p.method.referenceMode == 'obligatoire' && (p.reference == null || p.reference!.trim().isEmpty)) {
@@ -542,6 +550,7 @@ class V2Engine extends CaisseEngine {
             extras: extras,
             cashRounding: cashRounding,
             revision21: revision21,
+            approval: overLimit ? extras.approval : null,
           ),
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
@@ -718,7 +727,9 @@ class V2Engine extends CaisseEngine {
       if (o['remise_max_pourcent'] != null || o['remise_max_montant'] != null) {
         caps[id] = (o['remise_max_pourcent'] == null ? null : parseMicros(o['remise_max_pourcent'] as String), o['remise_max_montant'] as int?);
       }
-      if (rights[id]!.contains('vente')) operators.add({'id': id, 'nom': o['nom'], 'pin': o['pin_empreinte']});
+      if (rights[id]!.contains('vente')) {
+        operators.add({'id': id, 'nom': o['nom'], 'pin': o['pin_empreinte'], 'approbateur': o['approbateur_remise'], 'code_autorisation': o['code_autorisation_empreinte']});
+      }
     }
     final session = await _ownSession();
     final changesSeconds = ((_state?['delais'] as Map?)?['changements_secondes'] as int?) ?? 60;

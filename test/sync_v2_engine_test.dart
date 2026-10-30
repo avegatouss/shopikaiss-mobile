@@ -450,8 +450,10 @@ void main() {
       ..put('operateur', 'operateur:7', operateur21('7', 'Awa', 'empreinte', ['ouverture_session', 'remise', 'vente'], '5.000000', 40), critical: true)
       ..put('operateur', 'operateur:8', operateur21('8', 'Stagiaire', null, <String>[], null, null));
 
+    final codeHash = r'$2y$12$' + 'a' * 53;
     final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
-        pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true, contract21: true);
+        pinVerifier: (secret, hash) async => hash == codeHash ? secret == '12345678' : FakeV2Server.pinVerifier(secret, hash),
+        declaredPayments: true, contract21: true);
     await e.load('https://boutique.exemple.ci');
     final report = await e.sync();
     expect(report.reachable, isTrue);
@@ -504,6 +506,80 @@ void main() {
       }, null),
       throwsA(isA<AdapterFailure>().having((f) => f.message, 'message', 'Trop-perçu électronique : en ligne seulement. Saisissez le montant exact.')),
     );
+
+    // Lot 1c : code d'autorisation d'un responsable, seuils du caissier puis de l'approbateur.
+    Map<String, dynamic> responsable(String id, String nom, String seuil) => {
+      ...operateur21(id, nom, null, ['remise', 'vente'], seuil, null),
+      'approbateur_remise': true,
+      'code_autorisation_empreinte': codeHash,
+    };
+    server.publish([
+      for (final o in [responsable('9', 'Chef', '8.000000'), responsable('10', 'Adjoint', '6.000000')])
+        {'type': 'operateur', 'critique': false, 'cle': 'operateur:${o['operateur_id']}', 'revision': '2', 'action': 'upsert', 'donnees': o},
+    ]);
+    await e.sync();
+    expect(e.blockReason, isNull, reason: 'empreinte acceptée par le schéma');
+    final operators = e.snapshot!.operators;
+    final chef = operators.firstWhere((o) => o.id == 9);
+    final adjoint = operators.firstWhere((o) => o.id == 10);
+    expect(e.enterableLineDiscount(awa, 1000), 100, reason: 'le plafond de la boutique reste, le seuil du rôle se lève');
+    expect(e.maxLineDiscountFor(awa, 1000), 50);
+    Future<OfflineOperation> sell(int discount, Operator who, {SaleApproval? approval}) => e.recordSale(
+      [savon(e, units: 2)..discount = discount],
+      [CartPayment(method: cashMethod, amount: 1000 - discount, received: 1000 - discount)],
+      who,
+      extras: SaleExtras(approval: approval),
+    );
+    Matcher refused(String text) => throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains(text)));
+    await expectLater(sell(70, awa), refused('autorisation d’un responsable requise'));
+    final seventy = [savon(e, units: 2)..discount = 70];
+    expect([for (final o in e.approversFor(awa, seventy, 0)) o.name], ['Chef'], reason: 'le seuil de l’adjoint ne couvre pas 7 %');
+    Future<SaleApproval> authorize(Operator who, int discount, {Operator? cashier, String code = '12345678', String reason = 'Client fidèle'}) => e.authorizeDiscount(
+      cashier: cashier ?? awa, approver: who, code: code, reason: reason, lines: [savon(e, units: 2)..discount = discount], globalDiscount: 0,
+    );
+    await expectLater(authorize(adjoint, 70), refused('ne peut pas autoriser'));
+    await expectLater(authorize(chef, 90, cashier: chef), refused('ne peut pas autoriser'));
+    await expectLater(authorize(chef, 70, reason: '  '), refused('motif'));
+    // Blocage après 3 échecs : même le bon code est refusé, le compteur reste propre à ce responsable.
+    for (var i = 0; i < 3; i++) {
+      await expectLater(authorize(adjoint, 55, code: '00000000'), refused('Code d’autorisation incorrect'));
+    }
+    await expectLater(authorize(adjoint, 55), refused('Trop d’essais'));
+    expect(await e.approvalLockedFor(chef), isNull);
+    await expectLater(authorize(chef, 70, code: '1234'), refused('Code d’autorisation incorrect'));
+
+    final approval = await authorize(chef, 70);
+    await expectLater(sell(70, awa, approval: SaleApproval(approverId: 10, reason: 'x', verifiedAt: approval.verifiedAt)), refused('ne peut pas autoriser'));
+    await expectLater(sell(120, awa, approval: approval), refused('maximum hors ligne'));
+    final approved = await sell(70, awa, approval: approval);
+    Future<Object?> authorizations(String uuid) async => (await e.v2.operation(uuid))!['operation']['contenu']['autorisations'];
+    expect(await authorizations(approved.uuid), [
+      {'type': 'remise', 'approbateur_id': '9', 'motif': 'Client fidèle', 'preuve': 'code_local|${approval.verifiedAt}'},
+    ]);
+    final unneeded = await sell(40, awa, approval: approval);
+    expect(await authorizations(unneeded.uuid), isEmpty, reason: 'dans le seuil du caissier : aucune autorisation inscrite');
+
+    // Adaptateur : la vue annonce l'autorisation, commitSale la reçoit.
+    await adapter.execute('clear', {}, null);
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    final scanned = await adapter.execute('scan', {'code': '6190000000011'}, null);
+    final lineId = ((scanned['lines'] as List).single as Map)['id'];
+    final discounted = await adapter.execute('setLineDiscount', {'line_id': lineId, 'amount': 70}, null);
+    expect(discounted['discount_approval'], {
+      'required': true,
+      'approvers': [{'id': 9, 'name': 'Chef'}],
+    });
+    await adapter.execute('setPayment', {'method': 'especes', 'received': 930}, null);
+    const operation = 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000e2';
+    await expectLater(adapter.execute('commitSale', {}, operation), throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'autorisation_requise')));
+    await expectLater(
+      adapter.execute('commitSale', {'approval': {'approver_id': 9, 'code': '00000000', 'reason': 'Client fidèle'}}, operation),
+      throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'autorisation_refusee')),
+    );
+    final committed = await adapter.execute('commitSale', {'approval': {'approver_id': 9, 'code': '12345678', 'reason': 'Client fidèle'}}, operation);
+    expect(committed['state'], 'committed');
+    expect((await authorizations(operation) as List).single, containsPair('approbateur_id', '9'));
     await adapter.close();
   });
 
@@ -623,6 +699,10 @@ void main() {
     expect(lines.firstWhere((l) => l['remise'] == 50)['remise_saisie'], {'type': 'pourcentage', 'valeur': '10'});
     final cashPayment = (content['paiements'] as List).single as Map;
     expect([cashPayment['montant'], cashPayment['recu'], cashPayment['monnaie'], cashPayment['ecart_arrondi']], [2487, 3000, 525, -12]);
+
+    // Ticket local : la monnaie est celle rendue sur le montant arrondi, pas sur le montant exact.
+    final ticket = await adapter.execute('reprint', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
+    expect((ticket['lines'] as List).join(' '), contains('525'));
 
     // Le serveur (recoupement de CoherenceVente 4bb14454) l'intègre.
     await e.sync();
