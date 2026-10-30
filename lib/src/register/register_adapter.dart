@@ -51,6 +51,12 @@ class LocalRegisterAdapter {
   late _Draft _draft;
   String _query = '';
   String? _category;
+  String? _brand;
+  String? _supplier;
+
+  /// Nombre de produits rendus par la vue : une page de plus à chaque `moreProducts`, une page après `search`.
+  static const productPage = 60;
+  int _productLimit = productPage;
   int _revision = 0;
   bool _started = false;
   bool _syncing = false;
@@ -108,12 +114,15 @@ class LocalRegisterAdapter {
         return _view();
       case 'search':
         _query = _text(args, 'query', max: 100);
-        // Catégorie : absente ou vide = toutes ; conservée jusqu'à la prochaine recherche.
-        final category = args['category'];
-        if (category != null && (category is! String || category.length > 120)) {
-          throw const AdapterFailure('argument_invalide', 'Argument « category » invalide.');
-        }
-        _category = category == null || (category as String).isEmpty ? null : category;
+        // Catégorie, marque, fournisseur : absents ou vides = tous ; conservés jusqu'à la prochaine recherche.
+        _category = _filter(args, 'category');
+        _brand = _filter(args, 'brand');
+        _supplier = _filter(args, 'supplier');
+        _productLimit = productPage;
+        return _view();
+      case 'moreProducts':
+        // Page suivante des résultats de la recherche courante, filtrés sur tout le catalogue.
+        _productLimit += productPage;
         return _view();
       case 'addProduct':
         return _add(_int(args, 'product_id'), args['packaging_id'] is int ? args['packaging_id'] as int : null);
@@ -263,6 +272,9 @@ class LocalRegisterAdapter {
     final available = [for (final r in resolved) if (r.$2 != null) r.$2!];
     final totals = snapshot == null ? null : _totalsOf(_draft, snapshot);
     final currency = snapshot?.store.currency == 'FCFA' || snapshot == null ? 'F' : snapshot.store.currency;
+    final hits = snapshot == null
+        ? const <Product>[]
+        : snapshot.search(_query, limit: null, category: _category, brand: _brand, supplier: _supplier);
     final payments = _draft.payments;
     final payment = payments.firstOrNull;
     final paymentValid = totals != null && payments.isNotEmpty && _paymentsError(snapshot!, payments, totals.payable) == null;
@@ -343,9 +355,14 @@ class LocalRegisterAdapter {
       'query': _query,
       'category': _category,
       'categories': snapshot?.categories ?? const <String>[],
+      'brand': _brand,
+      'brands': snapshot?.brands ?? const <String>[],
+      'supplier': _supplier,
+      'suppliers': snapshot?.suppliers ?? const <String>[],
+      'products_total': hits.length,
+      'has_more': hits.length > _productLimit,
       'products': [
-        if (snapshot != null)
-          for (final p in snapshot.search(_query, limit: 60, category: _category))
+        for (final p in hits.take(_productLimit))
             {
               'id': p.id,
               'name': p.name,
@@ -929,6 +946,13 @@ class LocalRegisterAdapter {
     final value = args[key];
     if (value is! String || value.length > max) throw AdapterFailure('argument_invalide', 'Argument « $key » invalide.');
     return value;
+  }
+
+  /// Filtre facultatif du catalogue : absent ou vide = aucun.
+  static String? _filter(Map<String, dynamic> args, String key) {
+    final value = args[key];
+    if (value != null && (value is! String || value.length > 120)) throw AdapterFailure('argument_invalide', 'Argument « $key » invalide.');
+    return value == null || (value as String).isEmpty ? null : value;
   }
 
   static int _int(Map<String, dynamic> args, String key) {

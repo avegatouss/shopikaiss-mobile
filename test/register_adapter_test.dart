@@ -67,6 +67,52 @@ void main() {
     expect((await run('view'))['can_pay'], isTrue);
   });
 
+  test('catalogue complet : filtres marque et fournisseur, listes de valeurs, pages de 60 sans perte', () async {
+    final products = (transport.snapshotBody['produits'] as List).cast<Map<String, dynamic>>();
+    final template = products.first;
+    transport.snapshotBody['produits'] = [
+      ...products,
+      for (var i = 0; i < 130; i++)
+        {
+          ...template,
+          'id': 100 + i,
+          'uuid': 'g$i',
+          'nom': 'Article $i',
+          'reference': null,
+          'codes': const [],
+          'conditionnements': const [],
+          'marque': i.isEven ? 'Éclat' : 'Dove',
+          'fournisseur': i % 3 == 0 ? 'Grossiste Plateau' : null,
+        },
+    ];
+    final engine = OfflineEngine(store: store, transport: transport, newUuid: uuid);
+    await engine.load('https://boutique.exemple.ci');
+    expect(await engine.refreshSnapshot(), isNull);
+    adapter = LocalRegisterAdapter(engine, newUuid: uuid);
+    await adapter.start();
+
+    var view = await run('view');
+    expect([view['products_total'], (view['products'] as List).length, view['has_more']], [132, 60, isTrue]);
+    expect(view['brands'], ['Dove', 'Éclat'], reason: 'catalogue complet, ordre sans accents');
+    expect(view['suppliers'], ['Grossiste Plateau']);
+
+    // Le filtre porte sur tout le catalogue, y compris au-delà des 60 premiers.
+    view = await run('search', {'query': '', 'brand': 'Dove', 'supplier': 'Grossiste Plateau'});
+    expect([view['brand'], view['supplier'], view['products_total'], view['has_more']], ['Dove', 'Grossiste Plateau', 22, isFalse]);
+    expect((view['products'] as List).last['name'], 'Article 129');
+
+    // Charger plus : pages successives, sans doublon, et une nouvelle recherche repart de la première page.
+    await run('search', {'query': ''});
+    view = await run('moreProducts');
+    expect([(view['products'] as List).length, view['has_more']], [120, isTrue]);
+    view = await run('moreProducts');
+    expect([(view['products'] as List).length, view['has_more']], [132, isFalse]);
+    expect({for (final x in view['products'] as List) x['id']}.length, 132);
+    view = await run('search', {'query': 'Article'});
+    expect([(view['products'] as List).length, view['products_total'], view['brand']], [60, 130, isNull]);
+    await expectLater(run('search', {'query': '', 'brand': 12}), throwsA(isA<AdapterFailure>()));
+  });
+
   test('C-REQ-004 : le panier est conservé et retrouvé après redémarrage de l’hôte', () async {
     await cartOf2Soaps();
     final draft = (await run('view'))['draft_id'];
