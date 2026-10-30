@@ -235,3 +235,9 @@ Moteur B 2180f4c integre (plafond global distinct). Validation : 50 tests Window
 Integration B c783089 sans conflit. HostCommand.moreProducts raccorde ; listes Fournisseur et Marque sous les categories. Les recherches transmettent ensemble texte, categorie, marque et fournisseur, y compris valeurs vides pour enlever un filtre. Compteur produits affiches/total et bouton Afficher plus tant que has_more ; pages de 60 gerees par le moteur sur le catalogue complet, aucun filtrage limite aux seuls produits visibles.
 
 Contrat 2.1 active par B dans l'hote, selon les capacites serveur ; pas de modification des serveurs depuis C. Validation : analyse sans remarque, 61 tests Windows + adaptateur reussis ; rendu Flutter inspecte (donnees fictives), absence de debordement testee a 1280x800 et 800x600. Pas de nouvelle vente sur la demo dans cette livraison.
+
+## Compatibilite prioritaire catalogue 2.1 (1b38dea)
+
+Moteur et schemas B integres pour accepter favoris, promotions, nouveautes, stock faible et metadonnees image du serveur 198a26d7. Aucun changement de prix ni telechargement image automatique. Le raccordement visuel des nouveaux badges et le cache image restent distincts de cette mise a jour de compatibilite.
+
+Validation : 64 tests Windows + moteur v2 reussis, analyse Windows sans remarque. La fixture FakeV2Server avait une autorisation fixe expirant le 30 octobre a 08:00 UTC ; sa valeur par defaut est maintenant relative a la date du test, les scenarios explicites d'expiration restent inchanges. Aucun controle metier affaibli. Installation a relancer avant deploiement du nouveau catalogue : un processus deja ouvert reste sur son ancien moteur.
