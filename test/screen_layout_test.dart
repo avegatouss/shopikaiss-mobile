@@ -65,8 +65,31 @@ class _FullStore extends MemoryOfflineStore {
   Future<void> append(OfflineOperation operation) async => throw StateError('disque plein');
 }
 
-Future<TerminalSession> _session({required double inches, String layout = 'auto', MemoryOfflineStore? memory, bool permanent = false}) async {
+Future<TerminalSession> _session({required double inches, String layout = 'auto', MemoryOfflineStore? memory, bool permanent = false, bool rich = false}) async {
   final snapshot = _snapshot();
+  if (rich) {
+    snapshot['produits'] = [
+      for (var i = 1; i <= 70; i++)
+        {
+          'id': i,
+          'nom': 'Article $i',
+          'prix': 1000,
+          'stock': '5.000000',
+          'seuil_alerte': '10.000000',
+          'categorie': i.isEven ? 'Boissons' : 'Hygiène',
+          'marque': i <= 2 ? 'Dove' : null,
+          'fournisseur': 'Grossiste',
+          'favori': i == 1,
+          'promotions': i == 1
+              ? [
+                  {'libelle': 'Bon de réduction au nom très long pour vérifier le débordement', 'du': null, 'au': '2099-12-31', 'exclusions': <Map>[]},
+                ]
+              : <Map>[],
+          'conditionnements': [],
+          'codes': [],
+        },
+    ];
+  }
   if (permanent) (snapshot['reglages'] as Map)['vente_locale_permanente'] = true;
   final store = (memory ?? MemoryOfflineStore())
     ..values.addAll({
@@ -160,6 +183,30 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.text('Valider la vente'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('catalogue complet : badges, filtres sur tout le catalogue, Afficher plus, aucun débordement', (tester) async {
+      final session = await _session(inches: 4.0, rich: true);
+      await _pump(tester, const Size(320, 568), session);
+      expect(find.text('★ Favori'), findsOneWidget);
+      expect(find.textContaining('Bon de réduction'), findsOneWidget);
+      expect(find.text('Afficher plus (10)'), findsOneWidget);
+      await tester.tap(find.text('Marque'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dove').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Afficher plus (10)'), findsNothing);
+      expect(find.text('Article 2'), findsOneWidget);
+      expect(find.text('Article 3'), findsNothing);
+      await tester.ensureVisible(find.text('Effacer'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Effacer'));
+      await tester.pumpAndSettle();
+      expect(find.text('Afficher plus (10)'), findsOneWidget);
+      await tester.tap(find.text('Afficher plus (10)'));
+      await tester.pump();
+      expect(find.textContaining('Afficher plus'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +43,13 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Map<int, BigInt> _sold = {};
   bool _probing = false;
   String? _lastSyncMessage;
+
+  /// Filtres du catalogue (catalogue complet) et nombre de produits affichés, une page de plus à chaque « Afficher plus ».
+  static const _productPage = 60;
+  String? _category;
+  String? _brandFilter;
+  String? _supplier;
+  int _productLimit = _productPage;
 
   /// Disposition compacte (téléphone de moins de 6 pouces) : onglet affiché, 0 = articles, 1 = panier.
   int _compactTab = 0;
@@ -91,6 +99,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         return;
       }
       final report = await _engine.sync();
+      // Images : hors vente seulement, pour ne jamais ralentir un encaissement.
+      if (_cart.isEmpty) unawaited(_engine.downloadImages().then((added) => added > 0 ? _changed() : null));
       setState(
         () => _lastSyncMessage = report.sent > 0
             ? '${report.sent} opération(s) envoyée(s) : ${report.integrated} intégrée(s)${report.pending > 0 ? ', ${report.pending} à arbitrer par la boutique' : ''}${report.refused > 0 ? ', ${report.refused} refusée(s)' : ''}.'
@@ -367,8 +377,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Widget _catalogue(Snapshot snapshot) {
-    final results = snapshot.search(_search.text);
+    final results = snapshot.search(_search.text, limit: null, category: _category, brand: _brandFilter, supplier: _supplier);
     final compact = _compact;
+    final filtered = _category != null || _brandFilter != null || _supplier != null;
     return Padding(
       padding: EdgeInsets.all(compact ? 8 : 12),
       child: Column(
@@ -385,39 +396,108 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               border: const OutlineInputBorder(),
               suffixIcon: _search.text.isEmpty ? null : IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(_search.clear)),
             ),
-            onChanged: (_) => setState(() {}),
+            onChanged: (_) => setState(() => _productLimit = _productPage),
             onSubmitted: (value) => _scan(snapshot, value),
+          ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _filter('Catégorie', _category, snapshot.categories, (v) => _category = v),
+                _filter('Marque', _brandFilter, snapshot.brands, (v) => _brandFilter = v),
+                _filter('Fournisseur', _supplier, snapshot.suppliers, (v) => _supplier = v),
+                if (filtered)
+                  TextButton(
+                    onPressed: () => setState(() {
+                      _category = _brandFilter = _supplier = null;
+                      _productLimit = _productPage;
+                    }),
+                    child: const Text('Effacer'),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 8),
           Expanded(
             child: results.isEmpty
-                ? const Center(child: Text('Aucun article.'))
+                ? Center(child: Text(filtered ? 'Aucun produit actif ne correspond à ces filtres.' : 'Aucun article.', textAlign: TextAlign.center))
                 : GridView.builder(
                     gridDelegate: compact
                         ? const SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 180,
-                            mainAxisExtent: 84,
+                            mainAxisExtent: 104,
                             crossAxisSpacing: 6,
                             mainAxisSpacing: 6,
                           )
                         : const SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 220,
-                            mainAxisExtent: 92,
+                            mainAxisExtent: 112,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
-                    itemCount: results.length,
+                    itemCount: results.length.clamp(0, _productLimit),
                     itemBuilder: (context, index) => _productTile(results[index]),
                   ),
           ),
+          if (results.length > _productLimit)
+            TextButton(
+              onPressed: () => setState(() => _productLimit += _productPage),
+              child: Text('Afficher plus (${results.length - _productLimit})'),
+            ),
         ],
       ),
     );
   }
 
+  /// Filtre du catalogue : masqué si la boutique n'a aucune valeur ; porte sur tout le catalogue.
+  Widget _filter(String label, String? value, List<String> values, void Function(String?) select) {
+    if (values.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: PopupMenuButton<String>(
+        tooltip: label,
+        onSelected: (choice) => setState(() {
+          select(choice.isEmpty ? null : choice);
+          _productLimit = _productPage;
+        }),
+        itemBuilder: (_) => [
+          PopupMenuItem(value: '', child: Text('Toutes les valeurs ($label)')),
+          for (final v in values) PopupMenuItem(value: v, child: Text(v)),
+        ],
+        child: Chip(
+          label: Text(value ?? label),
+          avatar: const Icon(Icons.arrow_drop_down, size: 18),
+          backgroundColor: value == null ? Colors.white : _brand.withValues(alpha: 0.12),
+          visualDensity: VisualDensity.compact,
+        ),
+      ),
+    );
+  }
+
+  /// Badges du catalogue, comme la caisse web : présentation seule, aucun prix ne change.
+  List<Widget> _badges(Product product) {
+    Widget badge(String text, Color color) => Container(
+      margin: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(4)),
+      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
+    );
+    final now = DateTime.now();
+    final promotion = product.promotionLabel(now.toIso8601String().substring(0, 10));
+    return [
+      if (product.favorite) badge('★ Favori', _offline),
+      if (product.isNew(_engine.newBadgeDays, now)) badge('Nouveau', _brand),
+      if (promotion != null) Flexible(child: badge(promotion, Colors.deepPurple)),
+    ];
+  }
+
   Widget _productTile(Product product) {
     final stock = product.signedStock - (_sold[product.id] ?? BigInt.zero);
     final low = !product.unlimitedStock && stock <= BigInt.zero;
+    final alert = !product.unlimitedStock && !low && product.alertThreshold != null && stock <= product.alertThreshold!;
+    final badges = _badges(product);
+    final image = product.image == null ? null : _engine.imagePath(product.image!);
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(8),
@@ -429,12 +509,28 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                product.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w600),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (image != null)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: Image.file(File(image), width: 40, height: 40, cacheWidth: 120, fit: BoxFit.cover),
+                      ),
+                    ),
+                  Expanded(
+                    child: Text(
+                      product.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
               ),
+              if (badges.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: Row(children: badges)),
               const Spacer(),
               Row(
                 children: [
@@ -457,7 +553,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         textAlign: TextAlign.right,
-                        style: TextStyle(fontSize: 11, color: low ? Colors.red : Colors.black54),
+                        style: TextStyle(fontSize: 11, color: low ? Colors.red : (alert ? _offline : Colors.black54)),
                       ),
                     ),
                 ],
