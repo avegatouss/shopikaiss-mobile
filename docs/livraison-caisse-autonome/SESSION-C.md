@@ -229,3 +229,9 @@ Taille des produits 150–330 px avec boutons −/+ dans les réglages. Flèches
 Raccordement setPayments : jusqu'a 10 lignes, reference par paiement, validation automatique apres 250 ms et totaux exclusivement fournis par le moteur. Toute edition invalide immediatement la confirmation, avec controle supplementaire au clic. Les moyens proposes restent ceux autorises par le serveur ; aucune activation 2.1 forcee. Suppression d'un panier en attente avec confirmation explicite.
 
 Moteur B 2180f4c integre (plafond global distinct). Validation : 50 tests Windows reussis, analyse sans remarque ; 19 tests moteur v2/regles web reussis. Test de reponse IPC malformee stabilise par une requete de demarrage avant injection : le demarrage JIT n'est plus confondu avec la panne testee. Recette des nouveaux paiements sur la demo et impression physique restent a effectuer.
+
+## Catalogue complet : fournisseur, marque et pages
+
+Integration B c783089 sans conflit. HostCommand.moreProducts raccorde ; listes Fournisseur et Marque sous les categories. Les recherches transmettent ensemble texte, categorie, marque et fournisseur, y compris valeurs vides pour enlever un filtre. Compteur produits affiches/total et bouton Afficher plus tant que has_more ; pages de 60 gerees par le moteur sur le catalogue complet, aucun filtrage limite aux seuls produits visibles.
+
+Contrat 2.1 active par B dans l'hote, selon les capacites serveur ; pas de modification des serveurs depuis C. Validation : analyse sans remarque, 61 tests Windows + adaptateur reussis ; rendu Flutter inspecte (donnees fictives), absence de debordement testee a 1280x800 et 800x600. Pas de nouvelle vente sur la demo dans cette livraison.

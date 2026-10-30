@@ -125,6 +125,46 @@ class _Register extends StatefulWidget {
 
 class _RegisterState extends State<_Register> {
   final _search = TextEditingController();
+  Future<void> _searchCatalogue({
+    String? category,
+    String? brand,
+    String? supplier,
+  }) => c.command(HostCommand.search, {
+    'query': _search.text,
+    'category': category ?? c.view['category'] ?? '',
+    'brand': brand ?? c.view['brand'] ?? '',
+    'supplier': supplier ?? c.view['supplier'] ?? '',
+  });
+
+  Widget _catalogueFilter(String field, String label, String all) {
+    final values = (c.view['${field}s'] as List? ?? const []).cast<String>();
+    final selected = c.view[field] as String? ?? '';
+    return DropdownButtonFormField<String>(
+      key: ValueKey('$field-$selected'),
+      initialValue: values.contains(selected) ? selected : '',
+      isExpanded: true,
+      decoration: InputDecoration(labelText: label, isDense: true),
+      items: [
+        DropdownMenuItem(value: '', child: Text(all)),
+        for (final value in values.toSet())
+          if (value.isNotEmpty)
+            DropdownMenuItem(
+              value: value,
+              child: Text(value, overflow: TextOverflow.ellipsis),
+            ),
+      ],
+      onChanged: _canEdit
+          ? (value) {
+              if (field == 'brand') {
+                _searchCatalogue(brand: value ?? '');
+              } else {
+                _searchCatalogue(supplier: value ?? '');
+              }
+            }
+          : null,
+    );
+  }
+
   final _scan = TextEditingController();
   final _screen = ScreenSettings.load();
   ColorScheme get _palette =>
@@ -771,19 +811,11 @@ class _RegisterState extends State<_Register> {
                   labelText: 'Rechercher un produit',
                   suffixIcon: IconButton(
                     tooltip: 'Rechercher',
-                    onPressed: _canEdit
-                        ? () => c.command(HostCommand.search, {
-                            'query': _search.text,
-                            'category': ?c.view['category'],
-                          })
-                        : null,
+                    onPressed: _canEdit ? () => _searchCatalogue() : null,
                     icon: const Icon(Icons.search),
                   ),
                 ),
-                onSubmitted: (query) => c.command(HostCommand.search, {
-                  'query': query,
-                  'category': ?c.view['category'],
-                }),
+                onSubmitted: (_) => _searchCatalogue(),
               ),
             ),
           ],
@@ -816,10 +848,7 @@ class _RegisterState extends State<_Register> {
                             ),
                             selected: (c.view['category'] ?? '') == category,
                             onSelected: _canEdit
-                                ? (_) => c.command(HostCommand.search, {
-                                    'query': _search.text,
-                                    'category': category,
-                                  })
+                                ? (_) => _searchCatalogue(category: category)
                                 : null,
                           ),
                         ),
@@ -834,6 +863,38 @@ class _RegisterState extends State<_Register> {
               ],
             ),
           ),
+        Row(
+          children: [
+            Expanded(
+              child: _catalogueFilter(
+                'supplier',
+                'Fournisseur',
+                'Tous les fournisseurs',
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _catalogueFilter('brand', 'Marque', 'Toutes les marques'),
+            ),
+          ],
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                '${c.products.length} / ${c.view['products_total'] ?? c.products.length} produits',
+              ),
+            ),
+            if (c.view['has_more'] == true)
+              TextButton.icon(
+                onPressed: _canEdit
+                    ? () => c.command(HostCommand.moreProducts, const {})
+                    : null,
+                icon: const Icon(Icons.expand_more),
+                label: const Text('Afficher plus'),
+              ),
+          ],
+        ),
         Expanded(
           child: c.products.isEmpty
               ? const Center(child: Text('Aucun article à afficher.'))

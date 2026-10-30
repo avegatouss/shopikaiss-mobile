@@ -24,6 +24,7 @@ enum HostCommand {
   status,
   view,
   search,
+  moreProducts,
   scan,
   changeQuantity,
   removeLine,

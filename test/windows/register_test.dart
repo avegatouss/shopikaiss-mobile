@@ -139,6 +139,58 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets(
+    'catalogue filters preserve each other and load more through engine',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      host.state.addAll({
+        'brands': ['Marque A'],
+        'suppliers': ['Fournisseur A'],
+        'category': 'Épicerie',
+        'supplier': 'Fournisseur A',
+        'products_total': 121,
+        'has_more': true,
+      });
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Toutes les marques'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Marque A').last);
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.search], {
+        'query': '',
+        'category': 'Épicerie',
+        'brand': 'Marque A',
+        'supplier': 'Fournisseur A',
+      });
+      expect(find.text('1 / 121 produits'), findsOneWidget);
+      await tester.tap(find.text('Afficher plus'));
+      await tester.pumpAndSettle();
+      expect(host.calls, contains(HostCommand.moreProducts));
+      host.state['brand'] = 'Marque A';
+      await c.refresh();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Fournisseur A'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Tous les fournisseurs').last);
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.search], {
+        'query': '',
+        'category': 'Épicerie',
+        'brand': 'Marque A',
+        'supplier': '',
+      });
+    },
+  );
   testWidgets('category discount and suspended basket use engine commands', (
     tester,
   ) async {
@@ -164,6 +216,8 @@ void main() {
     expect(host.argumentsByCommand[HostCommand.search], {
       'query': '',
       'category': 'Épicerie',
+      'brand': '',
+      'supplier': '',
     });
     await tester.tap(find.byTooltip('Remise de ligne'));
     await tester.pumpAndSettle();
@@ -317,7 +371,12 @@ void main() {
     );
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
-    expect(host.argumentsByCommand[HostCommand.search], {'query': 'riz'});
+    expect(host.argumentsByCommand[HostCommand.search], {
+      'query': 'riz',
+      'category': '',
+      'brand': '',
+      'supplier': '',
+    });
     expect(host.calls, isNot(contains(HostCommand.scan)));
     await tester.tap(find.text('Compacte'));
     await tester.pumpAndSettle();
