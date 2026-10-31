@@ -171,6 +171,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.customerCreateCapability,
           CaisseV2Client.sessionCloseCapability,
           CaisseV2Client.sharedCartCapability,
+          CaisseV2Client.returnCapability,
         ],
       ],
     );
@@ -424,6 +425,123 @@ class V2Engine extends CaisseEngine {
   @override
   String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
 
+  /// Politiques des retours, publiées avec la capacité.
+  ({String mode, int max, int days}) _returnRules = (mode: 'en_ligne', max: 0, days: 0);
+
+  @override
+  bool returnsOpen(Operator operator) =>
+      saleExtrasSupported &&
+      _serverOffers(CaisseV2Client.returnCapability) &&
+      _returnRules.mode == 'especes' &&
+      !((_state?['fonctions_restreintes'] as List?)?.any((f) => (f as Map)['fonction'] == 'retour') ?? true) &&
+      hasRight(operator, 'retour_creer') &&
+      hasRight(operator, 'retour_rembourser_especes');
+
+  /// Vente du terminal, quantités déjà retournées par ligne et total déjà rendu. Refus si le montant dépendrait de la règle
+  /// de reste de la boutique, que le serveur ne publie pas : un retour se chiffre ici exactement ou se fait en ligne.
+  Future<({Map content, Map<String, int> before, int refunded})> _returnBasis(String saleUuid) async {
+    final row = await v2.operation(saleUuid);
+    final operation = row?['operation'] as Map?;
+    if (operation == null || operation['type'] != 'vente') throw const OfflineRefusal('Seules les ventes de ce terminal se retournent hors ligne.');
+    if (row!['etat'] == V2OperationState.rejected || row['etat'] == V2OperationState.arbitration) {
+      throw const OfflineRefusal('Cette vente attend un traitement de la boutique : retour impossible pour l’instant.');
+    }
+    final created = DateTime.parse(operation['cree_le'] as String).toLocal();
+    final today = DateTime(now.year, now.month, now.day);
+    final age = (today.difference(DateTime(created.year, created.month, created.day)).inHours / 24).round();
+    if (age > _returnRules.days) throw OfflineRefusal('Vente trop ancienne pour un retour hors ligne (${_returnRules.days} jour(s) au plus).');
+    final content = operation['contenu'] as Map;
+    final lines = (content['lignes'] as List).cast<Map>();
+    final gross = lines.fold<int>(0, (sum, l) => sum + (l['total'] as int));
+    final net = _saleNet(content);
+    if (lines.fold<int>(0, (sum, l) => sum + archivedShare(net, l['total'] as int, gross)) != net) {
+      throw const OfflineRefusal('Le montant de ce retour dépend d’une règle d’arrondi de la boutique : faites-le en ligne.');
+    }
+    final before = <String, int>{};
+    var refunded = 0;
+    for (final other in await v2.operationRows()) {
+      final past = other['operation'] as Map;
+      if (past['type'] != 'retour' || other['etat'] == V2OperationState.rejected) continue;
+      final pastContent = past['contenu'] as Map;
+      if ((pastContent['vente_ref'] as Map)['operation_uuid'] != saleUuid) continue;
+      refunded += pastContent['montant'] as int;
+      for (final l in (pastContent['lignes'] as List).cast<Map>()) {
+        before.update(l['ligne_uuid'] as String, (v) => v + Decimal6.parse(l['quantite'] as String), ifAbsent: () => Decimal6.parse(l['quantite'] as String));
+      }
+    }
+    return (content: content, before: before, refunded: refunded);
+  }
+
+  /// Net archivé : à payer, livraison exclue.
+  static int _saleNet(Map content) => ((content['totaux'] as Map)['a_payer'] as int) - (content['livraison'] as int? ?? 0);
+
+  @override
+  Future<List<ReturnableLine>> returnableLines(String saleUuid) async {
+    final basis = await _returnBasis(saleUuid);
+    return [
+      for (final l in (basis.content['lignes'] as List).cast<Map>())
+        if (Decimal6.parse(l['quantite_base'] as String) - (basis.before[l['ligne_uuid']] ?? 0) case final remaining when remaining > 0)
+          ReturnableLine(lineUuid: l['ligne_uuid'] as String, label: l['libelle'] as String, remaining: remaining),
+    ];
+  }
+
+  int _amountOf(({Map content, Map<String, int> before, int refunded}) basis, Map<String, int> quantities) {
+    final lines = (basis.content['lignes'] as List).cast<Map>();
+    final gross = lines.fold<int>(0, (sum, l) => sum + (l['total'] as int));
+    final net = _saleNet(basis.content);
+    var amount = 0;
+    for (final e in quantities.entries) {
+      final line = lines.where((l) => l['ligne_uuid'] == e.key).firstOrNull ?? (throw const OfflineRefusal('Cette ligne n’appartient pas à la vente.'));
+      final sold = Decimal6.parse(line['quantite_base'] as String);
+      final before = basis.before[e.key] ?? 0;
+      if (e.value <= 0) throw const OfflineRefusal('Quantité invalide.');
+      if (before + e.value > sold) throw const OfflineRefusal('La quantité retournée dépasse la quantité vendue restante.');
+      amount += returnedAmount(archivedShare(net, line['total'] as int, gross), before, e.value, sold);
+    }
+    return amount;
+  }
+
+  @override
+  Future<int> returnAmount(String saleUuid, Map<String, int> quantities) async => _amountOf(await _returnBasis(saleUuid), quantities);
+
+  @override
+  Future<OfflineOperation> recordReturn(Operator operator, String saleUuid, Map<String, int> quantities, String reason, {String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) return _view(existing);
+    }
+    if (!returnsOpen(operator)) throw const OfflineRefusal('Retour hors ligne non autorisé sur ce terminal.');
+    if (!sessionOpen) throw const OfflineRefusal('Aucune session de caisse ouverte sur ce terminal : ouvrez-la d’abord.');
+    final motive = reason.trim();
+    if (motive.isEmpty || motive.length > 500) throw const OfflineRefusal('Indiquez le motif du retour (500 caractères au plus).');
+    if (quantities.isEmpty) throw const OfflineRefusal('Choisissez au moins une quantité à retourner.');
+    final basis = await _returnBasis(saleUuid);
+    final amount = _amountOf(basis, quantities);
+    if (amount <= 0) throw const OfflineRefusal('Rien à rembourser pour ces quantités.');
+    if (amount > _returnRules.max) throw OfflineRefusal('Retour hors ligne limité à ${formatFcfa(_returnRules.max)} : faites-le en ligne.');
+    final content = basis.content;
+    if (basis.refunded + amount > ((content['totaux'] as Map)['a_payer'] as int)) throw const OfflineRefusal('Le montant cumulé restitué dépasse le montant reçu sur la vente.');
+    final lines = (content['lignes'] as List).cast<Map>();
+    final stocked = {for (final m in (content['mouvements'] as List).cast<Map>()) m['produit_uuid']};
+    final movements = [
+      for (final e in quantities.entries)
+        if (lines.firstWhere((l) => l['ligne_uuid'] == e.key)['produit_uuid'] case final product when stocked.contains(product))
+          {'mouvement_uuid': _newUuid(), 'produit_uuid': product, 'lot_uuid': null, 'variation': Decimal6.format(e.value)},
+    ];
+    final operation = await _record(operationUuid ?? _newUuid(), 'retour', operator, (_) => {
+      'vente_ref': {'operation_uuid': saleUuid},
+      'lignes': [for (final e in quantities.entries) {'ligne_uuid': e.key, 'quantite': Decimal6.format(e.value)}],
+      'montant': amount,
+      'remboursement': 'especes',
+      'motif': motive,
+      'mouvements': movements,
+    });
+    await _rebuild();
+    await _afterWrite();
+    return operation;
+  });
+
   /// Panier repris en ce moment (uuid, opérateur) : sa reprise de 30 minutes est renouvelée à chaque synchronisation.
   (String, int)? _heldCart;
 
@@ -561,6 +679,7 @@ class V2Engine extends CaisseEngine {
   /// Attendu de la session d'après les opérations du terminal, par moyen de paiement ; null si son ouverture n'y figure pas.
   Future<Map<String, int>?> _expectedCounts() async {
     final expected = <String, int>{};
+    final cash = (await v2.entities('moyen_paiement')).values.where((m) => m['especes'] == true).map((m) => m['code'] as String).firstOrNull ?? 'especes';
     for (final row in await v2.operationRows()) {
       if (row['etat'] == V2OperationState.rejected) continue;
       final operation = row['operation'] as Map;
@@ -571,8 +690,9 @@ class V2Engine extends CaisseEngine {
             final amount = (p['montant'] as int) + (p['ecart_arrondi'] as int? ?? 0);
             expected.update(p['moyen'] as String, (v) => v + amount, ifAbsent: () => amount);
           }
+        case 'retour':
+          expected.update(cash, (v) => v - (content['montant'] as int), ifAbsent: () => -(content['montant'] as int));
         case 'ouverture_session':
-          final cash = (await v2.entities('moyen_paiement')).values.where((m) => m['especes'] == true).map((m) => m['code'] as String).firstOrNull ?? 'especes';
           expected.update(cash, (v) => v + (content['fond'] as int), ifAbsent: () => content['fond'] as int);
           return expected;
         case 'cloture_session':
@@ -1014,6 +1134,11 @@ class V2Engine extends CaisseEngine {
     final barcodes = await v2.entities('code_barre');
     final stock = await v2.entities('stock.projection');
     final policies = {for (final p in (await v2.entities('politique')).values) p['cle_politique'] as String: p['valeur']};
+    _returnRules = (
+      mode: policies['retours.mode'] as String? ?? 'en_ligne',
+      max: policies['retours.max_montant'] as int? ?? 0,
+      days: policies['retours.delai_jours'] as int? ?? 0,
+    );
     final ids = await v2.localIds([...products.keys, ...packagings.keys]);
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];

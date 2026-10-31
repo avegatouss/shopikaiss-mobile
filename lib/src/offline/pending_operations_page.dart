@@ -7,12 +7,15 @@ import 'money.dart';
 /// Journal des opérations hors ligne du terminal : en attente d'envoi, transmises (intégrées ou à arbitrer par la
 /// boutique), refusées. Les opérations transmises restent visibles 30 jours.
 class PendingOperationsPage extends StatefulWidget {
-  const PendingOperationsPage({super.key, required this.engine, this.onReprint});
+  const PendingOperationsPage({super.key, required this.engine, this.onReprint, this.onReturn});
 
   final CaisseEngine engine;
 
   /// Réimpression d'un ticket de vente (caisse hors ligne) ; absent depuis les réglages.
   final Future<void> Function(OfflineOperation operation)? onReprint;
+
+  /// Retour en espèces d'une vente ; absent si les retours hors ligne sont fermés.
+  final Future<void> Function(OfflineOperation operation)? onReturn;
 
   @override
   State<PendingOperationsPage> createState() => _PendingOperationsPageState();
@@ -74,6 +77,7 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
                 title: Text(switch (o.type) {
                   'vente' => 'Vente ${o.number}',
                   'creation_client' => 'Nouveau client : ${o.content['nom']}',
+                  'retour' => 'Retour (${formatFcfa((o.content['montant'] as num?)?.toInt() ?? 0)} rendus)',
                   'cloture_session' => 'Clôture de session (compté ${formatFcfa((o.content['compte'] as num?)?.toInt() ?? 0)})',
                   _ => 'Ouverture de session (fond ${formatFcfa((o.content['fond'] as num?)?.toInt() ?? 0)})',
                 }),
@@ -89,6 +93,15 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
                           Text(formatFcfa(o.total), style: const TextStyle(fontWeight: FontWeight.w600)),
                           if (widget.onReprint != null)
                             IconButton(tooltip: 'Réimprimer le ticket', icon: const Icon(Icons.print), onPressed: () => widget.onReprint!(o)),
+                          if (widget.onReturn != null)
+                            IconButton(
+                              tooltip: 'Retour',
+                              icon: const Icon(Icons.assignment_return),
+                              onPressed: () async {
+                                await widget.onReturn!(o);
+                                if (mounted) setState(() => _operations = widget.engine.history());
+                              },
+                            ),
                         ],
                       ),
               );

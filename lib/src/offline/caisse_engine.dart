@@ -178,6 +178,19 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// Retours hors ligne ouverts à [operator] : fermés par défaut (capacité `retour.especes`, `retours.mode`, droits).
+  bool returnsOpen(Operator operator) => false;
+
+  /// Lignes encore retournables d'une vente émise par ce terminal ; refus si le terminal ne peut pas chiffrer son retour.
+  Future<List<ReturnableLine>> returnableLines(String saleUuid) => throw const OfflineRefusal('Retours non disponibles sur ce terminal.');
+
+  /// Montant à rendre pour ces quantités ([quantities] : `ligne_uuid` → millionièmes de l'unité de base).
+  Future<int> returnAmount(String saleUuid, Map<String, int> quantities) => throw const OfflineRefusal('Retours non disponibles sur ce terminal.');
+
+  /// Enregistre le retour en espèces. Tout écart avec le serveur part en arbitrage, sans remboursement écrit.
+  Future<OfflineOperation> recordReturn(Operator operator, String saleUuid, Map<String, int> quantities, String reason, {String? operationUuid}) =>
+      throw const OfflineRefusal('Retours non disponibles sur ce terminal.');
+
   /// Paniers partagés avec le web et les autres terminaux (contrat 2.1, capacité `panier.partage`).
   bool get sharedCartsSupported => false;
 

@@ -34,6 +34,9 @@ class AdapterFailure implements Exception {
 /// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
 /// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, reprint, synchronize.
 ///
+/// Retours (contrat 2.1, fermés par défaut) : returnableSale {sale_id}, previewReturn {sale_id, lines: [{line_id, quantity}]},
+/// commitReturn {sale_id, lines, reason} avec un identifiant d'opération facultatif. Quantités en unité de base.
+///
 /// Paniers partagés (contrat 2.1) : suspendDraft {label} publie le panier si le caissier est identifié ; drafts donne aussi
 /// `shared` [{shared_id, label, lines_count, taken_elsewhere}] ; resumeShared {shared_id} (réseau requis), deleteShared {shared_id}.
 ///
@@ -120,6 +123,12 @@ class LocalRegisterAdapter {
         _operator = null;
         _emit('caissier');
         return _status();
+      case 'returnableSale':
+        return _returnable(_text(args, 'sale_id', max: 36));
+      case 'previewReturn':
+        return _previewReturn(args);
+      case 'commitReturn':
+        return _commitReturn(args, operationId);
       case 'closeSession':
         return _closeSession(args, operationId);
       case 'openSession':
@@ -257,6 +266,7 @@ class LocalRegisterAdapter {
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
       'close_session': cap(_operator == null ? 'Identifiez le caissier.' : (engine.canCloseSession(_operator!) ? null : 'Clôture non autorisée sur ce terminal.')),
+      'returns': cap(_operator != null && engine.returnsOpen(_operator!) ? null : 'Retours hors ligne non autorisés sur ce terminal.'),
       'shared_carts': cap(engine.sharedCartsSupported ? null : 'Paniers partagés non disponibles sur ce terminal.'),
       'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
       'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
@@ -543,6 +553,50 @@ class LocalRegisterAdapter {
     _operator = operator;
     _emit('caissier');
     return _status();
+  }
+
+  Map<String, int> _returnQuantities(Map<String, dynamic> args) {
+    final quantities = <String, int>{};
+    for (final raw in (args['lines'] as List? ?? const []).cast<Map>()) {
+      final line = raw.cast<String, dynamic>();
+      final quantity = parseMicros(_text(line, 'quantity', max: 32));
+      if (quantity == null) throw const AdapterFailure('retour_refuse', 'Quantité invalide.');
+      quantities[_text(line, 'line_id', max: 36)] = quantity.toInt();
+    }
+    return quantities;
+  }
+
+  Future<Map<String, dynamic>> _returnable(String saleId) async {
+    try {
+      return {
+        'lines': [
+          for (final l in await engine.returnableLines(saleId)) {'line_id': l.lineUuid, 'label': l.label, 'remaining': formatMicros(BigInt.from(l.remaining))},
+        ],
+      };
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('retour_refuse', e.message);
+    }
+  }
+
+  Future<Map<String, dynamic>> _previewReturn(Map<String, dynamic> args) async {
+    try {
+      final amount = await engine.returnAmount(_text(args, 'sale_id', max: 36), _returnQuantities(args));
+      return {'amount': amount, 'amount_label': formatFcfa(amount)};
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('retour_refuse', e.message);
+    }
+  }
+
+  Future<Map<String, dynamic>> _commitReturn(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant un retour.');
+    try {
+      final operation = await engine.recordReturn(operator, _text(args, 'sale_id', max: 36), _returnQuantities(args), _text(args, 'reason', max: 500), operationUuid: operationId);
+      _emit('retour');
+      return {'operation_id': operation.uuid, 'amount': operation.content['montant'], 'amount_label': formatFcfa(operation.content['montant'] as int)};
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('retour_refuse', e.message);
+    }
   }
 
   /// Clôture de la session par le caissier identifié, comptée à l'aveugle ; le Z arrive du serveur.

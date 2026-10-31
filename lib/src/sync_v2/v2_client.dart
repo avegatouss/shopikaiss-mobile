@@ -104,6 +104,9 @@ class CaisseV2Client {
   /// Paniers partagés (2.1, lot 4).
   static const sharedCartCapability = 'panier.partage';
 
+  /// Retours limités en espèces (2.1, lot 5).
+  static const returnCapability = 'retour.especes';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;

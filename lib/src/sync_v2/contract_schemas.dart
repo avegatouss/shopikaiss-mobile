@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 4) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 5) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -1777,6 +1777,9 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/panier_supprimer"
+        },
+        {
+            "$ref": "#/$defs/retour"
         }
     ],
     "$defs": {
@@ -2731,6 +2734,117 @@ const contractV2Schemas = <String, String>{
                 }
             },
             "description": "Suppression d'un panier en attente ou repris par ce terminal (capacité panier.partage)."
+        },
+        "retour": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "retour"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "vente_ref",
+                        "lignes",
+                        "montant",
+                        "remboursement",
+                        "motif",
+                        "mouvements"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "vente_ref": {
+                            "type": "object",
+                            "required": [
+                                "operation_uuid"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "operation_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            }
+                        },
+                        "lignes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "ligne_uuid",
+                                    "quantite"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "ligne_uuid": {
+                                        "$ref": "commun.json#/$defs/uuid",
+                                        "description": "ligne_uuid de la vente."
+                                    },
+                                    "quantite": {
+                                        "type": "string",
+                                        "description": "En unité de base (quantite_base de la vente)."
+                                    }
+                                }
+                            }
+                        },
+                        "montant": {
+                            "$ref": "commun.json#/$defs/montant",
+                            "description": "Par parts archivées (référentiel §3.13) ; différent du calcul serveur : a_arbitrer."
+                        },
+                        "remboursement": {
+                            "const": "especes"
+                        },
+                        "motif": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                        },
+                        "mouvements": {
+                            "type": "array",
+                            "maxItems": 400,
+                            "items": {
+                                "$ref": "#/$defs/mouvement"
+                            },
+                            "description": "Variations positives."
+                        }
+                    }
+                }
+            },
+            "description": "Retour hors ligne limité (REVISION-2.1 §3.4, capacité retour.especes, politique retours.mode = especes) : espèces, vente émise par ce terminal."
         }
     }
 }

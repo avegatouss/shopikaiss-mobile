@@ -93,7 +93,7 @@
             "erreur_attendue": "format invalide"
         },
         {
-            "fichier": "invalides/operation--type-reserve-retour.json",
+            "fichier": "invalides/operation--type-reserve-avoir.json",
             "schema": "operation.json",
             "valide": false,
             "erreur_attendue": "exactement une variante"
@@ -295,6 +295,11 @@
         },
         {
             "fichier": "valides/operation--panier-suspendre.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--retour.json",
             "schema": "operation.json",
             "valide": true
         }

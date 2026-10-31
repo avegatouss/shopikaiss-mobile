@@ -215,6 +215,15 @@ class Customer {
   final bool pending;
 }
 
+/// Ligne d'une vente du terminal encore retournable ; quantités en unité de base, en millionièmes.
+class ReturnableLine {
+  const ReturnableLine({required this.lineUuid, required this.label, required this.remaining});
+
+  final String lineUuid;
+  final String label;
+  final int remaining;
+}
+
 /// Panier partagé lié au panier courant ; [claimed] = reprise exclusive obtenue du serveur.
 class SharedCartRef {
   const SharedCartRef(this.uuid, {this.claimed = false});

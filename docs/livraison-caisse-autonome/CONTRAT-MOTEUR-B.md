@@ -221,3 +221,12 @@ Capacité `panier.partage`, instantané unique à la première obtention. Un pan
 - Reprise d'un panier publié : réseau requis, renouvelée à chaque synchronisation, libérée si le panier est vidé. Prix figés conservés (`prix_fige`) et repris dans la vente avec `panier_uuid`.
 - Suspendre de nouveau : nouvel uuid. Repris : `remplace_uuid`. Non repris : `panier_supprimer` d'abord.
 - Un panier local intégré puis absent du journal (vendu ou supprimé ailleurs) quitte la liste. `remise_saisie` en % n'est pas conservée après reprise.
+
+## Retours limités (2.1, lot 5)
+
+Fermés par défaut : capacité `retour.especes`, `retours.mode` = `especes`, fonction `retour` absente de `fonctions_restreintes`, droits `retour_creer` et `retour_rembourser_especes`, session ouverte. Ventes de ce terminal seulement, dans `retours.delai_jours`, jusqu'à `retours.max_montant`.
+
+- Adaptateur : `returnableSale` {sale_id}, `previewReturn` {sale_id, lines: [{line_id, quantity}]}, `commitReturn` {sale_id, lines, reason}. Capacité `returns`. Erreur `retour_refuse`. Quantités en unité de base.
+- Montant selon §3.13 : part = arrondi(net × total_ligne / brut), demi vers le haut ; rendu = arrondi(part × (avant + q) / Q) − arrondi(part × avant / Q).
+- Si les parts ne totalisent pas le net, le montant dépend de `return_residual`, non publié : le terminal refuse et renvoie en ligne.
+- Limites : un retour fait en ligne sur la même vente n'est pas vu du terminal (écart `a_arbitrer`) ; produit à lots non détecté (`a_arbitrer`) ; aucun bon de retour imprimé ; tiroir ouvert si une imprimante est branchée.

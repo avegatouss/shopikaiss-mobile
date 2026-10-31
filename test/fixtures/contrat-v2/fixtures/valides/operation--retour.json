@@ -1,0 +1,39 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000007",
+    "type": "retour",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 45,
+    "cree_le": "2026-10-29T08:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "vente_ref": {
+            "operation_uuid": "a0000000-0000-4000-8000-000000000001"
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "e0000000-0000-4000-8000-000000000001",
+                "quantite": "1.000000"
+            }
+        ],
+        "montant": 1000,
+        "remboursement": "especes",
+        "motif": "Article défectueux",
+        "mouvements": [
+            {
+                "mouvement_uuid": "f0000000-0000-4000-8000-000000000001",
+                "produit_uuid": "11111111-1111-4111-8111-111111111111",
+                "lot_uuid": null,
+                "variation": "1.000000"
+            }
+        ]
+    },
+    "empreinte": "b95171d40287bf2baea9dc19ba5038a184479650d084cc2c1310215c1992b0b3"
+}

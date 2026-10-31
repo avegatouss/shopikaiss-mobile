@@ -1498,10 +1498,97 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _searchFocus.requestFocus();
   }
 
+  /// Retour en espèces d'une vente de ce terminal : quantités par ligne, montant calculé, motif obligatoire.
+  Future<void> _startReturn(OfflineOperation sale) async {
+    final operator = _operator!;
+    final List<ReturnableLine> lines;
+    try {
+      lines = await _engine.returnableLines(sale.uuid);
+    } on OfflineRefusal catch (e) {
+      return _toast(e.message);
+    }
+    if (!mounted) return;
+    if (lines.isEmpty) return _toast('Tout a déjà été retourné sur cette vente.');
+    final fields = {for (final l in lines) l.lineUuid: TextEditingController()};
+    final reason = TextEditingController();
+    int? amount;
+    String? error;
+    Map<String, int>? quantities() {
+      final result = <String, int>{};
+      for (final e in fields.entries) {
+        if (e.value.text.trim().isEmpty) continue;
+        final q = parseMicros(e.value.text.trim());
+        if (q == null) return null;
+        result[e.key] = q.toInt();
+      }
+      return result;
+    }
+
+    final done = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: Text('Retour : vente ${sale.number}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final l in lines)
+                  TextField(
+                    controller: fields[l.lineUuid],
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(labelText: l.label, helperText: 'Quantité, ${formatMicros(BigInt.from(l.remaining))} au plus'),
+                    onChanged: (_) async {
+                      final wanted = quantities();
+                      try {
+                        final value = wanted == null || wanted.isEmpty ? null : await _engine.returnAmount(sale.uuid, wanted);
+                        setLocal(() => (amount, error) = (value, wanted == null ? 'Quantité invalide.' : null));
+                      } on OfflineRefusal catch (e) {
+                        setLocal(() => (amount, error) = (null, e.message));
+                      }
+                    },
+                  ),
+                TextField(controller: reason, maxLength: 500, decoration: InputDecoration(labelText: 'Motif du retour', errorText: error, errorMaxLines: 3)),
+                Text('À rendre en espèces : ${amount == null ? '—' : formatFcfa(amount!)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                final wanted = quantities();
+                if (wanted == null) return setLocal(() => error = 'Quantité invalide.');
+                try {
+                  await _engine.recordReturn(operator, sale.uuid, wanted, reason.text);
+                  if (context.mounted) Navigator.pop(context, true);
+                } on OfflineRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Rembourser'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (done == true) {
+      if (widget.session.hasPrinter) await widget.session.channel.openDrawer();
+      _changed();
+      _toast('Retour enregistré. Rendez le montant en espèces.');
+    }
+  }
+
   void _openJournal() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PendingOperationsPage(engine: _engine, onReprint: _reprint),
+        builder: (_) => PendingOperationsPage(
+          engine: _engine,
+          onReprint: _reprint,
+          onReturn: _operator != null && _engine.returnsOpen(_operator!) ? _startReturn : null,
+        ),
       ),
     );
   }

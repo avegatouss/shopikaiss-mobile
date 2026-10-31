@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
+import 'package:shopikaiss_terminal/src/offline/web_rules.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
@@ -714,12 +715,14 @@ void main() {
     await e.sync();
     expect(server.taken.length, 2, reason: 'reprise renouvelée à la synchronisation');
 
-    await e.openSession(0, closer).then<void>((_) {}, onError: (Object _) {});
-    if (e.sessionOpen) {
-      final frozen = await e.recordSale(held.lines, [CartPayment(method: cashMethod, amount: 900, received: 900)], closer, extras: const SaleExtras(sharedCart: webCart));
-      final frozenContent = (await e.v2.operation(frozen.uuid))!['operation']['contenu'] as Map;
-      expect([(frozenContent['lignes'] as List).single['prix_unitaire'], frozenContent['panier_uuid']], [450, webCart]);
-    }
+    // Vente au prix figé : la clôture en arbitrage est d'abord résolue, la session du serveur reste ouverte.
+    final stuck = (await e.lastClosure())!.uuid;
+    server.received[stuck]!..['etat'] = 'resolue'..['version'] = 2;
+    await e.sync();
+    expect(e.sessionOpen, isTrue);
+    final frozen = await e.recordSale(held.lines, [CartPayment(method: cashMethod, amount: 900, received: 900)], closer, extras: const SaleExtras(sharedCart: webCart));
+    final frozenContent = (await e.v2.operation(frozen.uuid))!['operation']['contenu'] as Map;
+    expect([(frozenContent['lignes'] as List).single['prix_unitaire'], frozenContent['panier_uuid']], [450, webCart]);
     // Suspendu de nouveau : nouvel uuid, remplace l'ancien repris ; non repris : suppression explicite d'abord.
     final replaced = await e.suspendShared(closer, held.lines, const SaleExtras(), previous: held.ref);
     expect(replaced.uuid, isNot(webCart));
@@ -733,6 +736,57 @@ void main() {
 
     await e.sync();
     expect(await e.sharedCartState(again.uuid), 'disparu', reason: 'intégré et absent du journal : vendu ou supprimé ailleurs');
+
+    // Lot 5 : retours fermés par défaut ; ouverts par la capacité, la politique et les droits.
+    expect(e.returnsOpen(closer), isFalse);
+    await expectLater(e.recordReturn(closer, frozen.uuid, const {}, 'x'), refused('non autorisé'));
+    Map<String, dynamic> politique(String cle, Object valeur) => {
+      'type': 'politique', 'critique': false, 'cle': cle, 'revision': '3', 'action': 'upsert',
+      'donnees': {'cle_politique': cle, 'valeur': valeur, 'source': 'boutique', 'verrouillee': false},
+    };
+    server.capabilities = [...server.capabilities, 'retour.especes'];
+    server.publish([
+      politique('retours.mode', 'especes'),
+      politique('retours.max_montant', 500),
+      politique('retours.delai_jours', 1),
+      {'type': 'operateur', 'critique': true, 'cle': 'operateur:7', 'revision': '5', 'action': 'upsert',
+       'donnees': operateur21('7', 'Awa', 'empreinte', ['caisse_cloturer', 'clients_creer', 'ouverture_session', 'remise', 'retour_creer', 'retour_rembourser_especes', 'vente'], '5.000000', 40)},
+    ]);
+    await e.sync();
+    expect(e.blockReason, isNull);
+    final refunder = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.returnsOpen(refunder), isTrue);
+    final line = (await e.returnableLines(frozen.uuid)).single;
+    expect(line.remaining, 2000000);
+    expect(await e.returnAmount(frozen.uuid, {line.lineUuid: 1000000}), 450);
+    await expectLater(e.recordReturn(refunder, frozen.uuid, {line.lineUuid: 1000000}, '  '), refused('motif'));
+    await expectLater(e.recordReturn(refunder, frozen.uuid, {line.lineUuid: 2000000}, 'Abîmé'), refused('limité'));
+    await expectLater(e.returnAmount(frozen.uuid, {line.lineUuid: 3000000}), refused('dépasse'));
+    final stockBefore = (await e.soldSinceSnapshot()).values.fold<BigInt>(BigInt.zero, (a, b) => a + b);
+    final refund = await e.recordReturn(refunder, frozen.uuid, {line.lineUuid: 1000000}, 'Abîmé');
+    final refundContent = (await e.v2.operation(refund.uuid))!['operation']['contenu'] as Map;
+    expect(refundContent['montant'], 450);
+    expect((refundContent['mouvements'] as List).single['variation'], '1.000000');
+    expect((await e.soldSinceSnapshot()).values.fold<BigInt>(BigInt.zero, (a, b) => a + b), stockBefore - BigInt.from(1000000), reason: 'stock remis localement');
+    expect((await e.returnableLines(frozen.uuid)).single.remaining, 1000000);
+    final viaAdapter = await adapter.execute('previewReturn', {'sale_id': frozen.uuid, 'lines': [{'line_id': line.lineUuid, 'quantity': '1'}]}, null);
+    expect(viaAdapter['amount'], 450);
+
+    // Parts qui ne tombent pas juste (remise globale répartie sur deux lignes) : la règle de reste n'est pas publiée, le terminal ne rend rien.
+    server.publish([politique('remises.globale_max_pourcent', 50)]);
+    await e.sync();
+    final emballage = e.snapshot!.products.firstWhere((p) => p.name == 'Emballage');
+    final split = await e.recordSale(
+      [CartLine(product: emballage), CartLine(product: emballage)],
+      [CartPayment(method: cashMethod, amount: 199, received: 199)],
+      refunder,
+      extras: const SaleExtras(globalDiscount: 1),
+    );
+    await expectLater(e.returnableLines(split.uuid), refused('faites-le en ligne'));
+    // Arrondi demi vers le haut, cumul par ligne : 333 + 334 + 333.
+    expect(archivedShare(100, 33, 99), 33);
+    expect(archivedShare(1000, 1, 3), 333);
+    expect(returnedAmount(1000, 1000000, 1000000, 3000000), 334);
     await adapter.close();
   });
 

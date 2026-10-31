@@ -56,6 +56,17 @@ int enteredDiscount({required String type, required String value, required int b
   return amount;
 }
 
+BigInt _halfUp(BigInt numerator, BigInt denominator) => (numerator * BigInt.two + denominator) ~/ (denominator * BigInt.two);
+
+/// Part archivée d'une ligne : `arrondi(net × total_ligne / brut)`, demi vers le haut (référentiel §3.13).
+int archivedShare(int net, int lineTotal, int gross) => gross == 0 ? 0 : _halfUp(BigInt.from(net) * BigInt.from(lineTotal), BigInt.from(gross)).toInt();
+
+/// Montant rendu pour [quantity] après [before] déjà retournés sur une ligne de quantité [sold], en millionièmes.
+int returnedAmount(int share, int before, int quantity, int sold) {
+  int cumulated(int q) => _halfUp(BigInt.from(share) * BigInt.from(q), BigInt.from(sold)).toInt();
+  return cumulated(before + quantity) - cumulated(before);
+}
+
 /// Téléphone au format E.164, indicatif 225 par défaut, ou null s'il est illisible (`ClientsCaisse::telephone` du serveur).
 String? normalizePhone(String? entered) {
   final text = (entered ?? '').trim();
