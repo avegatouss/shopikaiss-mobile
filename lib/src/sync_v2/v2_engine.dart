@@ -549,8 +549,9 @@ class V2Engine extends CaisseEngine {
     if (!sharedCartsSupported) return const [];
     final me = _device['terminal_uuid'];
     final carts = <SharedCart>[];
+    final deleted = await v2.deletedCarts();
     for (final e in (await v2.entities('panier')).entries) {
-      if (!(e.value['terminaux'] as List).contains(me)) continue;
+      if (!(e.value['terminaux'] as List).contains(me) || deleted.contains(e.key)) continue;
       final taken = e.value['repris_par'] as Map?;
       carts.add(SharedCart(
         uuid: e.key,
@@ -563,10 +564,18 @@ class V2Engine extends CaisseEngine {
     return carts..sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
   }
 
+  static const _sharedCartPublication = Duration(minutes: 10);
+
   @override
   Future<String> sharedCartState(String uuid) async {
     if ((await v2.entities('panier')).containsKey(uuid)) return 'publie';
-    return (await v2.operation(uuid))?['etat'] == V2OperationState.integrated ? 'disparu' : 'local';
+    final row = await v2.operation(uuid);
+    if (row?['etat'] != V2OperationState.integrated) return 'local';
+    if (await v2.entityDeleted('panier', uuid)) return 'disparu';
+    // Intégré, pas encore revenu par le journal : observé sur la démo juste après l'envoi. Passé ce délai, sans suppression
+    // reçue (instantané intermédiaire), il a été vendu ou supprimé ailleurs.
+    final integrated = DateTime.tryParse('${row!['maj_le']}');
+    return integrated != null && now.difference(integrated) < _sharedCartPublication ? 'local' : 'disparu';
   }
 
   @override

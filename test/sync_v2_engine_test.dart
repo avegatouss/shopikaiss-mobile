@@ -705,6 +705,13 @@ void main() {
     expect(e.blockReason, isNull);
     expect(server.snapshotReasons.skip(before4), ['reparation']);
     expect((await e.sharedCarts()).map((c) => c.uuid), [webCart]);
+    // Suppression demandée ici : retiré de la liste aussitôt, même si le journal ne l'a pas encore confirmée.
+    const gone = '0e000000-0000-4000-8000-000000000002';
+    server.publish([{'type': 'panier', 'critique': false, 'cle': gone, 'revision': '9', 'action': 'upsert', 'donnees': panier([fakeTerminal])}]);
+    await e.sync();
+    expect((await e.sharedCarts()).map((c) => c.uuid), contains(gone));
+    await e.deleteSharedCart(e.snapshot!.operators.first, gone);
+    expect((await e.sharedCarts()).map((c) => c.uuid), isNot(contains(gone)));
 
     // Reprise : prix figé du panier, conservé dans la vente, panier consommé.
     server.takenElsewhere.add(webCart);
@@ -735,7 +742,9 @@ void main() {
     expect(await e.sharedCartState(again.uuid), 'local');
 
     await e.sync();
-    expect(await e.sharedCartState(again.uuid), 'disparu', reason: 'intégré et absent du journal : vendu ou supprimé ailleurs');
+    expect(await e.sharedCartState(again.uuid), 'local', reason: 'intégré, pas encore revenu par le journal : la copie locale reste');
+    await e.v2.db.update('v2_operations', {'maj_le': '2020-01-01T00:00:00Z'}, where: 'uuid = ?', whereArgs: [again.uuid]);
+    expect(await e.sharedCartState(again.uuid), 'disparu', reason: 'toujours absent après le délai : vendu ou supprimé ailleurs');
 
     // Lot 5 : retours fermés par défaut ; ouverts par la capacité, la politique et les droits.
     expect(e.returnsOpen(closer), isFalse);
