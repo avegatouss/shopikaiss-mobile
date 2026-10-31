@@ -51,6 +51,9 @@ class _CaissePageState extends State<CaissePage> {
   /// Terminal pilote revenu volontairement à la caisse web : la caisse locale ne se rouvre pas d'elle-même.
   bool _stayOnWeb = false;
 
+  /// Chemin du site demandé depuis la caisse locale ; null : la caisse web.
+  String? _sitePath;
+
   TerminalSession get _session => widget.session;
   AppSettings get _settings => _session.settings;
   CaisseEngine get _offline => _session.offline;
@@ -117,6 +120,11 @@ class _CaissePageState extends State<CaissePage> {
         engine: _offline,
         session: _session,
         onBackOnline: () => Navigator.of(context).pop(),
+        onOpenSettings: _openSettings,
+        onOpenSite: (path) {
+          _sitePath = path;
+          Navigator.of(context).pop();
+        },
       ),
     ));
     _offlineShown = false;
@@ -241,7 +249,7 @@ class _CaissePageState extends State<CaissePage> {
                   onOffline: _offline.paired && _offline.snapshot != null ? _openOffline : null,
                   offlineBlocked: _offline.paired ? _offline.blockReason : null,
                 ),
-              // Accès aux réglages : 5 touchers en 3 s dans le coin haut gauche.
+              // Accès aux réglages : 5 touchers en 3 s sur le logo de la page, dans le coin haut gauche.
               Positioned(
                 left: 0,
                 top: 0,
@@ -249,6 +257,30 @@ class _CaissePageState extends State<CaissePage> {
                 height: 56,
                 child: GestureDetector(behavior: HitTestBehavior.translucent, onTap: _onCornerTap),
               ),
+              // Retour à la caisse locale d'un terminal en vente locale permanente.
+              if (_offline.permanentLocal && _offline.blockReason == null)
+                Positioned(
+                  left: 104,
+                  bottom: 8,
+                  child: Opacity(
+                    opacity: 0.75,
+                    child: Material(
+                      color: Colors.white,
+                      shape: const CircleBorder(side: BorderSide(color: Color(0xFF0F3E2E))),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: () {
+                          _stayOnWeb = false;
+                          unawaited(_openOffline());
+                        },
+                        child: const Tooltip(
+                          message: 'Revenir à la caisse',
+                          child: SizedBox.square(dimension: 40, child: Icon(Icons.point_of_sale, size: 22, color: Color(0xFF0F3E2E))),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               // Afficheur client : rafraîchi d'un toucher (page en 404, affichage figé).
               if (_session.info.hasSecondaryDisplay)
                 Positioned(
@@ -449,7 +481,9 @@ class _CaissePageState extends State<CaissePage> {
 
   void _reload() {
     setState(() => _error = null);
-    _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(_settings.shopUrl)));
+    final path = _sitePath;
+    _sitePath = null;
+    _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(path == null ? _settings.shopUrl : '${_settings.origin}$path')));
   }
 
   void _onCornerTap() {
@@ -471,7 +505,8 @@ class _CaissePageState extends State<CaissePage> {
       if (!mounted) return;
       await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => SettingsPage(session: _session)));
     } finally {
-      await _applyKeyboardBlock();
+      // La caisse locale a besoin du clavier de l'écran : le blocage ne vaut que pour la page web.
+      if (!_offlineShown) await _applyKeyboardBlock();
     }
     if (!mounted) return;
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);

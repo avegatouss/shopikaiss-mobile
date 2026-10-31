@@ -72,4 +72,16 @@ void main() {
     expect(exceedsPercent(1544, 15400, ten), isTrue);
     expect(exceedsPercent(1540, 15400, ten), isFalse);
   });
+
+  test('stock : demande convertie, alertes de la caisse web, plage horaire', () {
+    final u = BigInt.from(1000000);
+    expect(baseQuantity(u * BigInt.two, '12.000000'), u * BigInt.from(24));
+    expect(stockAlert(u * BigInt.from(10), u * BigInt.from(2), null, null), isNull);
+    expect(stockAlert(u * BigInt.from(10), u * BigInt.from(8), u * BigInt.from(3), null)!.message, 'Stock faible : il restera 2 après cette vente (seuil 3). Vente possible.');
+    expect(stockAlert(u, u * BigInt.from(4), null, 'refuser')!.message, contains('refus strict'));
+    expect(stockAlert(-u, u, null, 'autoriser_avec_droit')!.message, startsWith('Stock insuffisant : 0 pour une demande de 1.'));
+    expect(validTimeWindow('22:00', '06:00'), isTrue);
+    expect(validTimeWindow('22:00', '22:00'), isFalse);
+    expect(validTimeWindow('24:00', '06:00'), isFalse);
+  });
 }

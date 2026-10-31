@@ -222,3 +222,34 @@ CashLine cashLine(int amount, {({int step, String mode})? rounding, int? receive
   if (paid < due) throw const WebRuleRefusal('Le montant reçu est inférieur au montant à régler.');
   return CashLine(amount: amount, roundingGap: due - amount, received: paid);
 }
+
+/// Quantité en unité de base (millionièmes) d'une ligne, conditionnement converti.
+BigInt baseQuantity(BigInt quantity, String? coefficient) {
+  final million = BigInt.from(1000000);
+  return quantity * (parseMicros(coefficient ?? '1') ?? million) ~/ million;
+}
+
+/// Alerte indicative de la caisse web (F60) pour [demand] sur un stock estimé à [estimated] : le stock est partagé entre
+/// terminaux, elle n'empêche pas l'encaissement. [policy] : `refuser`, `autoriser_avec_droit`, ou null si non publiée.
+({String level, String message})? stockAlert(BigInt estimated, BigInt demand, BigInt? threshold, String? policy) {
+  final remaining = estimated - demand;
+  if (remaining.isNegative) {
+    final available = estimated.isNegative ? BigInt.zero : estimated;
+    final rule = switch (policy) {
+      'refuser' => ' La boutique refuse la survente (refus strict) : réduisez la quantité.',
+      'autoriser_avec_droit' => ' Survente possible seulement avec l’autorisation d’un responsable (code et motif).',
+      _ => '',
+    };
+    return (level: 'short', message: 'Stock insuffisant : ${formatMicros(available)} pour une demande de ${formatMicros(demand)}.$rule');
+  }
+  if (threshold != null && remaining > BigInt.zero && remaining <= threshold) {
+    return (level: 'low', message: 'Stock faible : il restera ${formatMicros(remaining)} après cette vente (seuil ${formatMicros(threshold)}). Vente possible.');
+  }
+  return null;
+}
+
+/// Plage horaire `HH:MM` valide : deux heures différentes, le passage de minuit est permis.
+bool validTimeWindow(Object? start, Object? end) {
+  final time = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
+  return start is String && end is String && time.hasMatch(start) && time.hasMatch(end) && start != end;
+}

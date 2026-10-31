@@ -361,6 +361,56 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    for (final (name, inches, size) in const [('petit téléphone', 4.0, Size(320, 568)), ('tablette', 8.0, Size(1280, 800))]) {
+      testWidgets('menu de caisse sur $name : calculatrice exacte et affichage compact, sans débordement', (tester) async {
+        final session = await _session(inches: inches, approver: true);
+        await _pump(tester, size, session);
+        await tester.tap(find.byType(PopupMenuButton<String>));
+        await tester.pumpAndSettle();
+        expect(find.text('Ventes et retours'), findsOneWidget);
+        await tester.tap(find.text('Calculatrice'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.widgetWithText(TextField, 'Calcul'), '0,1+0,2');
+        await tester.ensureVisible(find.text('='));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('='));
+        await tester.pumpAndSettle();
+        expect(find.text('0,3').evaluate().isNotEmpty || find.text('0.3').evaluate().isNotEmpty, isTrue);
+        await tester.tap(find.text('Fermer'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byType(PopupMenuButton<String>));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Affichage compact'));
+        await tester.pumpAndSettle();
+        expect(find.byType(ListView), findsWidgets);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('logo : 5 touchers ouvrent les réglages, 4 ne les ouvrent pas ; personnalisation appliquée', (tester) async {
+      final session = await _session(inches: 4.0, approver: true);
+      var opened = 0;
+      tester.view.physicalSize = const Size(640, 1136);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.reset);
+      session.settings
+        ..brandColor = 0xFF1D4ED8
+        ..imageMode = 'hidden'
+        ..catalogList = true;
+      await tester.pumpWidget(MaterialApp(theme: ThemeData(fontFamily: 'Roboto'), home: OfflineRegisterPage(engine: session.offline, session: session, onBackOnline: () {}, onOpenSettings: () async => opened++)));
+      await tester.pumpAndSettle();
+      final logo = find.byKey(const ValueKey('register-logo'));
+      for (var i = 0; i < 4; i++) {
+        await tester.tap(logo);
+      }
+      await tester.pump();
+      expect(opened, 0);
+      await tester.tap(logo);
+      await tester.pumpAndSettle();
+      expect(opened, 1);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('clôture à l’aveugle sur petit téléphone : refus affiché, aucun attendu, aucun débordement', (tester) async {
       final session = await _session(inches: 4.0, approver: true);
       await _pump(tester, const Size(320, 568), session);

@@ -5,8 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:uuid/uuid.dart';
 
+import '../app_settings.dart';
 import '../diagnostics.dart';
 import '../terminal/terminal_session.dart';
+import 'calculator.dart';
 import 'engine.dart';
 import 'models.dart';
 import 'money.dart';
@@ -14,18 +16,23 @@ import 'pending_operations_page.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
 
-const _brand = Color(0xFF0F3E2E);
 const _offline = Color(0xFFB45309);
 
 /// Caisse hors ligne : vente sur le dernier catalogue reçu, ticket imprimé, file envoyée au retour de la connexion.
 ///
 /// [onBackOnline] est appelé quand la boutique répond de nouveau et que la file est vide (retour à la caisse web).
 class OfflineRegisterPage extends StatefulWidget {
-  const OfflineRegisterPage({super.key, required this.engine, required this.session, required this.onBackOnline});
+  const OfflineRegisterPage({super.key, required this.engine, required this.session, required this.onBackOnline, this.onOpenSettings, this.onOpenSite});
 
   final CaisseEngine engine;
   final TerminalSession session;
   final VoidCallback onBackOnline;
+
+  /// Réglages de l'application (code administrateur compris).
+  final Future<void> Function()? onOpenSettings;
+
+  /// Ouvre ce chemin du site dans le navigateur de l'application.
+  final void Function(String path)? onOpenSite;
 
   @override
   State<OfflineRegisterPage> createState() => _OfflineRegisterPageState();
@@ -42,6 +49,49 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Operator? _operator;
   Timer? _probe;
   Map<int, BigInt> _sold = {};
+
+  AppSettings get _look => widget.session.settings;
+  Color get _brand => Color(_look.brandColor);
+  bool get _listView => _look.catalogList;
+  final _logoTaps = <DateTime>[];
+
+  /// Accès aux réglages : 5 touchers en 3 s sur le logo, comme sur la caisse web.
+  void _onLogoTap() {
+    final now = DateTime.now();
+    _logoTaps
+      ..add(now)
+      ..removeWhere((t) => now.difference(t) > const Duration(seconds: 3));
+    if (_logoTaps.length >= 5) {
+      _logoTaps.clear();
+      unawaited(_openSettings());
+    }
+  }
+
+  Future<void> _openSettings() async {
+    await widget.onOpenSettings?.call();
+    if (mounted) setState(() {});
+  }
+
+  /// Site de la boutique dans le navigateur de l'application : mêmes impressions et mêmes appareils que la caisse web.
+  Future<void> _openSite(String path) async {
+    if (_cart.isNotEmpty) {
+      _toast('Terminez ou videz ce panier avant d’ouvrir le site.');
+    } else if (!await _engine.probe()) {
+      _toast('La boutique ne répond pas : le site n’est pas disponible.');
+    } else {
+      widget.onOpenSite?.call(path);
+    }
+  }
+
+  Widget _logo({double size = 32}) => GestureDetector(
+    key: const ValueKey('register-logo'),
+    behavior: HitTestBehavior.opaque,
+    onTap: _onLogoTap,
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Image.asset('assets/marque/embleme.png', width: size, height: size, filterQuality: FilterQuality.medium, semanticLabel: 'ShopiKaiss'),
+    ),
+  );
   bool _probing = false;
   String? _lastSyncMessage;
 
@@ -807,10 +857,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         child: Row(
           children: [
             // Emblème ShopiKaiss (or sur noir, non transparent) : pastille noire, quelle que soit la couleur du bandeau.
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: Image.asset('assets/marque/embleme.png', width: 32, height: 32, filterQuality: FilterQuality.medium, semanticLabel: 'ShopiKaiss'),
-            ),
+            _logo(size: 32),
             const SizedBox(width: 8),
             Icon(_bannerIcon, color: Colors.white),
             const SizedBox(width: 8),
@@ -834,7 +881,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 icon: const Icon(Icons.person),
                 label: Text(_operator!.name),
               ),
-            IconButton(tooltip: 'Opérations hors ligne', color: Colors.white, onPressed: _openJournal, icon: const Icon(Icons.receipt_long)),
+            if (MediaQuery.sizeOf(context).width >= 900)
+              IconButton(tooltip: 'Ventes et retours', color: Colors.white, onPressed: _openJournal, icon: const Icon(Icons.receipt_long)),
             FilledButton.tonalIcon(
               onPressed: _engine.syncing ? null : () => _tryOnline(),
               icon: _engine.syncing
@@ -842,6 +890,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   : Icon(_engine.permanentLocal ? Icons.public : Icons.wifi_find),
               label: Text(_engine.permanentLocal ? 'Caisse web' : 'Reconnecter'),
             ),
+            _registerMenu(),
           ],
         ),
       ),
@@ -881,6 +930,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         padding: const EdgeInsets.only(left: 10),
         child: Row(
           children: [
+            _logo(size: 28),
+            const SizedBox(width: 6),
             Icon(_bannerIcon, color: Colors.white, size: 20),
             const SizedBox(width: 6),
             Expanded(
@@ -901,34 +952,108 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                   : Icon(_engine.permanentLocal ? Icons.public : Icons.wifi_find),
             ),
-            PopupMenuButton<String>(
-              iconColor: Colors.white,
-              onSelected: (choice) {
-                if (choice == 'journal') {
-                  _openJournal();
-                } else if (choice == 'caissier') {
-                  setState(() => _operator = null);
-                } else if (choice == 'cloture') {
-                  _closeSession();
-                }
-              },
-              itemBuilder: (context) => [
-                if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
-                const PopupMenuItem(value: 'journal', child: Text('Opérations hors ligne')),
-                if (_operator != null && _engine.canCloseSession(_operator!))
-                  PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
-                if (_operator != null)
-                  PopupMenuItem(
-                    value: 'caissier',
-                    enabled: _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true),
-                    child: Text('Changer de caissier (${_operator!.name})'),
-                  ),
+            _registerMenu(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _registerMenu() => PopupMenuButton<String>(
+    iconColor: Colors.white,
+    onSelected: (choice) {
+      if (choice == 'journal') {
+        _openJournal();
+      } else if (choice == 'caissier') {
+        setState(() => _operator = null);
+      } else if (choice == 'cloture') {
+        _closeSession();
+      } else if (choice == 'calculatrice') {
+        showDialog<void>(context: context, builder: (_) => const DeskCalculator());
+      } else if (choice == 'images') {
+        _editImageWindow();
+      } else if (choice == 'site') {
+        _openSite('/accueil');
+      } else if (choice == 'reglages') {
+        _openSettings();
+      } else if (choice == 'affichage') {
+        setState(() => _look.catalogList = !_look.catalogList);
+        unawaited(widget.session.save());
+      }
+    },
+    itemBuilder: (context) => [
+      if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
+      const PopupMenuItem(value: 'journal', child: Text('Ventes et retours')),
+      const PopupMenuItem(value: 'calculatrice', child: Text('Calculatrice')),
+      PopupMenuItem(value: 'affichage', child: Text(_listView ? 'Affichage en tuiles' : 'Affichage compact')),
+      if (widget.onOpenSite != null) const PopupMenuItem(value: 'site', child: Text('Site en ligne')),
+      if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
+      if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
+      if (_operator != null && _engine.canCloseSession(_operator!))
+        PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
+      if (_operator != null)
+        PopupMenuItem(
+          value: 'caissier',
+          enabled: _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true),
+          child: Text('Changer de caissier (${_operator!.name})'),
+        ),
+    ],
+  );
+
+  /// Plage de téléchargement des images de ce terminal ; une vente qui commence arrête le lot.
+  Future<void> _editImageWindow() async {
+    final counts = _engine.imageCounts();
+    final current = _engine.imageWindow;
+    final start = TextEditingController(text: current?.start ?? '22:00');
+    final end = TextEditingController(text: current?.end ?? '06:00');
+    var limited = current != null;
+    String? error;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: const Text('Horaires des images'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('${counts.cached} / ${counts.total} photos sur ce terminal'),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Limiter à une plage horaire'),
+                value: limited,
+                onChanged: (v) => setDialog(() => limited = v),
+              ),
+              if (limited) ...[
+                TextField(controller: start, keyboardType: TextInputType.datetime, decoration: const InputDecoration(labelText: 'Début · HH:MM')),
+                TextField(controller: end, keyboardType: TextInputType.datetime, decoration: InputDecoration(labelText: 'Fin · HH:MM', errorText: error)),
+                const SizedBox(height: 8),
+                const Text('Heure de ce téléphone. Une plage 22:00–06:00 passe minuit.', style: TextStyle(fontSize: 12)),
               ],
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                final first = start.text.trim();
+                final last = end.text.trim();
+                if (limited && !validTimeWindow(first, last)) {
+                  setDialog(() => error = 'Indiquez deux heures différentes, au format HH:MM.');
+                  return;
+                }
+                await _engine.setImageWindow(limited ? (start: first, end: last) : null);
+                if (context.mounted) Navigator.pop(context);
+              },
+              child: const Text('Enregistrer'),
             ),
           ],
         ),
       ),
     );
+    start.dispose();
+    end.dispose();
   }
 
   /// Petit téléphone : articles ou panier en plein écran, barre fixe avec le total et « Encaisser ».
@@ -964,7 +1089,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     fit: BoxFit.scaleDown,
                     child: Text(
                       formatFcfa(totals.payable),
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _brand),
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: _brand),
                     ),
                   ),
                 ),
@@ -993,7 +1118,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           return Row(
             children: [
               Expanded(flex: 3, child: catalogue),
-              SizedBox(width: 380, child: cart),
+              SizedBox(width: _look.cartWidth.toDouble(), child: cart),
             ],
           );
         }
@@ -1053,17 +1178,23 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           Expanded(
             child: results.isEmpty
                 ? Center(child: Text(filtered ? 'Aucun produit actif ne correspond à ces filtres.' : 'Aucun article.', textAlign: TextAlign.center))
+                : _listView
+                ? ListView.separated(
+                    itemCount: results.length.clamp(0, _productLimit),
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, index) => _productRow(results[index]),
+                  )
                 : GridView.builder(
                     gridDelegate: compact
-                        ? const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 180,
-                            mainAxisExtent: 104,
+                        ? SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: _look.tileWidth - 20,
+                            mainAxisExtent: _look.imageMode == 'top' ? 164 : 104,
                             crossAxisSpacing: 6,
                             mainAxisSpacing: 6,
                           )
-                        : const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 220,
-                            mainAxisExtent: 112,
+                        : SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: _look.tileWidth + 20,
+                            mainAxisExtent: _look.imageMode == 'top' ? 172 : 112,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
@@ -1123,12 +1254,32 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     ];
   }
 
+  /// Quantité déjà demandée par le panier pour ce produit, en unité de base.
+  BigInt _inCart(Product product) => _cart
+      .where((l) => l.product.id == product.id)
+      .fold(BigInt.zero, (sum, l) => sum + baseQuantity(l.quantity, l.packaging?.coefficient));
+
+  /// Stock estimé une fois le panier vendu.
+  BigInt _stockAfterCart(Product product) => product.signedStock - (_sold[product.id] ?? BigInt.zero) - _inCart(product);
+
+  Widget _productRow(Product product) {
+    final stock = _stockAfterCart(product);
+    return ListTile(
+      dense: true,
+      title: Text(product.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: product.unlimitedStock ? null : Text('stock ${stock.isNegative ? '−' : ''}${formatMicros(stock.abs())}', style: TextStyle(color: stock <= BigInt.zero ? Colors.red : Colors.black54)),
+      trailing: Text(formatFcfa(product.price), style: TextStyle(color: _brand, fontWeight: FontWeight.bold)),
+      onTap: () => _add(product, null),
+    );
+  }
+
   Widget _productTile(Product product) {
-    final stock = product.signedStock - (_sold[product.id] ?? BigInt.zero);
+    final stock = _stockAfterCart(product);
     final low = !product.unlimitedStock && stock <= BigInt.zero;
     final alert = !product.unlimitedStock && !low && product.alertThreshold != null && stock <= product.alertThreshold!;
     final badges = _badges(product);
-    final image = product.image == null ? null : _engine.imagePath(product.image!);
+    final image = product.image == null || _look.imageMode == 'hidden' ? null : _engine.imagePath(product.image!);
+    final fit = _look.imageFit == 'contain' ? BoxFit.contain : BoxFit.cover;
     return Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(8),
@@ -1140,15 +1291,23 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (image != null && _look.imageMode == 'top')
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: Image.file(File(image), width: double.infinity, height: 56, cacheWidth: 300, fit: fit),
+                  ),
+                ),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (image != null)
+                  if (image != null && _look.imageMode == 'left')
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(4),
-                        child: Image.file(File(image), width: 40, height: 40, cacheWidth: 120, fit: BoxFit.cover),
+                        child: Image.file(File(image), width: 40, height: 40, cacheWidth: 120, fit: fit),
                       ),
                     ),
                   Expanded(
@@ -1172,7 +1331,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                       alignment: Alignment.centerLeft,
                       child: Text(
                         formatFcfa(product.price),
-                        style: const TextStyle(color: _brand, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: _brand, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
@@ -1264,11 +1423,23 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final line = _cart[index];
+                      final tracked = !line.product.unlimitedStock;
+                      final first = _cart.indexWhere((l) => l.product.id == line.product.id) == index;
+                      final alert = !tracked || !first
+                          ? null
+                          : stockAlert(line.product.signedStock - (_sold[line.product.id] ?? BigInt.zero), _inCart(line.product), line.product.alertThreshold, _engine.oversellPolicy);
+                      final after = _stockAfterCart(line.product);
                       return ListTile(
                         dense: true,
                         title: Text(line.label, maxLines: 2, overflow: TextOverflow.ellipsis),
-                        subtitle: Text(
-                          '${formatMicros(line.quantity)} × ${formatFcfa(line.unitPrice)}${line.discount > 0 ? ' − ${formatFcfa(line.discount)}' : ''}',
+                        subtitle: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('${formatMicros(line.quantity)} × ${formatFcfa(line.unitPrice)}${line.discount > 0 ? ' − ${formatFcfa(line.discount)}' : ''}'),
+                            if (tracked) Text('Reste ${after.isNegative ? '−' : ''}${formatMicros(after.abs())}', style: const TextStyle(fontSize: 11)),
+                            if (alert != null)
+                              Text(alert.message, style: TextStyle(fontSize: 11, color: alert.level == 'short' ? Colors.red : _offline)),
+                          ],
                         ),
                         onTap: () => _editLine(snapshot, line),
                         trailing: Row(
@@ -1317,7 +1488,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                       const Spacer(),
                       Text(
                         formatFcfa(totals.payable),
-                        style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: _brand),
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: _brand),
                       ),
                     ],
                   ),
@@ -1483,7 +1654,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        icon: const Icon(Icons.check_circle, color: _brand, size: 48),
+        icon: Icon(Icons.check_circle, color: _brand, size: 48),
         title: Text('Vente ${operation.number}'),
         content: Text(
           change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : 'Vente enregistrée sur le terminal.',

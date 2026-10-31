@@ -521,34 +521,17 @@ class LocalRegisterAdapter {
   /// Quantité demandée par produit suivi, toutes lignes du panier, en unité de base (millionièmes).
   Map<int, BigInt> _stockDemand(List<(_DraftLine, CartLine?)> resolved) {
     final demand = <int, BigInt>{};
-    final million = BigInt.from(1000000);
     for (final (line, cart) in resolved) {
       if (cart == null || cart.product.unlimitedStock) continue;
-      final coefficient = parseMicros(cart.packaging?.coefficient ?? '1') ?? million;
-      demand[cart.product.id] = (demand[cart.product.id] ?? BigInt.zero) + line.quantity * coefficient ~/ million;
+      demand[cart.product.id] = (demand[cart.product.id] ?? BigInt.zero) + baseQuantity(line.quantity, cart.packaging?.coefficient);
     }
     return demand;
   }
 
-  /// Alerte indicative de la caisse web (F60) : le stock est estimé, plusieurs terminaux vendent le même. N'empêche pas
-  /// l'encaissement ; `level` : `low` ou `short`.
+  /// `level` : `low` ou `short`.
   Map<String, dynamic>? _stockAlert(Product p, BigInt sold, BigInt demand) {
-    final estimated = p.signedStock - sold;
-    final remaining = estimated - demand;
-    final threshold = p.alertThreshold;
-    if (remaining.isNegative) {
-      final available = estimated.isNegative ? BigInt.zero : estimated;
-      final policy = switch (engine.oversellPolicy) {
-        'refuser' => ' La boutique refuse la survente (refus strict) : réduisez la quantité.',
-        'autoriser_avec_droit' => ' Survente possible seulement avec l’autorisation d’un responsable (code et motif).',
-        _ => '',
-      };
-      return {'level': 'short', 'message': 'Stock insuffisant : ${formatMicros(available)} pour une demande de ${formatMicros(demand)}.$policy'};
-    }
-    if (threshold != null && remaining > BigInt.zero && remaining <= threshold) {
-      return {'level': 'low', 'message': 'Stock faible : il restera ${formatMicros(remaining)} après cette vente (seuil ${formatMicros(threshold)}). Vente possible.'};
-    }
-    return null;
+    final alert = stockAlert(p.signedStock - sold, demand, p.alertThreshold, engine.oversellPolicy);
+    return alert == null ? null : {'level': alert.level, 'message': alert.message};
   }
 
   /// Stock estimé au seuil d'alerte du produit ou en dessous (jamais pour un stock illimité).
@@ -866,11 +849,8 @@ class LocalRegisterAdapter {
       await engine.setImageWindow(null);
       return _imageSettings();
     }
-    final time = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
-    if (start is! String || end is! String || !time.hasMatch(start) || !time.hasMatch(end) || start == end) {
-      throw const AdapterFailure('reglage_refuse', 'Indiquez deux heures différentes, au format HH:MM.');
-    }
-    await engine.setImageWindow((start: start, end: end));
+    if (!validTimeWindow(start, end)) throw const AdapterFailure('reglage_refuse', 'Indiquez deux heures différentes, au format HH:MM.');
+    await engine.setImageWindow((start: start as String, end: end as String));
     return _imageSettings();
   }
 

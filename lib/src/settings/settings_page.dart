@@ -13,7 +13,7 @@ import '../terminal/terminal_channel.dart';
 import '../terminal/terminal_session.dart';
 
 /// Réglages : adresse de la boutique, terminal détecté, imprimante, code d'accès.
-/// Affiché au premier lancement ([firstRun]) puis par 5 touchers dans le coin de la caisse.
+/// Affiché au premier lancement ([firstRun]) puis par 5 touchers sur le logo de la caisse.
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.session, this.firstRun = false, this.onDone});
 
@@ -41,6 +41,12 @@ class _SettingsPageState extends State<SettingsPage> {
   late String _screenLayout = _settings.screenLayout;
   late bool _appPrinterFirst = _settings.appPrinterFirst;
   late bool _fastRendering = _settings.fastRendering;
+  late int _brandColor = _settings.brandColor;
+  late bool _catalogList = _settings.catalogList;
+  late int _tileWidth = _settings.tileWidth;
+  late int _cartWidth = _settings.cartWidth;
+  late String _imageMode = _settings.imageMode;
+  late String _imageFit = _settings.imageFit;
 
   List<Map<String, dynamic>> _btDevices = const [];
   List<Map<String, dynamic>> _serialPorts = const [];
@@ -276,6 +282,54 @@ class _SettingsPageState extends State<SettingsPage> {
             ]),
             OfflineSettingsSection(session: _session),
             DiagnosticsSection(session: _session),
+            _Section(title: 'Personnalisation de la caisse', children: [
+              Text('Couleur principale', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final color in const [AppSettings.defaultBrandColor, 0xFF1D4ED8, 0xFF7C3AED, 0xFFBE123C, 0xFFB45309, 0xFF0F766E, 0xFF111827])
+                    ChoiceChip(
+                      label: const SizedBox.square(dimension: 18),
+                      selected: _brandColor == color,
+                      selectedColor: Color(color),
+                      backgroundColor: Color(color),
+                      onSelected: (_) => setState(() => _brandColor = color),
+                    ),
+                ],
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Catalogue en liste'),
+                subtitle: const Text('Plus d\u2019articles à l\u2019écran, sans tuiles.'),
+                value: _catalogList,
+                onChanged: (v) => setState(() => _catalogList = v),
+              ),
+              Text('Taille des produits : $_tileWidth', style: theme.textTheme.labelLarge),
+              Slider(value: _tileWidth.toDouble(), min: 140, max: 300, divisions: 8, label: '$_tileWidth', onChanged: (v) => setState(() => _tileWidth = v.round())),
+              Text('Largeur du panier (tablette) : $_cartWidth', style: theme.textTheme.labelLarge),
+              Slider(value: _cartWidth.toDouble(), min: 300, max: 520, divisions: 11, label: '$_cartWidth', onChanged: (v) => setState(() => _cartWidth = v.round())),
+              DropdownButtonFormField<String>(
+                initialValue: _imageMode,
+                decoration: const InputDecoration(labelText: 'Disposition des images'),
+                items: const [
+                  DropdownMenuItem(value: 'left', child: Text('À gauche du nom')),
+                  DropdownMenuItem(value: 'top', child: Text('Au-dessus du nom')),
+                  DropdownMenuItem(value: 'hidden', child: Text('Masquées')),
+                ],
+                onChanged: (v) => setState(() => _imageMode = v ?? 'left'),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: _imageFit,
+                decoration: const InputDecoration(labelText: 'Cadrage des images'),
+                items: const [
+                  DropdownMenuItem(value: 'cover', child: Text('Remplir le cadre (recadrage)')),
+                  DropdownMenuItem(value: 'contain', child: Text('Image entière')),
+                ],
+                onChanged: (v) => setState(() => _imageFit = v ?? 'cover'),
+              ),
+            ]),
             _Section(title: 'Sécurité', children: [
               TextField(
                 controller: _code,
@@ -283,7 +337,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(
                   labelText: 'Code d’accès aux réglages (facultatif)',
-                  helperText: 'Demandé après les 5 touchers dans le coin haut gauche de la caisse.',
+                  helperText: 'Demandé après les 5 touchers sur le logo de la caisse.',
                   prefixIcon: Icon(Icons.lock_outline),
                 ),
               ),
@@ -331,6 +385,12 @@ class _SettingsPageState extends State<SettingsPage> {
       ..screenLayout = _screenLayout
       ..appPrinterFirst = _appPrinterFirst
       ..fastRendering = _fastRendering
+      ..brandColor = _brandColor
+      ..catalogList = _catalogList
+      ..tileWidth = _tileWidth
+      ..cartWidth = _cartWidth
+      ..imageMode = _imageMode
+      ..imageFit = _imageFit
       ..customerDisplayUrl = displayUrl
       ..adminCode = _code.text.trim();
     if (persist) {

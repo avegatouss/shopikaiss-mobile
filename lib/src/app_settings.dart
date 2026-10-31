@@ -18,7 +18,33 @@ class AppSettings {
     this.screenLayout = 'auto',
     this.appPrinterFirst = true,
     this.fastRendering = true,
+    this.brandColor = defaultBrandColor,
+    this.catalogList = false,
+    this.tileWidth = 200,
+    this.cartWidth = 380,
+    this.imageMode = 'left',
+    this.imageFit = 'cover',
   });
+
+  static const defaultBrandColor = 0xFF0F3E2E;
+
+  /// Couleur principale de la caisse locale (ARGB).
+  int brandColor;
+
+  /// Articles en liste compacte plutôt qu'en tuiles.
+  bool catalogList;
+
+  /// Largeur maximale d'une tuile d'article (dp).
+  int tileWidth;
+
+  /// Largeur du panier à côté du catalogue, sur tablette et terminal (dp).
+  int cartWidth;
+
+  /// Image d'une tuile : `left` (à gauche du nom), `top` (au-dessus), `hidden`.
+  String imageMode;
+
+  /// `cover` (recadrée) ou `contain` (image entière).
+  String imageFit;
 
   /// Adresse de la caisse, ex. `https://boutique.exemple.ci/caisse`. Vide = pas encore configurée.
   String shopUrl;
@@ -92,6 +118,12 @@ class AppSettings {
       screenLayout: p.getString('screenLayout') ?? 'auto',
       appPrinterFirst: p.getBool('appPrinterFirst') ?? true,
       fastRendering: p.getBool('fastRendering') ?? true,
+      brandColor: p.getInt('brandColor') ?? defaultBrandColor,
+      catalogList: p.getBool('catalogList') ?? false,
+      tileWidth: p.getInt('tileWidth') ?? 200,
+      cartWidth: p.getInt('cartWidth') ?? 380,
+      imageMode: p.getString('imageMode') ?? 'left',
+      imageFit: p.getString('imageFit') ?? 'cover',
     );
   }
 
@@ -110,6 +142,12 @@ class AppSettings {
     await p.setString('screenLayout', screenLayout);
     await p.setBool('appPrinterFirst', appPrinterFirst);
     await p.setBool('fastRendering', fastRendering);
+    await p.setInt('brandColor', brandColor);
+    await p.setBool('catalogList', catalogList);
+    await p.setInt('tileWidth', tileWidth);
+    await p.setInt('cartWidth', cartWidth);
+    await p.setString('imageMode', imageMode);
+    await p.setString('imageFit', imageFit);
   }
 }
 
