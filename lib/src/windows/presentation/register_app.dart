@@ -20,6 +20,7 @@ import 'searchable_choice.dart';
 import 'calculator.dart';
 import 'discount_approval.dart';
 import 'web_destinations.dart';
+import 'customer_picker.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -58,13 +59,38 @@ class WindowsRegisterApp extends StatelessWidget {
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size(40, 40),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(40, 40),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+      elevatedButtonTheme: ElevatedButtonThemeData(
+        style: ElevatedButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ),
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
         ),
       ),
       inputDecorationTheme: const InputDecorationTheme(
@@ -1140,9 +1166,19 @@ class _RegisterState extends State<_Register> {
             ],
           ),
           const Divider(height: 18),
-          const Align(
+          Align(
             alignment: Alignment.centerLeft,
-            child: Text('Client de passage'),
+            child: TextButton.icon(
+              icon: const Icon(Icons.person_outline),
+              label: Text(customerLabel(c)),
+              onPressed: c.ready && !c.busy && c.uncertainOperation == null
+                  ? () => showDialog<void>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => CustomerPicker(controller: c),
+                    )
+                  : null,
+            ),
           ),
           Align(
             alignment: Alignment.centerLeft,

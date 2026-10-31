@@ -270,3 +270,12 @@ Remplacement des deux champs par une calculatrice avec pavé tactile 48 px, oper
 
 Retour au back-office : adresse personnalisee si renseignee, sinon origine appairee + /accueil (route web verifiee). Bouton distinct Ouvrir la caisse web : origine appairee + /caisse. L'origine publique est fournie par status de l'adaptateur Windows ; aucun jeton transmis au navigateur. Les boutons sont accessibles sans configuration manuelle supplementaire. Session du navigateur distincte, authentification web normale.
 Bilan final avant compilation : suite complete 243 tests reussis, 6 scenarios reels ignores faute de configuration, 0 echec ; analyse globale avant ajustements et analyse Windows finale sans remarque. Journal build/full-final-0816fbf.log.
+
+## Selection et creation de clients Windows, boutons arrondis
+
+Le libelle Client de passage au-dessus du panier ouvre maintenant le repertoire local : recherche par nom/telephone avec temporisation de 250 ms, selection d'un client, retour au client de passage. Le panneau Client, remise et livraison ouvre le meme selecteur. Le nom affiche vient du panier moteur, y compris apres restauration.
+
+Nouveau client : nom requis, telephone facultatif, commande createCustomer avec identifiant UUID, puis setCustomer ; le client en attente de synchronisation est signale. Une reponse perdue ne provoque pas une seconde creation automatique : retour a la recherche avec explication. Les capacites customer/customer_create et les verrous de caisse sont respectes. Trois tests de parcours couvrent selection, creation, retour au client de passage et reponse perdue. Pas encore de recette de ces ecrans contre la demo.
+
+Boutons pleins, contours, textes, eleves et icones : arrondi commun de 16 px dans le theme de caisse. Pagination catalogue existante : Afficher plus ajoute 60 produits, filtres conserves ; pas de pages numerotees.
+Validation de ce lot : 59 tests Windows reussis (dont executable moteur reel), analyse Windows sans remarque. Aucun essai client sur la demo pendant cette passe.

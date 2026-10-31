@@ -130,11 +130,14 @@ class WindowsRegisterController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> command(
+  Future<Map<String, dynamic>?> command(
     HostCommand command,
-    Map<String, dynamic> arguments,
-  ) async {
-    if (_journalBlocked || !ready || busy || uncertainOperation != null) return;
+    Map<String, dynamic> arguments, {
+    String? operationId,
+  }) async {
+    if (_journalBlocked || !ready || busy || uncertainOperation != null) {
+      return null;
+    }
     busy = true;
     message = null;
     if (command == HostCommand.preparePayment) {
@@ -143,7 +146,11 @@ class WindowsRegisterController extends ChangeNotifier {
     }
     notifyListeners();
     try {
-      final result = await host.call(command, arguments: arguments);
+      final result = await host.call(
+        command,
+        arguments: arguments,
+        operationId: operationId,
+      );
       if (command == HostCommand.setPayment) {
         paymentChange = result['change'] is int
             ? result['change'] as int
@@ -157,6 +164,7 @@ class WindowsRegisterController extends ChangeNotifier {
       }
       _checkoutId = null;
       await refresh();
+      return result;
     } on HostFailure catch (error) {
       message = error.message;
       if (command == HostCommand.setPayments ||
@@ -174,6 +182,7 @@ class WindowsRegisterController extends ChangeNotifier {
       busy = false;
       if (!_disposed) notifyListeners();
     }
+    return null;
   }
 
   Future<void> commitSale({Map<String, dynamic>? approval}) async {

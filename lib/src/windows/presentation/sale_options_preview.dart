@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
+import 'customer_picker.dart';
 
 class SaleOptionsPreview extends StatefulWidget {
   const SaleOptionsPreview({super.key, required this.controller});
@@ -65,13 +66,19 @@ class _SaleOptionsState extends State<SaleOptionsPreview> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const ListTile(
+            ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.person_outline),
-              title: Text('Client de passage'),
-              subtitle: Text(
-                'Sélection et création de client : prochain lot du moteur.',
-              ),
+              leading: const Icon(Icons.person_outline),
+              title: Text(customerLabel(c)),
+              subtitle: const Text('Sélectionner ou créer un client'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: allowed('customer')
+                  ? () => showDialog<void>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => CustomerPicker(controller: c),
+                    )
+                  : null,
             ),
             const Divider(),
             const Text('Remise globale'),
