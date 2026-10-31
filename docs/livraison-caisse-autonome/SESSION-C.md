@@ -312,3 +312,8 @@ Moteur B 4a61829 fusionne. Alertes indicatives et stock apres panier affiches ; 
 
 Validation : 94 tests Windows/moteur puis 69 tests Windows avec afficheurs, tous PASS ; analyse Windows sans remarque. Compilation native et installation a confirmer dans JOURNAL. Aucun main/push, aucune nouvelle vente demo ; gate A/B encore attendue. Mesure Release sur catalogue realiste et recette papier restent ouvertes.
 
+
+### Mesure Release et verification native
+Moteur AOT reel, IPC stdin/stdout, SQLite synthetique dediee de 5000 produits, aucun reseau ni donnees boutique : mediane de 20 appels view 74,72 ms, search 48,47 ms, scan 55,38 ms ; maxima 130,51 / 107,99 / 115,23 ms. Demarrage + premiere vue 1020,95 ms. Script reproductible tool/windows/benchmark_release.py ; ce n'est pas une mesure de rendu visuel ni de synchronisation reelle. Compilation initiale native reussie.
+Test natif afficheur (echec de peripherique absent + arret du worker) PASS. Test natif securite non validable avec caisse ouverte : assertion first instance refusee normalement ; ne pas fermer la caisse de l'utilisateur pour ce test. Dernier correctif : reglages corrompus rejetes sans contaminer les menus ; 3 tests afficheur Dart PASS.
+

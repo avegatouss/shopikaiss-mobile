@@ -65,8 +65,11 @@ class CustomerDisplayService {
       final source = file;
       if (source != null && await source.exists()) {
         final data = jsonDecode(await source.readAsString()) as Map;
-        settings = {...settings, ...data.map((k, v) => MapEntry('$k', '$v'))};
-        if (!disposed) await configure(settings, save: false);
+        final restored = {
+          ...settings,
+          ...data.map((k, v) => MapEntry('$k', '$v')),
+        };
+        if (!disposed) await configure(restored, save: false);
       }
     } catch (e) {
       error = e.toString();
@@ -76,6 +79,10 @@ class CustomerDisplayService {
   Future<List<int>> monitors() async =>
       (await channel.invokeListMethod<int>('displayMonitors')) ?? [];
   Future<void> configure(Map<String, String> value, {bool save = true}) async {
+    if (!['off', 'screen', 'serial'].contains(value['mode']) ||
+        !['9600', '19200', '38400', '115200'].contains(value['baud'])) {
+      throw const FormatException('Configuration d’afficheur invalide.');
+    }
     await channel.invokeMethod<void>('configureDisplay', value);
     settings = Map.of(value);
     lastFrame = null;

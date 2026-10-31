@@ -1,7 +1,34 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/platform/customer_display.dart';
+import 'package:shopikaiss_terminal/src/windows/presentation/register_controller.dart';
+import 'package:shopikaiss_terminal/src/windows/ipc/protocol.dart';
+
+class _Host implements WindowsHost {
+  @override
+  Stream<Map<String, dynamic>> get events => const Stream.empty();
+  @override
+  Future<void> close() async {}
+  @override
+  Future<Map<String, dynamic>> call(
+    HostCommand command, {
+    Map<String, dynamic> arguments = const {},
+    String? operationId,
+  }) async => {};
+}
 
 void main() {
+  test('invalid saved settings cannot poison the settings dropdowns', () async {
+    final controller = WindowsRegisterController(_Host());
+    final display = CustomerDisplayService(controller);
+    await expectLater(
+      display.configure({'mode': 'corrupt', 'baud': 'invalid'}),
+      throwsFormatException,
+    );
+    expect(display.settings['mode'], 'off');
+    expect(display.settings['baud'], '9600');
+    display.dispose();
+    controller.dispose();
+  });
   test(
     'public display never exposes customer identity and strips controls',
     () {
