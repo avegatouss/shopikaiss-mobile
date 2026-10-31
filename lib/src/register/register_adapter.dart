@@ -344,7 +344,9 @@ class LocalRegisterAdapter {
         : totals == null
         ? 'La remise globale dépasse le montant du panier.'
         : _discountIssue(snapshot, resolved);
-    final suspended = (await engine.openDrafts()).where((d) => d.content['suspendu'] == true).length;
+    final localSuspended = (await engine.openDrafts()).where((d) => d.content['suspendu'] == true).toList();
+    final linkedShared = {for (final d in localSuspended) _Draft.fromStored(d).sharedCart?.uuid};
+    final suspended = localSuspended.length + (await engine.sharedCarts()).where((c) => !linkedShared.contains(c.uuid)).length;
     final carts = resolved.map((r) => r.$2).whereType<CartLine>().toList();
     final overLimit = _operator != null && !engine.withinDiscountLimits(_operator!, carts, _draft.globalDiscount);
     final demand = _stockDemand(resolved);

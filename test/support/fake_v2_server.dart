@@ -53,7 +53,9 @@ class FakeV2Server implements V2Transport {
 
   /// Autorisation de vente locale rendue par `/etat`.
   bool authorized = true;
-  String authorizationExpires = '2036-10-30T08:00:00Z'; // loin devant : les tests d'expiration la fixent eux-mêmes
+  // The default sellable fixture stays valid regardless of the calendar day.
+  // Expiry scenarios override this value explicitly.
+  String authorizationExpires = '${DateTime.now().toUtc().add(const Duration(days: 1)).toIso8601String().substring(0, 19)}Z';
 
   /// Entité de l'instantané (avant l'appairage du client).
   void put(String type, String key, Map<String, dynamic> data, {bool critical = false}) =>

@@ -1,4 +1,12 @@
-## Dernière remise : bootstrap et journal durable
+## Suite sur B f5247a4 : actions panier
+
+Base commune avancée sans conflit vers B `f5247a4` (contrat 2.0.1). Son essai v2 réel est décrit dans SESSION-B ; C ne l'a pas rejoué. B conserve le raccordement v2 de l'hôte, sans changement prévu du protocole local. La synchronisation v1 reste celle de l'application de recette actuelle.
+
+C ajoute uniquement l'interface panier : clic sur une ligne pour saisir sa quantité, transmise telle quelle à changeQuantity pour validation/calcul par le moteur ; vider le panier avec confirmation explicite via clear. Aucun calcul financier côté Windows. Annuler le dialogue n'écrit rien ; une vente incertaine interdit ces actions, y compris si son état change pendant le dialogue grâce au contrôle du contrôleur.
+
+Analyse Windows sans anomalie et 39 tests Windows réussis, dont deux nouveaux tests d'interface sur quantité, confirmation et blocage pendant un encaissement incertain. Aucun fichier moteur/API/Android modifié. Pas de nouveau ZIP dans ce lot : le paquet précédent demeure au code 3ce238f. Main et production inchangées. Le correctif MySQL signalé par B reste à coordonner avec A séparément de la caisse autonome.
+
+## Remise précédente : bootstrap et journal durable
 
 Voir [RACCORDEMENT-HOTE-C.md](RACCORDEMENT-HOTE-C.md) pour la suite sur B `0c39b40` : lancement de l'hôte, appairage/PIN, journal d'intention et 190 tests réussis. Les états ci-dessous sont historiques.
 
@@ -149,3 +157,179 @@ B est encore à `51e106f` avec moteur/modèles/stockage en modification non comm
 Travail indépendant C : le contrôleur d'écran traite désormais `connected` en rechargeant sa vue, et invalide toute lecture en vol lors de `disconnected`, d'une erreur ou de la fermeture du flux d'événements. Une réponse de vue reçue après la déconnexion ne peut plus rétablir `ready` et autoriser le paiement. Le résultat incertain et son UUID sont conservés lors d'une reconnexion ; celle-ci n'appelle jamais `commitSale`. L'indicateur d'état n'affiche plus l'ancien libellé de synchronisation quand le moteur est indisponible.
 
 Trois tests ajoutés : réponse de vue tardive après coupure, reconnexion avec vente incertaine et fermeture du flux. **24/24 tests Windows réussis**, analyse sans anomalie ; tests d'écran également revérifiés après ajustement du libellé. Ce lot ne remplace pas le journal durable de B et ne valide pas la reprise après redémarrage complet de l'application. Pas de nouveau paquet Release pour ce lot, aucun push ni déploiement ; le ZIP précédemment remis reste un artefact de revue antérieur.
+
+## Parité demandée avec la caisse web — 29/10
+
+Le périmètre cible est maintenant la caisse web complète, avec les mêmes parcours et droits. Référence de travail, écarts et demande C-REQ-005 à B : [PARITE-CAISSE-WEB-WINDOWS.md](PARITE-CAISSE-WEB-WINDOWS.md). Les fonctions absentes restent des travaux requis, pas des exclusions acceptées.
+
+Lot 718ec0e : grille 58/42, présentations visuelle/compacte, scan F2 séparé de la recherche, choix du conditionnement, saisie espèces reçues et monnaie calculée par le moteur. Analyse propre, 45/45 tests Windows réussis. Release compilée et installée dans `%LOCALAPPDATA%/Programs/Shopikaiss-Recette/718ec0eb905c`, raccourci mis à jour ; données intactes, pas de fermeture imposée à la fenêtre actuelle. Comparaison visuelle native non effectuée, parité complète non acquise. B reste à cb10844 ; hôte v2 et commandes métier enrichies attendus. Aucun push, aucune modification main, aucune vente démo supplémentaire.
+
+## Identité visuelle et pied de panier — 29/10
+
+Six PNG fournis par le responsable conservés sans modification sous assets/branding/shopikaiss (empreintes comparées aux originaux). Logo horizontal or/noir sur fond clair et or sur noir en thème sombre, utilisé à la connexion, dans l'en-tête et sur l'écran non configuré. Icône Windows ICO dérivée du fichier 04, six tailles 16 à 256 px ; aucun changement du dessin original. pubspec.yaml ne change que l'enregistrement des ressources, aucune dépendance/version modifiée ; ces ressources seront également embarquées si B reprend ce manifeste pour Android.
+
+Pied du panier rapproché du web : libellé À payer et actions Vider le panier / Payer (F4) côte à côte. 45/45 tests Windows réussis, analyse sans anomalie. Rendu natif côte à côte non validé ; la parité complète reste ouverte.
+
+## Raccordement v2 — 29/10
+
+B 9b0a5dd et 83fd64e intégrés par fusion c36df32, sans conflit. Hôte reconstruit sur V2Engine (contrat 2.0.2) ; interface privée inchangée sauf ajout des commandes openSession/logout déjà fournies par B. Bootstrap : connexion puis ouverture locale selon capacités serveur, fond de caisse validé par le moteur ; sortie vers la connexion déconnecte réellement le caissier. Totaux HT/TVA affichés depuis les libellés moteur.
+
+Validation : analyse Windows sans anomalie, 45 tests Windows et 24 tests client/moteur v2 passent. Test de trames enrichi : logout interdit le paiement et conserve le même panier, repris après redémarrage. Exécutable moteur v2 reconstruit avant la suite, aucun test de cette passe sur l'ancien binaire v1.
+
+Protection complémentaire : présence du journal v1 pending-sale.json bloque le démarrage v2 sans le modifier ; utiliser l'ancienne version pour résoudre cet encaissement. Le journal v2 est pending-sale-v2.json, dans le même dossier de données. Analyse ciblée finale propre. La base existante est conservée, aucune suppression ni réappairage automatique. Un nouvel appairage v2 et la recette réelle sur Tablette Pâtisserie restent nécessaires ; le succès sur Caisse 2 de B n'est pas une preuve de cette interface installée.
+
+## Fenêtre réellement affichée — 29/10
+
+L'utilisateur signalait une interface inchangée : processus encore ouvert depuis ddf3a746fcff, malgré les raccourcis mis à jour. Contrôle accessibilité : panier vide, état À jour, ancien libellé Encaisser · F4. Fermeture normale puis lancement effectif de bf4f3f91007c : logo présent, écran appairage v2. Capture native toujours indisponible (timeout) ; aucune validation visuelle de parité annoncée. Sauvegarde à froid après arrêt du nouveau moteur dans LocalAppData/ShopiKaiss/sauvegarde-bascule-v2-20261029-215201, puis réouverture de la version v2. Demande à A déposée dans la présentation partagée pour l'appairage Tablette Pâtisserie.
+
+## Boîte à lettres et lot 2 B — 29/10
+
+INBOX-C.md et PROTOCOLE.md lus. e075296 fusionné (12f68dc) après sauvegarde du lot de densité visuelle cf0baed. Résolution du doublon de clé assets introduit par la fusion automatique du manifeste ; les deux jeux de ressources sont conservés, aucune version de dépendance changée. Icône Windows régénérée en six tailles depuis marque/hd/embleme-1050-transparent.png, source HD copiée dans les ressources.
+
+Commandes IPC ajoutées : setLineDiscount, suspendDraft, drafts, resumeDraft, deleteDraft, setPayments ; logout/openSession déjà raccordées. search.category reste un argument de search, pas une commande distincte. Interface : catégories sous le scan/recherche, remise par ligne selon capacités, mise en attente F8 et liste/reprise des paniers locaux. Prix et totaux restent calculés par B. Après refus d'un paiement, relecture de la vue autoritaire et remise à zéro du rendu de monnaie. Les paiements multiples ne sont pas proposés dans l'interface tant que la politique/contrat ne les ouvre pas. Suppression de panier disponible dans le protocole, pas de bouton de suppression ajouté dans ce lot.
+
+46 tests Windows réussis ; analyse finale sans anomalie. Aperçu généré par Flutter à 1366×768 avec données fictives, inspecté : catalogue à gauche, panier à droite, lignes et outils compacts, actions de fin de vente fixées en bas. Ce rendu de test ne remplace pas la recette native sur le poste.
+
+Appairage réel v2 effectué avec l'hôte installé bf4f3f9, Tablette Pâtisserie / Plateau : prêt, session déjà ouverte reprise de l'instantané, Caissier Démo identifié, panier vide, fermeture code 0. Aucune nouvelle session ni vente créée pendant ce contrôle ; aucune donnée secrète consignée. Résultat transmis dans JOURNAL.md.
+
+## Réglages écran et validation automatique du paiement
+
+Panneau local : catalogue liste/grille, largeur des fiches, proportion catalogue/panier. Préférences dans LocalAppData/ShopiKaiss/screen-settings.json ; une erreur de préférences ne bloque pas la caisse. Le changement ne touche ni prix, ni droits, ni taxes.
+
+Montant reçu : validation moteur automatique après 250 ms de pause, collage compris ; Entrée force la validation. Toute modification invalide immédiatement la confirmation. Une réponse antérieure à la dernière saisie ne la réactive pas. Aucun calcul monétaire ajouté dans Windows, aucun encaissement automatique.
+
+47 tests Windows passent et analyse sans remarque, dont le cas réponse montant tardive suivi d’une nouvelle saisie. Images : cadrage et demande A/B dans IMAGES-PRODUITS.md ; service non raccordé tant que manifeste/cache ne sont pas fournis.
+
+## Couleurs, disposition des photos et options de vente préparées
+
+Quatre palettes locales : vert, bleu, prune, terracotta. Emplacements images à gauche, au-dessus ou masqués, avec préférence entière/recadrée mémorisée pour les futures photos locales. Le cache image reste à raccorder ; pictogrammes seulement actuellement.
+
+Aperçu séparé client/remise globale/frais/note : champs inactifs, aucune mutation de panier simulée. Besoins moteur dans CLIENT-REMISES-FRAIS.md, envoyés à A/B au journal partagé. Les remises de ligne existantes restent raccordées.
+
+Validation : 47 tests Windows passent, analyse sans remarque, rendu Flutter fictif inspecté. Dernier ajustement purement visuel : palette propagée à la fenêtre de paiement.
+
+## Raccordement du lot moteur 2.1 (018f678)
+
+Moteur B fusionné sans conflit. Commandes Windows setGlobalDiscount, setDelivery, setNote ajoutées. Panneau client/remise/livraison désormais réel pour les trois fonctions moteur, avec contrôles capabilities et motifs de refus. Sélection/création client encore indisponible. Remise de ligne : montant ou pourcentage, valeur initiale issue de discount_entry. Totaux moteur affichés pour remise globale/livraison et arrondi espèces, sans recalcul UI.
+
+L’activation contract21 reste inchangée : aucune activation forcée ni vente démo effectuée. Les moyens déclaratifs de B sont inclus dans le moteur, mais l’éditeur multi-paiements et référence reste à terminer côté Windows. Le téléchargement d’images reste en attente.
+
+## Quantités, poste et impression
+
+Boutons −/+ dans le panier, pas de retrait implicite à zéro, pas de flottants ; contrôle métier moteur conservé. Menu poste : plein écran natif/F11, back-office HTTPS configurable, aide raccourcis/F1, Ctrl+F recherche. Choix imprimante parmi pilotes Windows enregistré pour la caisse ; impression du duplicata moteur depuis historique, sans renvoi automatique ni nouvelle vente. Format PDF 80 mm ; validation papier et multi-écrans encore nécessaire. Pas de ticket original inventé (commande moteur demandée).
+
+Les demandes catalogue complet (aujourd’hui 60 résultats), filtres marque/fournisseur, clients, clôture, promotions et afficheur sont suivies dans PERIPHERIQUES-ET-PARITE.md et le journal partagé. Aucun de ces points n’est déclaré terminé tant que son raccordement et sa recette ne sont pas faits.
+
+## Taille, catégories et accès session
+
+Taille des produits 150–330 px avec boutons −/+ dans les réglages. Flèches gauche/droite autour de la liste de catégories. Accès session dans menu du poste : relecture état/capacités, conservation de la session existante, saisie fond de caisse et seconde vérification avant commande openSession. Aucun ajout de clôture fictive. Analyse sans remarque ; 49 tests Windows passent en série.
+
+## Paiements multiples et entretien des paniers
+
+Raccordement setPayments : jusqu'a 10 lignes, reference par paiement, validation automatique apres 250 ms et totaux exclusivement fournis par le moteur. Toute edition invalide immediatement la confirmation, avec controle supplementaire au clic. Les moyens proposes restent ceux autorises par le serveur ; aucune activation 2.1 forcee. Suppression d'un panier en attente avec confirmation explicite.
+
+Moteur B 2180f4c integre (plafond global distinct). Validation : 50 tests Windows reussis, analyse sans remarque ; 19 tests moteur v2/regles web reussis. Test de reponse IPC malformee stabilise par une requete de demarrage avant injection : le demarrage JIT n'est plus confondu avec la panne testee. Recette des nouveaux paiements sur la demo et impression physique restent a effectuer.
+
+## Catalogue complet : fournisseur, marque et pages
+
+Integration B c783089 sans conflit. HostCommand.moreProducts raccorde ; listes Fournisseur et Marque sous les categories. Les recherches transmettent ensemble texte, categorie, marque et fournisseur, y compris valeurs vides pour enlever un filtre. Compteur produits affiches/total et bouton Afficher plus tant que has_more ; pages de 60 gerees par le moteur sur le catalogue complet, aucun filtrage limite aux seuls produits visibles.
+
+Contrat 2.1 active par B dans l'hote, selon les capacites serveur ; pas de modification des serveurs depuis C. Validation : analyse sans remarque, 61 tests Windows + adaptateur reussis ; rendu Flutter inspecte (donnees fictives), absence de debordement testee a 1280x800 et 800x600. Pas de nouvelle vente sur la demo dans cette livraison.
+
+## Compatibilite prioritaire catalogue 2.1 (1b38dea)
+
+Moteur et schemas B integres pour accepter favoris, promotions, nouveautes, stock faible et metadonnees image du serveur 198a26d7. Aucun changement de prix ni telechargement image automatique. Le raccordement visuel des nouveaux badges et le cache image restent distincts de cette mise a jour de compatibilite.
+
+Validation : 64 tests Windows + moteur v2 reussis, analyse Windows sans remarque. La fixture FakeV2Server avait une autorisation fixe expirant le 30 octobre a 08:00 UTC ; sa valeur par defaut est maintenant relative a la date du test, les scenarios explicites d'expiration restent inchanges. Aucun controle metier affaibli. Installation a relancer avant deploiement du nouveau catalogue : un processus deja ouvert reste sur son ancien moteur.
+
+## Acces caisse et listes recherchables
+
+Fournisseur/Marque : selection avec recherche integree locale, effacement du filtre, resultat vide explicite. Aucun plugin web Select2 ni dependance ajoutee dans Flutter. Barre horizontale defilante : Recu, Note, Session, Calculatrice, Aide et ventes recentes ; menu Verrouiller/Se deconnecter via logout existant, PIN et selection operateur effaces, panier conserve. Client de passage affiche par defaut (aucun client nominatif encore pris en charge).
+
+B 9f87858 integre : printTicket raccorde via identifiant d'operation ; bouton imprimante dans la liste des ventes. Verification imprimante disponible avant demande original. Le moteur marque le ticket emis avant retour IPC : une panne papier peut donc conduire a une reimpression, sans jamais recreer la vente. Affichage des fichiers images locaux uniquement, avec remplacement visuel si fichier indisponible. Cache B par lots de 30 apres synchro panier vide ; politique nocturne et interruption quand un panier commence demandees a B, non declarees realisees.
+
+Restent explicitement absents : tarif gros, ventes du jour/X consolidees, livre de caisse, historique des modifications du panier, cloture complete et selection/creation de client. Ouverture de session actuelle = fond simple et conservation session existante ; comptage par coupure/report et horaires restent absents du contrat. Demandes inscrites au journal A/B.
+Validation : 53 tests Windows (dont rendu fictif), analyse sans remarque ; 62 tests Windows/adaptateur au passage precedent. Rendu inspecte. Impression papier et essai des images sur demo non effectues.
+
+## Autorisation responsable (lot 1c) et monnaie du ticket
+
+205313a fusionne (inclut bcc6ee9 : monnaie du ticket calculee sur montant especes arrondi). Fenetre responsable/code masque de 8 chiffres/motif avant commitSale dans les paiements simples et multiples, seulement si discount_approval.required. Responsables proposes exclusivement par le moteur. Annuler ne soumet rien ; refus certain conserve le panier ; toute issue incertaine passe par la reconciliation existante du meme identifiant.
+
+Le code est transitoire a la tentative, jamais ajoute au journal durable, puis les champs de preuve sont effaces ; nouvelle saisie a chaque tentative. Panier/revision controles apres fermeture de la demande : changement impose une nouvelle verification. Le moteur reste autorite sur code, plafonds, verrouillage apres echecs et droits. Le lot ne couvre pas survente/prix manuel. Pas d'essai avec code reel sur la demo par C.
+Validation : 67 tests Windows/moteur v2 reussis, analyse sans remarque. Test specifique annulation/refus/code masque/effacement/nouvelle saisie ; erreur de cycle de vie du dialogue corrigee avant passe finale.
+
+## Reference moteur 0816fbf et compatibilite des lots 2.1
+
+Fusion de 0816fbf (pas bac42bc seul) : schemas retour_residuel a3d86150 et lots clients, cloture, paniers partages, retours. Enumeration IPC completee : searchCustomers/createCustomer/setCustomer, closeSession, resumeShared/deleteShared, returnableSale/previewReturn/commitReturn. Cela rend les commandes transportables mais ne constitue pas une recette des nouveaux ecrans : selection/creation clients, cloture aveugle, paniers partages et retours Windows restent a raccorder.
+
+Suite automatique complete lancee sans variables de recette serveur. Le scenario reel essai_21_test exigeait SK_BASE pendant son chargement ; il est maintenant marque ignore explicitement si aucune base de recette n'est fournie, comme les autres scenarios reels. Aucun contact demo ni vente reelle dans cette passe. Analyse globale du depot : aucune remarque. Feu vert a borner a la compatibilite moteur et a l'executable effectivement lance, sans validation production ni recette physique.
+
+## Calculatrice tactile et destinations web
+
+Remplacement des deux champs par une calculatrice avec pavé tactile 48 px, operations en chaine, priorites, parentheses, pourcentage relatif (200 + 10 % = 220), changement de signe, effacement/correction, memoire MC/MR/M+/M-, historique de 20 calculs reutilisables et copie. Saisie clavier/Entree possible. Calcul fractionnaire exact, arrondi d'affichage a 12 decimales, aucune modification de vente. Petit ecran : contenu defilant teste sans debordement.
+
+Retour au back-office : adresse personnalisee si renseignee, sinon origine appairee + /accueil (route web verifiee). Bouton distinct Ouvrir la caisse web : origine appairee + /caisse. L'origine publique est fournie par status de l'adaptateur Windows ; aucun jeton transmis au navigateur. Les boutons sont accessibles sans configuration manuelle supplementaire. Session du navigateur distincte, authentification web normale.
+Bilan final avant compilation : suite complete 243 tests reussis, 6 scenarios reels ignores faute de configuration, 0 echec ; analyse globale avant ajustements et analyse Windows finale sans remarque. Journal build/full-final-0816fbf.log.
+
+## Selection et creation de clients Windows, boutons arrondis
+
+Le libelle Client de passage au-dessus du panier ouvre maintenant le repertoire local : recherche par nom/telephone avec temporisation de 250 ms, selection d'un client, retour au client de passage. Le panneau Client, remise et livraison ouvre le meme selecteur. Le nom affiche vient du panier moteur, y compris apres restauration.
+
+Nouveau client : nom requis, telephone facultatif, commande createCustomer avec identifiant UUID, puis setCustomer ; le client en attente de synchronisation est signale. Une reponse perdue ne provoque pas une seconde creation automatique : retour a la recherche avec explication. Les capacites customer/customer_create et les verrous de caisse sont respectes. Trois tests de parcours couvrent selection, creation, retour au client de passage et reponse perdue. Pas encore de recette de ces ecrans contre la demo.
+
+Boutons pleins, contours, textes, eleves et icones : arrondi commun de 16 px dans le theme de caisse. Pagination catalogue existante : Afficher plus ajoute 60 produits, filtres conserves ; pas de pages numerotees.
+Validation de ce lot : 59 tests Windows reussis (dont executable moteur reel), analyse Windows sans remarque. Aucun essai client sur la demo pendant cette passe.
+
+## Paiement : messages, solde propose et appels locaux
+
+Les messages moteur sont presentes dans un bandeau colore du titre des fenetres paiement simple et multiple. Multipaiement : premier montant propose depuis preparePayment.payable, puis chaque nouvelle ligne reprend le solde non affecte ; affichage du reste a repartir, ajout desactive quand il est nul. Ce calcul est une proposition de saisie seulement : le moteur reste autorite pour les montants, l'arrondi, la monnaie et l'encaissement.
+
+preparePayment ne declenche plus une relecture status/view inutile. setPayment/setPayments reutilisent la vue moteur retournee si schema/revision valides, au lieu de deux appels IPC supplementaires et d'un second calcul de catalogue. Erreur ou reponse sans vue : chemin de rafraichissement conserve. Temporisation de saisie 250 ms conservee, validation explicite de l'encaissement. Synchronisation du moteur deja executee en dehors de la file des commandes locales ; aucune promesse de temps maximal sans mesure sur poste reel.
+
+## Paniers partages, cloture, retours et badges
+
+Liste items + shared, reprise/suppression par shared_id, taken_elsewhere non actionnable et besoin reseau indique. Priorite A du 31 octobre traitee.
+Menu du poste : cloture a l'aveugle (comptage especes/autres moyens, justifications), retour especes (vente connue, quantites en unites de base, previsualisation moteur et motif obligatoire). Confirmation avant ecriture. Z attendu du serveur. Aucun remboursement physique automatise.
+Requete et UUID conserves avant envoi dans pending-close-v2.json ou pending-return-v2.json, a cote de la base. Reponse inconnue : requete immuable reprise avec le meme UUID, y compris apres redemarrage. Fichier illisible bloque cette operation sans ecrasement ; reponse incoherente ne vaut pas succes.
+Badges stock faible/promotion/nouveau/favori depuis la vue moteur, sans recalcul. Stock projete apres panier encore attendu de B. Texte obsolete des reglages images corrige.
+Validation finale : 64 tests Windows PASS en serie, analyse sans remarque. Premiere passe parallele : timeout demarrage JIT du test de fermeture et test disque execute dans zone de temps simulee ; test disque corrige via runAsync, aucun controle metier retire. Pas de recette demo supplementaire.
+
+## Afficheur client : deux modes demandes le 31 octobre
+
+Le responsable ne dispose pas encore d'afficheur et demande les deux familles. A implementer et qualifier, pas presente comme support livre :
+- Second ecran Windows : fenetre de presentation separee, choix du moniteur, lignes/prix/totaux venant de la vue moteur, accueil apres fin de vente, aucune saisie caissier ni code/raison d'autorisation affiche. Perte du moniteur sans blocage de la caisse.
+- Afficheur USB/serie : adaptateur de protocole materiel, port COM, debit et encodage configurables. USB peut etre un port serie virtuel ou un peripherique proprietaire : aucune compatibilite universelle presumee. File de sortie bornee, dernier etat prioritaire, erreurs/debranchement sans attente de la caisse. Commandes exactes a valider selon modele.
+Les deux sorties utilisent les montants calcules par B, sans recalcul et sans requete reseau. Un simulateur ne remplacera pas la recette du materiel. Aucun pilote ni nouvelle dependance ajoute dans ce lot.
+
+POS-80 (redirection de 2) choisie explicitement par le responsable : configuration applicative sauvegardee et remplacee, aucune modification du defaut Windows. Ticket TEST SANS VENTE transmis au pilote Windows ; sortie papier a confirmer. Ce test de pilote ne constitue pas une recette du ticket PDF Flutter.
+Disposition demandee : selecteur Client de passage et Remise et livraison sur une ligne ; selection client retiree du panneau remise. Reprise inconnue : un refus lors d'une tentative ulterieure ne supprime plus l'intention precedente.
+Ajustements finaux : 31 tests parcours caisse/operations PASS, dont refus pendant reprise inconnue et dispositions 800x600/1280x800 ; analyse propre.
+Pied de panier compacte : remise globale/livraison puis base HT/TVA sur deux lignes et deux colonnes ; En attente/Suspendus sur une ligne. Total a payer et bouton paiement gardent leur prominence. 26 tests caisse PASS avec montants affiches, dont 800x600 et 1280x800, analyse propre.
+
+## 31 octobre — stock, images et afficheurs
+
+Moteur B 4a61829 fusionne. Alertes indicatives et stock apres panier affiches ; horaires images persistants dans le moteur, pause pendant vente. Compteur suspendus local/partage dedoublonne. Afficheur client configurable : second ecran etendu distinct de la caisse ; profil ESC/POS 20x2 via port COM (USB serie), 8N1, vitesse configurable, traitement des ecritures hors fil UI. Aucun nom de client transmis ; test sans vente. Aucun peripherique connecte : validation materielle non faite, USB HID/proprietaire hors profil disponible.
+
+Validation : 94 tests Windows/moteur puis 69 tests Windows avec afficheurs, tous PASS ; analyse Windows sans remarque. Compilation native et installation a confirmer dans JOURNAL. Aucun main/push, aucune nouvelle vente demo ; gate A/B encore attendue. Mesure Release sur catalogue realiste et recette papier restent ouvertes.
+
+
+### Mesure Release et verification native
+Moteur AOT reel, IPC stdin/stdout, SQLite synthetique dediee de 5000 produits, aucun reseau ni donnees boutique : mediane de 20 appels view 74,72 ms, search 48,47 ms, scan 55,38 ms ; maxima 130,51 / 107,99 / 115,23 ms. Demarrage + premiere vue 1020,95 ms. Script reproductible tool/windows/benchmark_release.py ; ce n'est pas une mesure de rendu visuel ni de synchronisation reelle. Compilation initiale native reussie.
+Test natif afficheur (echec de peripherique absent + arret du worker) PASS. Test natif securite non validable avec caisse ouverte : assertion first instance refusee normalement ; ne pas fermer la caisse de l'utilisateur pour ce test. Dernier correctif : reglages corrompus rejetes sans contaminer les menus ; 3 tests afficheur Dart PASS.
+
+
+## 31 octobre — corrections paniers et arret du moteur
+Moteur B a6e3dce integre (7c5af2c inclus) : panier partage conserve avant retour du journal, suppression visible immediatement pour eviter une seconde suppression.
+EngineHost ferme maintenant son propre client HTTP apres drainage des commandes/synchronisation, puis SQLite et le verrou. Les transports injectes restent possedes par leur appelant. Tous les appels close attendent la meme Future. Nettoyage aussi en echec de demarrage.
+86 tests Windows + moteur v2 PASS ; analyse ciblee sans remarque. Test avec vraie connexion TCP keep-alive : fermeture et reouverture de la base PASS. Script tool/windows/check_host_shutdown.py : ancien exe ne quitte pas apres EOF sous 5s (reproduit sur base synthetique seulement). Revalidation du nouvel exe apres compilation, resultat dans JOURNAL. Aucun processus utilisateur termine, aucune modification de donnees demo.
+
+
+## 31 octobre — maintien client et session avant retour du journal
+Fusion du moteur B a846ebd (f000212 inclus) : client cree maintenu dans la selection et session ouverte localement maintenue pendant l'attente de publication serveur. Les corrections Windows precedentes, notamment la fermeture HTTP du moteur, sont conservees. 86 tests Windows/v2 PASS, analyse ciblee sans remarque. Aucun nouvel essai sur la demo pour ce lot. Compilation et installation tracees dans JOURNAL.
+
+
+## 31 octobre — transmission Windows vers mobile et navigateur interne
+Le dossier TRANSMISSION-WINDOWS-VERS-MOBILE.md décrit les parcours intégrés, leurs fichiers, les règles communes, la reprise par B et la parité encore incomplète. Moteur B 39ec7f1 intégré par cf6b5f3 (capacités 2.1 conservées après redémarrage sans réseau).
+Navigateur mobile séparé de CaissePage : entrées Site/Back-office, origine HTTPS configurée, navigation et fermeture vers le panier conservé, aucun pont natif de caisse, droits web conservés, erreur réseau explicite. Dépendances existantes uniquement. Téléchargements via navigateur système pour ce premier lot.
+Validation : 74 tests Windows/navigation PASS ; 27 tests moteur v2/adaptateur PASS ; après correction du débordement du menu sur téléphone 6,5 pouces, 18 tests disposition/navigation PASS (dont 3 déjà comptés dans les 74). Analyse ciblée sans remarque. Pas de recette native navigateur sur téléphone ni de release signée produite par C. Aucune installation Windows nouvelle pour ce lot.
+Compilation Android de contrôle sur 95107d9 : flutter build apk --debug --no-pub PASS, APK debug uniquement, non installé. Avertissement existant compileSdk 36 / permission_handler_android demandant 37 ; aucun changement de SDK ou dépendance dans ce lot. L'analyse et la recette sur téléphone restent distinctes de cette compilation.

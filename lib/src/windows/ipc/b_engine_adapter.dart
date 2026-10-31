@@ -14,6 +14,21 @@ class BEngineAdapter implements WindowsEngineAdapter {
     Map<String, dynamic> arguments,
     String? operationId,
   ) async {
+    if (command == HostCommand.login) {
+      final snapshot = inner.engine.snapshot;
+      final id = arguments['operator_id'];
+      final operator = id is int ? snapshot?.operatorById(id) : null;
+      if (snapshot?.rules.pinRequired == true &&
+          operator != null &&
+          (operator.pinHash ?? '').isEmpty) {
+        // Missing server configuration is not a wrong PIN. Do not consume
+        // attempts or bypass authentication when no verifier was supplied.
+        throw const HostFailure(
+          'pin_unconfigured',
+          'Le serveur ne fournit pas de PIN pour ce caissier. Configurez son PIN côté web, puis synchronisez la caisse.',
+        );
+      }
+    }
     var effectiveId = operationId;
     // Existing C read/reprint callers put the ID in arguments; B expects the
     // third parameter. Reject conflicting IDs instead of choosing silently.
@@ -27,7 +42,11 @@ class BEngineAdapter implements WindowsEngineAdapter {
       effectiveId ??= argumentId as String?;
     }
     try {
-      return await inner.execute(command.name, arguments, effectiveId);
+      final result = await inner.execute(command.name, arguments, effectiveId);
+      if (command == HostCommand.status) {
+        return {...result, 'web_origin': await inner.engine.storedOrigin()};
+      }
+      return result;
     } on AdapterFailure catch (error) {
       throw HostFailure(
         error.code,

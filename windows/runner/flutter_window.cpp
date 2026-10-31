@@ -25,7 +25,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterCashierPlugins(flutter_controller_->engine());
-  platform_channel_ = CreatePlatformChannel(flutter_controller_->engine()->messenger());
+  platform_channel_ = CreatePlatformChannel(flutter_controller_->engine()->messenger(), GetHandle());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {

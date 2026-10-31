@@ -51,9 +51,6 @@ class _CaissePageState extends State<CaissePage> {
   /// Terminal pilote revenu volontairement à la caisse web : la caisse locale ne se rouvre pas d'elle-même.
   bool _stayOnWeb = false;
 
-  /// Chemin du site demandé depuis la caisse locale ; null : la caisse web.
-  String? _sitePath;
-
   TerminalSession get _session => widget.session;
   AppSettings get _settings => _session.settings;
   CaisseEngine get _offline => _session.offline;
@@ -121,10 +118,6 @@ class _CaissePageState extends State<CaissePage> {
         session: _session,
         onBackOnline: () => Navigator.of(context).pop(),
         onOpenSettings: _openSettings,
-        onOpenSite: (path) {
-          _sitePath = path;
-          Navigator.of(context).pop();
-        },
       ),
     ));
     _offlineShown = false;
@@ -481,9 +474,7 @@ class _CaissePageState extends State<CaissePage> {
 
   void _reload() {
     setState(() => _error = null);
-    final path = _sitePath;
-    _sitePath = null;
-    _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(path == null ? _settings.shopUrl : '${_settings.origin}$path')));
+    _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(_settings.shopUrl)));
   }
 
   void _onCornerTap() {

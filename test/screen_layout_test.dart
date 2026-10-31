@@ -234,14 +234,14 @@ void main() {
       final session = await _session(inches: 5.0);
       await _pump(tester, const Size(360, 640), session);
       expect(find.byKey(const ValueKey('compact-checkout-bar')), findsOneWidget);
-      expect(find.text('Panier (0)'), findsNothing, reason: 'le panier est dans son onglet');
+      expect(find.text('0 ligne(s)'), findsNothing, reason: 'le panier est dans son onglet');
       await tester.tap(find.textContaining('Article numéro 1 ').first);
       await tester.pump();
       expect(find.text('1 000 F'), findsWidgets);
       await tester.tap(find.text('Panier'));
       await tester.pump();
-      expect(find.text('Panier (1)'), findsOneWidget);
-      await tester.tap(find.text('Encaisser'));
+      expect(find.text('1 ligne(s)'), findsOneWidget);
+      await tester.tap(find.text('Payer'));
       await tester.pumpAndSettle();
       expect(find.byType(AlertDialog), findsNothing);
       expect(find.text('Valider la vente'), findsOneWidget);
@@ -251,7 +251,7 @@ void main() {
     testWidgets('catalogue complet : badges, filtres sur tout le catalogue, Afficher plus, aucun débordement', (tester) async {
       final session = await _session(inches: 4.0, rich: true);
       await _pump(tester, const Size(320, 568), session);
-      expect(find.text('★ Favori'), findsOneWidget);
+      expect(find.text('Stock faible'), findsWidgets);
       expect(find.textContaining('Bon de réduction'), findsOneWidget);
       expect(find.text('Afficher plus (10)'), findsOneWidget);
       await tester.tap(find.text('Marque'));
@@ -277,16 +277,16 @@ void main() {
       await _pump(tester, const Size(800, 1280), session);
       await tester.tap(find.textContaining('Article numéro 1 ').first);
       await tester.pump();
-      expect(find.text('Panier (1)'), findsOneWidget);
-      await tester.tap(find.text('Mettre en attente'));
+      expect(find.text('1 ligne(s)'), findsOneWidget);
+      await tester.tap(find.text('En attente'));
       await tester.pumpAndSettle();
-      expect(find.text('Panier (0)'), findsOneWidget);
-      await tester.tap(find.text('En attente (1)'));
+      expect(find.text('0 ligne(s)'), findsOneWidget);
+      await tester.tap(find.text('Suspendus (1)'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('1 article(s)'));
       await tester.pumpAndSettle();
-      expect(find.text('Panier (1)'), findsOneWidget);
-      expect(find.textContaining('En attente ('), findsNothing);
+      expect(find.text('1 ligne(s)'), findsOneWidget);
+      expect(find.text('Suspendus (0)'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 
@@ -305,8 +305,9 @@ void main() {
       testWidgets('$label : disposition standard inchangée', (tester) async {
         final session = await _session(inches: inches);
         await _pump(tester, size, session);
-        expect(find.byKey(const ValueKey('compact-checkout-bar')), findsNothing);
-        expect(find.text('Panier (0)'), findsOneWidget);
+        // Deux colonnes dès que la largeur le permet, sinon catalogue et panier à onglets.
+        expect(find.byKey(const ValueKey('compact-checkout-bar')), size.width < 760 ? findsOneWidget : findsNothing);
+        expect(find.text('0 ligne(s)'), size.width < 760 ? findsNothing : findsOneWidget);
         expect(find.text('Reconnecter'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
@@ -321,7 +322,7 @@ void main() {
         await _pump(tester, size, session);
         expect(find.textContaining(banner), findsOneWidget);
         expect(find.textContaining('Caisse hors ligne'), findsNothing);
-        if (inches > 6) expect(find.text('Caisse web'), findsOneWidget);
+        expect(find.text('Ouvrir la caisse web'), findsOneWidget);
         expect(tester.takeException(), isNull);
       });
     }
@@ -341,7 +342,7 @@ void main() {
       await tester.tap(find.text('Valider').last);
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Encaisser'));
+      await tester.tap(find.text('Payer'));
       await tester.pumpAndSettle();
       expect(find.text('Autorisation d’un responsable'), findsOneWidget);
       await tester.enterText(find.widgetWithText(TextField, 'Code du responsable (8 chiffres)'), '00000000');
@@ -362,12 +363,11 @@ void main() {
     });
 
     for (final (name, inches, size) in const [('petit téléphone', 4.0, Size(320, 568)), ('tablette', 8.0, Size(1280, 800))]) {
-      testWidgets('menu de caisse sur $name : calculatrice exacte et affichage compact, sans débordement', (tester) async {
+      testWidgets('barre d’actions sur $name : calculatrice exacte et affichage compact, sans débordement', (tester) async {
         final session = await _session(inches: inches, approver: true);
         await _pump(tester, size, session);
-        await tester.tap(find.byType(PopupMenuButton<String>));
+        await tester.ensureVisible(find.text('Calculatrice'));
         await tester.pumpAndSettle();
-        expect(find.text('Ventes et retours'), findsOneWidget);
         await tester.tap(find.text('Calculatrice'));
         await tester.pumpAndSettle();
         await tester.enterText(find.widgetWithText(TextField, 'Calcul'), '0,1+0,2');
@@ -378,9 +378,9 @@ void main() {
         expect(find.text('0,3').evaluate().isNotEmpty || find.text('0.3').evaluate().isNotEmpty, isTrue);
         await tester.tap(find.text('Fermer'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byType(PopupMenuButton<String>));
+        await tester.ensureVisible(find.text('Compacte'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Affichage compact'));
+        await tester.tap(find.text('Compacte'));
         await tester.pumpAndSettle();
         expect(find.byType(ListView), findsWidgets);
         expect(tester.takeException(), isNull);
@@ -434,12 +434,12 @@ void main() {
       await _pump(tester, const Size(800, 1280), session);
       await tester.tap(find.textContaining('Article numéro 1 ').first);
       await tester.pump();
-      await tester.tap(find.text('Client'));
+      await tester.tap(find.text('Client de passage'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Bintou Traoré'));
       await tester.pumpAndSettle();
-      expect(find.widgetWithText(ActionChip, 'Bintou Traoré'), findsOneWidget);
-      await tester.tap(find.text('Encaisser'));
+      expect(find.text('Bintou Traoré'), findsOneWidget);
+      await tester.tap(find.text('Payer'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Valider la vente'));
       await tester.pumpAndSettle();
@@ -453,7 +453,7 @@ void main() {
       await _pump(tester, const Size(360, 640), session);
       await tester.tap(find.textContaining('Article numéro 1 ').first);
       await tester.pump();
-      await tester.tap(find.text('Encaisser'));
+      await tester.tap(find.text('Payer'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Valider la vente'));
       await tester.pumpAndSettle();

@@ -126,6 +126,26 @@ void main() {
     await host.call(HostCommand.setPayment, arguments: {'method': 'especes'});
   }
 
+  test(
+    'missing server PIN is configuration failure without consuming attempts',
+    () async {
+      final operators = transport.snapshotBody['caissiers'] as List;
+      (operators.first as Map).remove('pin');
+      await inner.engine.refreshSnapshot();
+      final before = await store.read('${StoreKeys.pinFailures}7');
+      await expectLater(
+        host.call(
+          HostCommand.login,
+          arguments: {'operator_id': 7, 'pin': '1234'},
+        ),
+        throwsA(
+          isA<HostFailure>().having((e) => e.code, 'code', 'pin_unconfigured'),
+        ),
+      );
+      expect(await store.read('${StoreKeys.pinFailures}7'), before);
+    },
+  );
+
   test('framed C commands use B totals, persist basket and clear it', () async {
     await prepare();
     final before = await host.call(HostCommand.view);
@@ -177,6 +197,17 @@ void main() {
         arguments: {'operation_id': operation},
       );
       expect((receipt['lines'] as List).join('\n'), contains('REIMPRESSION'));
+      final original = await host.call(
+        HostCommand.printTicket,
+        operationId: operation,
+      );
+      expect(original['duplicate'], false);
+      final printedAgain = await host.call(
+        HostCommand.printTicket,
+        operationId: operation,
+      );
+      expect(printedAgain['duplicate'], true);
+      expect(await store.operations(), hasLength(1));
     },
   );
 

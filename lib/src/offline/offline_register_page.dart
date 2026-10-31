@@ -8,7 +8,11 @@ import 'package:uuid/uuid.dart';
 import '../app_settings.dart';
 import '../diagnostics.dart';
 import '../terminal/terminal_session.dart';
-import 'calculator.dart';
+import '../web/shop_browser_page.dart';
+import '../web/shop_browser_policy.dart';
+import '../windows/presentation/brand_logo.dart';
+import '../windows/presentation/calculator.dart';
+import '../windows/presentation/searchable_choice.dart';
 import 'engine.dart';
 import 'models.dart';
 import 'money.dart';
@@ -22,7 +26,7 @@ const _offline = Color(0xFFB45309);
 ///
 /// [onBackOnline] est appelé quand la boutique répond de nouveau et que la file est vide (retour à la caisse web).
 class OfflineRegisterPage extends StatefulWidget {
-  const OfflineRegisterPage({super.key, required this.engine, required this.session, required this.onBackOnline, this.onOpenSettings, this.onOpenSite});
+  const OfflineRegisterPage({super.key, required this.engine, required this.session, required this.onBackOnline, this.onOpenSettings});
 
   final CaisseEngine engine;
   final TerminalSession session;
@@ -31,15 +35,13 @@ class OfflineRegisterPage extends StatefulWidget {
   /// Réglages de l'application (code administrateur compris).
   final Future<void> Function()? onOpenSettings;
 
-  /// Ouvre ce chemin du site dans le navigateur de l'application.
-  final void Function(String path)? onOpenSite;
-
   @override
   State<OfflineRegisterPage> createState() => _OfflineRegisterPageState();
 }
 
 class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   final _search = TextEditingController();
+  final _scanInput = TextEditingController();
   final _searchFocus = FocusNode();
   final List<CartLine> _cart = [];
 
@@ -52,6 +54,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   AppSettings get _look => widget.session.settings;
   Color get _brand => Color(_look.brandColor);
+  ColorScheme get _palette => ColorScheme.fromSeed(seedColor: _brand);
   bool get _listView => _look.catalogList;
   final _logoTaps = <DateTime>[];
 
@@ -68,30 +71,43 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Future<void> _openSettings() async {
+    _keyboardBlocked = null;
     await widget.onOpenSettings?.call();
-    if (mounted) setState(() {});
+    if (mounted) setState(_syncKeyboard);
   }
 
-  /// Site de la boutique dans le navigateur de l'application : mêmes impressions et mêmes appareils que la caisse web.
-  Future<void> _openSite(String path) async {
-    if (_cart.isNotEmpty) {
-      _toast('Terminez ou videz ce panier avant d’ouvrir le site.');
-    } else if (!await _engine.probe()) {
-      _toast('La boutique ne répond pas : le site n’est pas disponible.');
-    } else {
-      widget.onOpenSite?.call(path);
+  bool _webOpen = false;
+  bool? _keyboardBlocked;
+
+  /// Bloqueur de clavier : seulement sur le champ Scanner, où écrit la douchette. Le blocage vaut pour tout l'appareil :
+  /// la recherche, le paiement et les autres fenêtres doivent garder leur clavier.
+  void _syncKeyboard() {
+    final blocked = _look.hideSoftKeyboard && !_webOpen && FocusManager.instance.primaryFocus == _searchFocus;
+    if (blocked == _keyboardBlocked) return;
+    _keyboardBlocked = blocked;
+    unawaited(widget.session.channel.setSoftKeyboardBlocked(blocked).then<void>((_) {}, onError: (Object _) {}));
+  }
+
+  /// Site de la boutique dans le navigateur de l'application : le panier reste sur la caisse locale.
+  Future<void> _openShopWeb({required bool admin}) async {
+    if (_webOpen) return;
+    _webOpen = true;
+    try {
+      final origin = await _engine.storedOrigin() ?? widget.session.settings.origin;
+      final policy = ShopBrowserPolicy(origin);
+      _syncKeyboard();
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => ShopBrowserPage(policy: policy, admin: admin, deviceCookie: _engine.webToken)));
+    } on FormatException catch (error) {
+      _toast(error.message);
+    } catch (_) {
+      _toast('Impossible d’ouvrir le site. Votre panier est conservé.');
+    } finally {
+      _webOpen = false;
+      _syncKeyboard();
     }
   }
 
-  Widget _logo({double size = 32}) => GestureDetector(
-    key: const ValueKey('register-logo'),
-    behavior: HitTestBehavior.opaque,
-    onTap: _onLogoTap,
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(6),
-      child: Image.asset('assets/marque/embleme.png', width: size, height: size, filterQuality: FilterQuality.medium, semanticLabel: 'ShopiKaiss'),
-    ),
-  );
   bool _probing = false;
   String? _lastSyncMessage;
 
@@ -126,6 +142,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   void initState() {
     super.initState();
     _engine.addListener(_changed);
+    FocusManager.instance.addListener(_syncKeyboard);
     final rules = _snapshot?.rules;
     _probe = Timer.periodic(Duration(seconds: rules?.probeSeconds ?? 20), (_) => _tryOnline(automatic: true));
     if (rules != null && !rules.pinRequired) _operator = _snapshot!.operatorById(_snapshot!.lastOperatorId);
@@ -137,7 +154,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   void dispose() {
     _probe?.cancel();
     _engine.removeListener(_changed);
+    FocusManager.instance.removeListener(_syncKeyboard);
     _search.dispose();
+    _scanInput.dispose();
     _searchFocus.dispose();
     super.dispose();
   }
@@ -746,21 +765,6 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   /// Actions du panier : remise globale, livraison et note exigent le contrat 2.1.
-  Widget _cartActions() {
-    final extras = _engine.saleExtrasSupported && _cart.isNotEmpty;
-    return Wrap(
-      spacing: 4,
-      children: [
-        if (extras && _engine.customersSupported) ActionChip(label: Text(_customer?.name ?? 'Client'), onPressed: _pickCustomer),
-        if (extras) ActionChip(label: const Text('Remise globale'), onPressed: _editGlobalDiscount),
-        if (extras) ActionChip(label: const Text('Livraison'), onPressed: _editDelivery),
-        if (extras) ActionChip(label: Text(_note == null ? 'Note' : 'Note ✓'), onPressed: _editNote),
-        if (_cart.isNotEmpty) ActionChip(label: const Text('Mettre en attente'), onPressed: _suspendCart),
-        if (_suspendedCount > 0) ActionChip(label: Text('En attente ($_suspendedCount)'), onPressed: () => _openSuspended(_snapshot!)),
-      ],
-    );
-  }
-
   Future<void> _refreshSold() async {
     final sold = await _engine.soldSinceSnapshot();
     if (mounted) setState(() => _sold = sold);
@@ -802,7 +806,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _toast('Connexion rétablie : terminez cette vente, puis revenez à la caisse en ligne.');
         return;
       }
-      if (!automatic || (_snapshot?.rules.automaticSwitch ?? true)) widget.onBackOnline();
+      if (!_webOpen && (!automatic || (_snapshot?.rules.automaticSwitch ?? true))) widget.onBackOnline();
     } finally {
       _probing = false;
     }
@@ -821,12 +825,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final reason = _engine.blockReason;
     return PopScope(
       canPop: false,
-      child: Scaffold(
+      child: Theme(
+        data: Theme.of(context).copyWith(colorScheme: _palette),
+        child: Scaffold(
         backgroundColor: const Color(0xFFF6F7F6),
         body: SafeArea(
           child: Column(
             children: [
-              _compact ? _compactBanner() : _banner(),
+              _header(),
               Expanded(
                 child: reason != null || snapshot == null
                     ? _scrollable(_Blocked(message: reason ?? 'Catalogue absent.', onRetry: () => _tryOnline()))
@@ -840,64 +846,121 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           ),
         ),
       ),
+      ),
     );
   }
 
-  Widget _banner() {
+  /// En-tête de la caisse Windows : logo, boutique, état, puis barre d'actions défilante.
+  Widget _header() {
     final remaining = _engine.remaining;
     final contact = _engine.lastContact;
     String two(int v) => v.toString().padLeft(2, '0');
     final since = contact == null
         ? 'jamais'
         : '${two(contact.toLocal().day)}/${two(contact.toLocal().month)} ${two(contact.toLocal().hour)}:${two(contact.toLocal().minute)}';
+    final status = _engine.permanentLocal
+        ? _localStatus(short: _compact)
+        : _compact
+        ? 'Hors ligne${remaining != null ? ' · reste ${remaining.inHours} h' : ''} · ${_engine.pendingCount} en attente'
+        : 'Caisse hors ligne · dernier contact $since${remaining != null ? ' · reste ${remaining.inHours} h ${two(remaining.inMinutes % 60)}' : ''} · ${_engine.pendingCount} en attente';
     return Material(
-      color: _bannerColor,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        child: Row(
-          children: [
-            // Emblème ShopiKaiss (or sur noir, non transparent) : pastille noire, quelle que soit la couleur du bandeau.
-            _logo(size: 32),
-            const SizedBox(width: 8),
-            Icon(_bannerIcon, color: Colors.white),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                _engine.permanentLocal
-                    ? '${_localStatus()}${_lastSyncMessage != null ? ' · $_lastSyncMessage' : ''}'
-                    : 'Caisse hors ligne · dernier contact $since'
-                          '${remaining != null ? ' · reste ${remaining.inHours} h ${two(remaining.inMinutes % 60)}' : ''}'
-                          ' · ${_engine.pendingCount} en attente'
-                          '${_lastSyncMessage != null ? ' · $_lastSyncMessage' : ''}',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
+      color: Colors.white,
+      elevation: 1,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 10),
+            child: Row(
+              children: [
+                GestureDetector(
+                  key: const ValueKey('register-logo'),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _onLogoTap,
+                  child: ShopikaissLogo(width: _compact ? 92 : 125),
+                ),
+                const SizedBox(width: 10),
+                if (!_compact && _snapshot != null)
+                  Flexible(child: Text(_snapshot!.store.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(color: _bannerColor.withValues(alpha: .1), borderRadius: BorderRadius.circular(16)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_bannerIcon, color: _bannerColor, size: 16),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: _bannerColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Synchroniser',
+                  onPressed: _engine.syncing ? null : () => _tryOnline(),
+                  icon: _engine.syncing ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh),
+                ),
+                _registerMenu(),
+              ],
             ),
-            if (_operator != null)
-              TextButton.icon(
-                style: TextButton.styleFrom(foregroundColor: Colors.white),
-                onPressed: _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true) ? () => setState(() => _operator = null) : null,
-                icon: const Icon(Icons.person),
-                label: Text(_operator!.name),
-              ),
-            if (MediaQuery.sizeOf(context).width >= 900)
-              IconButton(tooltip: 'Ventes et retours', color: Colors.white, onPressed: _openJournal, icon: const Icon(Icons.receipt_long)),
-            FilledButton.tonalIcon(
-              onPressed: _engine.syncing ? null : () => _tryOnline(),
-              icon: _engine.syncing
-                  ? const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                  : Icon(_engine.permanentLocal ? Icons.public : Icons.wifi_find),
-              label: Text(_engine.permanentLocal ? 'Caisse web' : 'Reconnecter'),
-            ),
-            _registerMenu(),
-          ],
-        ),
+          ),
+          _toolbar(),
+        ],
       ),
     );
   }
 
-  /// Vente locale permanente et boutique joignable : bandeau vert ; sinon, bandeau orange de la vente hors ligne.
+  Widget _toolbar() {
+    final operator = _operator;
+    final canClose = operator != null && _engine.canCloseSession(operator) && _cart.isEmpty;
+    final extras = _engine.saleExtrasSupported && _cart.isNotEmpty;
+    Widget action(String label, IconData icon, VoidCallback? onPressed) =>
+        TextButton.icon(onPressed: onPressed, icon: Icon(icon, size: 18), label: Text(label), style: TextButton.styleFrom(visualDensity: VisualDensity.compact));
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+      child: Row(
+        children: [
+          SegmentedButton<bool>(
+            showSelectedIcon: false,
+            style: const ButtonStyle(visualDensity: VisualDensity.compact),
+            segments: const [
+              ButtonSegment(value: false, icon: Icon(Icons.grid_view, size: 18), label: Text('Visuelle')),
+              ButtonSegment(value: true, icon: Icon(Icons.view_list, size: 18), label: Text('Compacte')),
+            ],
+            selected: {_listView},
+            onSelectionChanged: (value) {
+              setState(() => _look.catalogList = value.single);
+              unawaited(widget.session.save());
+            },
+          ),
+          const SizedBox(width: 8),
+          if (operator != null)
+            action(operator.name, Icons.person_outline, _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true) ? () => setState(() => _operator = null) : null),
+          action('Ventes récentes', Icons.history, _openJournal),
+          action('Reçu', Icons.receipt_long_outlined, _openJournal),
+          action(_note == null ? 'Note' : 'Note ✓', Icons.note_alt_outlined, extras ? _editNote : null),
+          action('Session de caisse', Icons.point_of_sale, canClose ? _closeSession : null),
+          action(_look.hideSoftKeyboard ? 'Clavier masqué' : 'Clavier affiché', _look.hideSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard, () {
+            setState(() => _look.hideSoftKeyboard = !_look.hideSoftKeyboard);
+            unawaited(widget.session.save());
+            _syncKeyboard();
+          }),
+          action('Calculatrice', Icons.calculate_outlined, () => showDialog<void>(context: context, builder: (_) => const DeskCalculator())),
+          action('Back-office web', Icons.dashboard_outlined, () => _openShopWeb(admin: true)),
+          action(_engine.permanentLocal ? 'Ouvrir la caisse web' : 'Reconnecter', _engine.permanentLocal ? Icons.open_in_browser : Icons.wifi_find, _engine.syncing ? null : () => _tryOnline()),
+        ],
+      ),
+    );
+  }
+
   bool get _localOnline => _engine.permanentLocal && _engine.reachable == true;
   Color get _bannerColor => _localOnline ? _brand : _offline;
   IconData get _bannerIcon => _localOnline ? (_engine.pendingCount == 0 ? Icons.cloud_done : Icons.cloud_upload) : Icons.cloud_off;
@@ -922,45 +985,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Widget _scrollable(Widget child) => _compact ? SingleChildScrollView(padding: const EdgeInsets.symmetric(vertical: 12), child: child) : child;
 
   /// Bandeau d'un petit téléphone : une ligne, reconnexion en icône, caissier et journal dans un menu.
-  Widget _compactBanner() {
-    final remaining = _engine.remaining;
-    return Material(
-      color: _bannerColor,
-      child: Padding(
-        padding: const EdgeInsets.only(left: 10),
-        child: Row(
-          children: [
-            _logo(size: 28),
-            const SizedBox(width: 6),
-            Icon(_bannerIcon, color: Colors.white, size: 20),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                _engine.permanentLocal
-                    ? _localStatus(short: true)
-                    : 'Hors ligne${remaining != null ? ' · reste ${remaining.inHours} h' : ''} · ${_engine.pendingCount} en attente',
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            IconButton(
-              tooltip: _engine.permanentLocal ? 'Caisse web' : 'Reconnecter',
-              color: Colors.white,
-              onPressed: _engine.syncing ? null : () => _tryOnline(),
-              icon: _engine.syncing
-                  ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Icon(_engine.permanentLocal ? Icons.public : Icons.wifi_find),
-            ),
-            _registerMenu(),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _registerMenu() => PopupMenuButton<String>(
-    iconColor: Colors.white,
     onSelected: (choice) {
       if (choice == 'journal') {
         _openJournal();
@@ -968,25 +993,18 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         setState(() => _operator = null);
       } else if (choice == 'cloture') {
         _closeSession();
-      } else if (choice == 'calculatrice') {
-        showDialog<void>(context: context, builder: (_) => const DeskCalculator());
       } else if (choice == 'images') {
         _editImageWindow();
       } else if (choice == 'site') {
-        _openSite('/accueil');
+        _openShopWeb(admin: false);
       } else if (choice == 'reglages') {
         _openSettings();
-      } else if (choice == 'affichage') {
-        setState(() => _look.catalogList = !_look.catalogList);
-        unawaited(widget.session.save());
       }
     },
     itemBuilder: (context) => [
       if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
       const PopupMenuItem(value: 'journal', child: Text('Ventes et retours')),
-      const PopupMenuItem(value: 'calculatrice', child: Text('Calculatrice')),
-      PopupMenuItem(value: 'affichage', child: Text(_listView ? 'Affichage en tuiles' : 'Affichage compact')),
-      if (widget.onOpenSite != null) const PopupMenuItem(value: 'site', child: Text('Site en ligne')),
+      const PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
       if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
       if (_operator != null && _engine.canCloseSession(_operator!))
@@ -1097,7 +1115,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: _brand, minimumSize: const Size(0, 48)),
                   onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
-                  child: const Text('Encaisser'),
+                  child: const Text('Payer'),
                 ),
               ],
             ),
@@ -1108,24 +1126,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Widget _register(Snapshot snapshot) {
-    if (_compact) return _compactRegister(snapshot);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 760;
-        final catalogue = _catalogue(snapshot);
-        final cart = _cartPanel(snapshot);
-        if (wide) {
-          return Row(
-            children: [
-              Expanded(flex: 3, child: catalogue),
-              SizedBox(width: _look.cartWidth.toDouble(), child: cart),
-            ],
-          );
-        }
-        return Column(
+        // Deux colonnes dès que la largeur le permet ; sinon catalogue et panier à onglets, sans réduire les touches.
+        if (_compact || constraints.maxWidth < 760) return _compactRegister(snapshot);
+        return Row(
           children: [
-            Expanded(flex: 3, child: catalogue),
-            SizedBox(height: constraints.maxHeight * 0.45, child: cart),
+            Expanded(child: _catalogue(snapshot)),
+            SizedBox(width: _look.cartWidth.toDouble(), child: _cartPanel(snapshot)),
           ],
         );
       },
@@ -1134,124 +1142,183 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   Widget _catalogue(Snapshot snapshot) {
     final results = snapshot.search(_search.text, limit: null, category: _category, brand: _brandFilter, supplier: _supplier);
-    final compact = _compact;
-    final filtered = _category != null || _brandFilter != null || _supplier != null;
+    final shown = results.length.clamp(0, _productLimit);
+    final tile = _look.tileWidth.toDouble();
     return Padding(
-      padding: EdgeInsets.all(compact ? 8 : 12),
+      padding: const EdgeInsets.all(8),
       child: Column(
         children: [
-          TextField(
-            controller: _search,
-            focusNode: _searchFocus,
-            autofocus: true,
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
-              hintText: 'Rechercher ou scanner un article',
-              filled: true,
-              fillColor: Colors.white,
-              border: const OutlineInputBorder(),
-              suffixIcon: _search.text.isEmpty ? null : IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(_search.clear)),
-            ),
-            onChanged: (_) => setState(() => _productLimit = _productPage),
-            onSubmitted: (value) => _scan(snapshot, value),
-          ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _filter('Catégorie', _category, snapshot.categories, (v) => _category = v),
-                _filter('Marque', _brandFilter, snapshot.brands, (v) => _brandFilter = v),
-                _filter('Fournisseur', _supplier, snapshot.suppliers, (v) => _supplier = v),
-                if (filtered)
-                  TextButton(
-                    onPressed: () => setState(() {
-                      _category = _brandFilter = _supplier = null;
-                      _productLimit = _productPage;
-                    }),
-                    child: const Text('Effacer'),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _scanInput,
+                  focusNode: _searchFocus,
+                  autofocus: true,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: Colors.white,
+                    labelText: 'Scanner',
+                    prefixIcon: const Icon(Icons.qr_code_scanner),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(tooltip: 'Ajouter le code scanné', icon: const Icon(Icons.arrow_forward), onPressed: () => _scan(snapshot, _scanInput.text)),
                   ),
-              ],
-            ),
+                  onSubmitted: (value) => _scan(snapshot, value),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: TextField(
+                  controller: _search,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    filled: true,
+                    fillColor: Colors.white,
+                    labelText: 'Rechercher un produit',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: _search.text.isEmpty ? const Icon(Icons.search) : IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(_search.clear)),
+                  ),
+                  onChanged: (_) => setState(() => _productLimit = _productPage),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
+          if (snapshot.categories.isNotEmpty)
+            SizedBox(
+              height: 40,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  for (final category in [null, ...snapshot.categories])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(category ?? 'Voir tout'),
+                        selected: _category == category,
+                        onSelected: (_) => setState(() {
+                          _category = category;
+                          _productLimit = _productPage;
+                        }),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          if (snapshot.suppliers.isNotEmpty || snapshot.brands.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Row(
+                children: [
+                  if (snapshot.suppliers.isNotEmpty) Expanded(child: _filter('Fournisseur', 'Tous les fournisseurs', _supplier, snapshot.suppliers, (v) => _supplier = v)),
+                  if (snapshot.suppliers.isNotEmpty && snapshot.brands.isNotEmpty) const SizedBox(width: 8),
+                  if (snapshot.brands.isNotEmpty) Expanded(child: _filter('Marque', 'Toutes les marques', _brandFilter, snapshot.brands, (v) => _brandFilter = v)),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              Expanded(child: Text('$shown / ${results.length} produits', style: const TextStyle(fontSize: 12))),
+              if (_category != null || _brandFilter != null || _supplier != null)
+                TextButton(
+                  onPressed: () => setState(() {
+                    _category = _brandFilter = _supplier = null;
+                    _productLimit = _productPage;
+                  }),
+                  child: const Text('Effacer'),
+                ),
+              if (results.length > _productLimit)
+                TextButton.icon(
+                  onPressed: () => setState(() => _productLimit += _productPage),
+                  icon: const Icon(Icons.expand_more),
+                  label: Text('Afficher plus (${results.length - _productLimit})'),
+                ),
+            ],
+          ),
           Expanded(
             child: results.isEmpty
-                ? Center(child: Text(filtered ? 'Aucun produit actif ne correspond à ces filtres.' : 'Aucun article.', textAlign: TextAlign.center))
+                ? const Center(child: Text('Aucun article à afficher.', textAlign: TextAlign.center))
                 : _listView
                 ? ListView.separated(
-                    itemCount: results.length.clamp(0, _productLimit),
+                    itemCount: shown,
                     separatorBuilder: (_, _) => const Divider(height: 1),
                     itemBuilder: (context, index) => _productRow(results[index]),
                   )
                 : GridView.builder(
-                    gridDelegate: compact
-                        ? SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: _look.tileWidth - 20,
-                            mainAxisExtent: _look.imageMode == 'top' ? 164 : 104,
-                            crossAxisSpacing: 6,
-                            mainAxisSpacing: 6,
-                          )
-                        : SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: _look.tileWidth + 20,
-                            mainAxisExtent: _look.imageMode == 'top' ? 172 : 112,
-                            crossAxisSpacing: 8,
-                            mainAxisSpacing: 8,
-                          ),
-                    itemCount: results.length.clamp(0, _productLimit),
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: tile,
+                      mainAxisExtent: tile * 115 / 175 + 24 + (_look.imageMode == 'top' ? 68 : 0),
+                      crossAxisSpacing: 4,
+                      mainAxisSpacing: 4,
+                    ),
+                    itemCount: shown,
                     itemBuilder: (context, index) => _productTile(results[index]),
                   ),
           ),
-          if (results.length > _productLimit)
-            TextButton(
-              onPressed: () => setState(() => _productLimit += _productPage),
-              child: Text('Afficher plus (${results.length - _productLimit})'),
+        ],
+      ),
+    );
+  }
+
+  /// Filtre du catalogue, avec recherche ; porte sur tout le catalogue.
+  Widget _filter(String label, String all, String? value, List<String> values, void Function(String?) select) => SearchableChoice(
+    label: label,
+    all: all,
+    values: values,
+    selected: value ?? '',
+    onChanged: (choice) => setState(() {
+      select(choice.isEmpty ? null : choice);
+      _productLimit = _productPage;
+    }),
+  );
+
+  /// Pastilles de la caisse Windows : défilent sur une ligne au lieu de pousser la tuile.
+  Widget _badges(Product product, BigInt stock) {
+    final now = DateTime.now();
+    final promotion = product.promotionLabel(now.toIso8601String().substring(0, 10));
+    final threshold = product.alertThreshold;
+    final low = !product.unlimitedStock && threshold != null && stock <= threshold;
+    final labels = [
+      if (low) 'Stock faible',
+      ?promotion,
+      if (product.isNew(_engine.newBadgeDays, now)) 'Nouveau',
+      if (product.favorite) '★ Favori',
+    ];
+    if (labels.isEmpty) return const SizedBox.shrink();
+    return SizedBox(
+      height: 22,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        children: [
+          for (final label in labels)
+            Container(
+              margin: const EdgeInsets.only(right: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+              decoration: BoxDecoration(color: label == 'Stock faible' ? const Color(0xFFFFEDC2) : const Color(0xFFE3EEE7), borderRadius: BorderRadius.circular(8)),
+              child: Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF27382F))),
             ),
         ],
       ),
     );
   }
 
-  /// Filtre du catalogue : masqué si la boutique n'a aucune valeur ; porte sur tout le catalogue.
-  Widget _filter(String label, String? value, List<String> values, void Function(String?) select) {
-    if (values.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(right: 6),
-      child: PopupMenuButton<String>(
-        tooltip: label,
-        onSelected: (choice) => setState(() {
-          select(choice.isEmpty ? null : choice);
-          _productLimit = _productPage;
-        }),
-        itemBuilder: (_) => [
-          PopupMenuItem(value: '', child: Text('Toutes les valeurs ($label)')),
-          for (final v in values) PopupMenuItem(value: v, child: Text(v)),
-        ],
-        child: Chip(
-          label: Text(value ?? label),
-          avatar: const Icon(Icons.arrow_drop_down, size: 18),
-          backgroundColor: value == null ? Colors.white : _brand.withValues(alpha: 0.12),
-          visualDensity: VisualDensity.compact,
-        ),
+  /// Image du cache local, ou substitut : aucune requête à l'affichage.
+  Widget _imageSlot(Product product, {bool large = false}) {
+    final path = product.image == null ? null : _engine.imagePath(product.image!);
+    final fit = _look.imageFit == 'contain' ? BoxFit.contain : BoxFit.cover;
+    final height = large ? 60.0 : 44.0;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: large ? double.infinity : 44,
+        height: height,
+        color: _palette.primaryContainer.withValues(alpha: .6),
+        child: path == null
+            ? Icon(Icons.inventory_2_outlined, color: _palette.primary, size: large ? 30 : 22)
+            : Image.file(File(path), fit: fit, cacheWidth: large ? 360 : 132, errorBuilder: (_, _, _) => Icon(Icons.inventory_2_outlined, color: _palette.primary)),
       ),
     );
-  }
-
-  /// Badges du catalogue, comme la caisse web : présentation seule, aucun prix ne change.
-  List<Widget> _badges(Product product) {
-    Widget badge(String text, Color color) => Container(
-      margin: const EdgeInsets.only(right: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(4)),
-      child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.w600)),
-    );
-    final now = DateTime.now();
-    final promotion = product.promotionLabel(now.toIso8601String().substring(0, 10));
-    return [
-      if (product.favorite) badge('★ Favori', _offline),
-      if (product.isNew(_engine.newBadgeDays, now)) badge('Nouveau', _brand),
-      if (promotion != null) Flexible(child: badge(promotion, Colors.deepPurple)),
-    ];
   }
 
   /// Quantité déjà demandée par le panier pour ce produit, en unité de base.
@@ -1262,92 +1329,68 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Stock estimé une fois le panier vendu.
   BigInt _stockAfterCart(Product product) => product.signedStock - (_sold[product.id] ?? BigInt.zero) - _inCart(product);
 
+  String _stockText(BigInt stock) => '${stock.isNegative ? '−' : ''}${formatMicros(stock.abs())}';
+
   Widget _productRow(Product product) {
     final stock = _stockAfterCart(product);
     return ListTile(
       dense: true,
+      leading: _look.imageMode == 'hidden' ? null : _imageSlot(product),
       title: Text(product.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: product.unlimitedStock ? null : Text('stock ${stock.isNegative ? '−' : ''}${formatMicros(stock.abs())}', style: TextStyle(color: stock <= BigInt.zero ? Colors.red : Colors.black54)),
-      trailing: Text(formatFcfa(product.price), style: TextStyle(color: _brand, fontWeight: FontWeight.bold)),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!product.unlimitedStock) Text('Stock : ${_stockText(stock)}', style: TextStyle(color: stock <= BigInt.zero ? Colors.red : Colors.black54)),
+          _badges(product, stock),
+        ],
+      ),
+      trailing: Text(formatFcfa(product.price), style: const TextStyle(fontWeight: FontWeight.bold)),
       onTap: () => _add(product, null),
     );
   }
 
   Widget _productTile(Product product) {
     final stock = _stockAfterCart(product);
-    final low = !product.unlimitedStock && stock <= BigInt.zero;
-    final alert = !product.unlimitedStock && !low && product.alertThreshold != null && stock <= product.alertThreshold!;
-    final badges = _badges(product);
-    final image = product.image == null || _look.imageMode == 'hidden' ? null : _engine.imagePath(product.image!);
-    final fit = _look.imageFit == 'contain' ? BoxFit.contain : BoxFit.cover;
-    return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(8),
+    final mode = _look.imageMode;
+    return Card(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      elevation: 0.5,
+      color: Color.alphaBlend(_palette.primaryContainer.withValues(alpha: .45), Colors.white),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
         onTap: () => _add(product, null),
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (image != null && _look.imageMode == 'top')
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(4),
-                    child: Image.file(File(image), width: double.infinity, height: 56, cacheWidth: 300, fit: fit),
-                  ),
+              if (mode == 'top') ...[_imageSlot(product, large: true), const SizedBox(height: 6)],
+              Expanded(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (mode == 'left') Padding(padding: const EdgeInsets.only(right: 6), child: _imageSlot(product)),
+                    Expanded(
+                      child: Text(product.name, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                    ),
+                  ],
                 ),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (image != null && _look.imageMode == 'left')
-                    Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: Image.file(File(image), width: 40, height: 40, cacheWidth: 120, fit: fit),
-                      ),
-                    ),
-                  Expanded(
-                    child: Text(
-                      product.name,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
               ),
-              if (badges.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 2), child: Row(children: badges)),
-              const Spacer(),
               Row(
                 children: [
-                  // Prix réduit plutôt que coupé si la tuile est étroite (gros montant, petit écran).
-                  Flexible(
+                  Expanded(
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: Text(
-                        formatFcfa(product.price),
-                        style: TextStyle(color: _brand, fontWeight: FontWeight.bold),
-                      ),
+                      child: Text(formatFcfa(product.price), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
                   ),
-                  const SizedBox(width: 4),
-                  if (!product.unlimitedStock)
-                    Flexible(
-                      child: Text(
-                        'stock ${formatMicros(stock.abs())}${stock.isNegative ? ' (−)' : ''}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        textAlign: TextAlign.right,
-                        style: TextStyle(fontSize: 11, color: low ? Colors.red : (alert ? _offline : Colors.black54)),
-                      ),
-                    ),
+                  CircleAvatar(radius: 12, backgroundColor: _palette.primary, child: const Icon(Icons.add, size: 16, color: Colors.white)),
                 ],
               ),
+              _badges(product, stock),
+              if (!product.unlimitedStock)
+                Text(_stockText(stock), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: stock <= BigInt.zero ? Colors.red : Colors.black87)),
             ],
           ),
         ),
@@ -1361,16 +1404,15 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final found = snapshot.byCode(code);
     if (found != null) {
       _add(found.$1, found.$1.packaging(found.$2));
-      _search.clear();
     } else {
       final results = snapshot.search(code);
       if (results.length == 1) {
         _add(results.first, null);
-        _search.clear();
       } else if (results.isEmpty) {
         _toast('Article « $code » introuvable dans le catalogue hors ligne.');
       }
     }
+    _scanInput.clear();
     setState(() {});
     _searchFocus.requestFocus();
   }
@@ -1402,111 +1444,230 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   /// [footer] : total et bouton « Encaisser » sous le panier (la disposition compacte les porte dans sa barre fixe).
-  Widget _cartPanel(Snapshot snapshot, {bool footer = true}) {
-    final compact = _compact;
-    final totals = _totals(snapshot);
-    return Material(
-      color: Colors.white,
-      elevation: 2,
+  Future<void> _confirmClear() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Vider le panier ?'),
+        content: const Text('Tous les articles de ce panier seront retirés.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Conserver')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Vider le panier')),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) setState(_clearCart);
+  }
+
+  /// Remise globale, livraison et note, derrière un seul bouton comme sur Windows.
+  Future<void> _saleOptions() => showModalBottomSheet<void>(
+    context: context,
+    builder: (context) => SafeArea(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          ListTile(
-            title: Text('Panier (${_cart.length})', style: const TextStyle(fontWeight: FontWeight.bold)),
-            trailing: _cart.isEmpty ? null : TextButton(onPressed: () => setState(_clearCart), child: const Text('Vider')),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: _cart.isEmpty
-                ? const Center(child: Text('Touchez ou scannez un article.'))
-                : ListView.separated(
-                    itemCount: _cart.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final line = _cart[index];
-                      final tracked = !line.product.unlimitedStock;
-                      final first = _cart.indexWhere((l) => l.product.id == line.product.id) == index;
-                      final alert = !tracked || !first
-                          ? null
-                          : stockAlert(line.product.signedStock - (_sold[line.product.id] ?? BigInt.zero), _inCart(line.product), line.product.alertThreshold, _engine.oversellPolicy);
-                      final after = _stockAfterCart(line.product);
-                      return ListTile(
-                        dense: true,
-                        title: Text(line.label, maxLines: 2, overflow: TextOverflow.ellipsis),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('${formatMicros(line.quantity)} × ${formatFcfa(line.unitPrice)}${line.discount > 0 ? ' − ${formatFcfa(line.discount)}' : ''}'),
-                            if (tracked) Text('Reste ${after.isNegative ? '−' : ''}${formatMicros(after.abs())}', style: const TextStyle(fontSize: 11)),
-                            if (alert != null)
-                              Text(alert.message, style: TextStyle(fontSize: 11, color: alert.level == 'short' ? Colors.red : _offline)),
-                          ],
-                        ),
-                        onTap: () => _editLine(snapshot, line),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              visualDensity: compact ? VisualDensity.compact : null,
-                              icon: const Icon(Icons.remove_circle_outline),
-                              onPressed: () => setState(() {
-                                line.quantity -= BigInt.from(1000000);
-                                if (line.quantity <= BigInt.zero) _cart.remove(line);
-                                _releaseIfEmpty();
-                                if (line.discountEntry case final entry? when !entry.isPercent && line.discount > line.base) {
-                                  line.discountEntry = null;
-                                  line.discount = 0;
-                                }
-                              }),
-                            ),
-                            Text(formatFcfa(line.total), style: const TextStyle(fontWeight: FontWeight.w600)),
-                            IconButton(
-                              visualDensity: compact ? VisualDensity.compact : null,
-                              icon: const Icon(Icons.add_circle_outline),
-                              onPressed: () => setState(() => line.quantity += BigInt.from(1000000)),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
+          for (final (label, icon, open) in [
+            ('Remise globale', Icons.percent, _editGlobalDiscount),
+            ('Livraison', Icons.local_shipping_outlined, _editDelivery),
+            ('Note du ticket', Icons.note_alt_outlined, _editNote),
+          ])
+            ListTile(
+              leading: Icon(icon),
+              title: Text(label),
+              onTap: () {
+                Navigator.pop(context);
+                open();
+              },
+            ),
+        ],
+      ),
+    ),
+  );
+
+  Widget _totalCell(String label, String value) => Expanded(
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+      child: Text.rich(
+        TextSpan(
+          children: [
+            TextSpan(text: '$label : ', style: const TextStyle(color: Color(0xFF627168))),
+            TextSpan(text: value, style: const TextStyle(fontWeight: FontWeight.w600)),
+          ],
+        ),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 12),
+      ),
+    ),
+  );
+
+  Widget _cartLine(Snapshot snapshot, CartLine line, int index) {
+    final tracked = !line.product.unlimitedStock;
+    final first = _cart.indexWhere((l) => l.product.id == line.product.id) == index;
+    final alert = !tracked || !first
+        ? null
+        : stockAlert(line.product.signedStock - (_sold[line.product.id] ?? BigInt.zero), _inCart(line.product), line.product.alertThreshold, _engine.oversellPolicy);
+    final step = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(
+          tooltip: 'Diminuer la quantité',
+          visualDensity: VisualDensity.compact,
+          icon: const Icon(Icons.remove, size: 18),
+          onPressed: () => setState(() {
+            line.quantity -= BigInt.from(1000000);
+            if (line.quantity <= BigInt.zero) _cart.remove(line);
+            _releaseIfEmpty();
+            if (line.discountEntry case final entry? when !entry.isPercent && line.discount > line.base) {
+              line.discountEntry = null;
+              line.discount = 0;
+            }
+          }),
+        ),
+        Text(formatMicros(line.quantity)),
+        IconButton(
+          tooltip: 'Augmenter la quantité',
+          visualDensity: VisualDensity.compact,
+          icon: const Icon(Icons.add, size: 18),
+          onPressed: () => setState(() => line.quantity += BigInt.from(1000000)),
+        ),
+      ],
+    );
+    final amounts = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(tooltip: 'Remise de ligne', visualDensity: VisualDensity.compact, icon: const Icon(Icons.percent, size: 18), onPressed: () => _editLine(snapshot, line)),
+        Text(formatFcfa(line.total), style: const TextStyle(fontWeight: FontWeight.bold)),
+        IconButton(
+          tooltip: 'Retirer du panier',
+          visualDensity: VisualDensity.compact,
+          icon: const Icon(Icons.delete_outline),
+          onPressed: () => setState(() {
+            _cart.remove(line);
+            _releaseIfEmpty();
+          }),
+        ),
+      ],
+    );
+    return InkWell(
+      onTap: () => _editLine(snapshot, line),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(line.label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+            if (line.discount > 0) Text('${formatFcfa(line.unitPrice)} − ${formatFcfa(line.discount)}', style: const TextStyle(fontSize: 11)),
+            if (tracked) Text('Après vente : ${_stockText(_stockAfterCart(line.product))}', style: const TextStyle(fontSize: 11)),
+            if (alert != null) Text(alert.message, style: TextStyle(fontSize: 11, color: alert.level == 'short' ? Colors.red : Colors.brown)),
+            Row(children: [step, const Spacer(), Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: amounts))]),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _cartPanel(Snapshot snapshot, {bool footer = true}) {
+    final totals = _totals(snapshot);
+    final extras = _engine.saleExtrasSupported && _cart.isNotEmpty;
+    String money(int value) => value == 0 ? '—' : formatFcfa(value);
+    return Card(
+      margin: const EdgeInsets.all(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.shopping_basket_outlined, size: 18),
+                const SizedBox(width: 8),
+                const Text('Panier', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Spacer(),
+                Text('${_cart.length} ligne(s)', style: const TextStyle(fontSize: 12, color: Color(0xFF627168))),
+              ],
+            ),
+            const Divider(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.person_outline),
+                    label: Text(_customer?.name ?? 'Client de passage', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onPressed: extras && _engine.customersSupported ? _pickCustomer : null,
                   ),
-          ),
-          if (footer) const Divider(height: 1),
-          if (footer)
-            Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.tune, size: 18),
+                    label: const Text('Remise et livraison', maxLines: 1, overflow: TextOverflow.ellipsis),
+                    onPressed: extras ? _saleOptions : null,
+                  ),
+                ),
+              ],
+            ),
+            Expanded(
+              child: _cart.isEmpty
+                  ? const Center(child: Text('Scannez votre premier article.'))
+                  : ListView.separated(
+                      itemCount: _cart.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) => _cartLine(snapshot, _cart[index], index),
+                    ),
+            ),
+            const Divider(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: _cart.isEmpty ? null : _suspendCart,
+                    icon: const Icon(Icons.pause_circle_outline),
+                    label: const Text('En attente', maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+                Expanded(
+                  child: TextButton.icon(
+                    onPressed: _suspendedCount > 0 ? () => _openSuspended(snapshot) : null,
+                    icon: const Icon(Icons.list_alt),
+                    label: Text('Suspendus ($_suspendedCount)', maxLines: 1, overflow: TextOverflow.ellipsis),
+                  ),
+                ),
+              ],
+            ),
+            Row(children: [_totalCell('Remise globale', money(totals.globalDiscount)), _totalCell('Livraison', money(totals.delivery))]),
+            Row(children: [_totalCell('Base HT', formatFcfa(totals.baseHt)), _totalCell('TVA', formatFcfa(totals.vat))]),
+            if (footer) ...[
+              Row(
                 children: [
-                  Align(alignment: Alignment.centerLeft, child: _cartActions()),
-                  if (totals.globalDiscount > 0)
-                    Row(children: [const Text('Remise globale'), const Spacer(), Text('− ${formatFcfa(totals.globalDiscount)}')]),
-                  if (totals.delivery > 0) Row(children: [const Text('Livraison'), const Spacer(), Text(formatFcfa(totals.delivery))]),
-                  if (snapshot.store.hasVat)
-                    Row(children: [Text(snapshot.store.vatIncluded ? 'dont TVA' : 'TVA'), const Spacer(), Text(formatFcfa(totals.vat))]),
-                  Row(
-                    children: [
-                      const Text('Total', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-                      const Spacer(),
-                      Text(
-                        formatFcfa(totals.payable),
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: _brand),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 56,
-                    child: FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: _brand),
-                      onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
-                      icon: const Icon(Icons.payments),
-                      label: const Text('Encaisser', style: TextStyle(fontSize: 18)),
+                  const Text('À payer', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerRight,
+                      child: Text(formatFcfa(totals.payable), style: const TextStyle(fontSize: 30, fontWeight: FontWeight.bold)),
                     ),
                   ),
                 ],
               ),
-            ),
-        ],
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  OutlinedButton(onPressed: _cart.isEmpty ? null : _confirmClear, child: const Text('Vider le panier')),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: FilledButton.icon(
+                      style: FilledButton.styleFrom(padding: const EdgeInsets.all(14)),
+                      onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
+                      icon: const Icon(Icons.payments_outlined),
+                      label: const Text('Payer'),
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (_cart.isNotEmpty)
+              OutlinedButton(onPressed: _confirmClear, child: const Text('Vider le panier')),
+          ],
+        ),
       ),
     );
   }

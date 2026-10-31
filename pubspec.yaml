@@ -73,9 +73,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+  assets:
+    - assets/branding/shopikaiss/
 
   # Marque ShopiKaiss (logo validé le 2026-10-29), affichée dans l'en-tête de la caisse locale.
-  assets:
     - assets/marque/embleme.png
 
   # To add assets to your application, add an assets section, like this:

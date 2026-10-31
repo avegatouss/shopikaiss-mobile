@@ -6,9 +6,10 @@ Future<void> main(List<String> args) async {
   await for (final line
       in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
     final request = jsonDecode(line) as Map;
-    if (args.contains('bad-error-code') ||
-        args.contains('bad-error-message') ||
-        args.contains('bad-error-proof')) {
+    if (request['command'] == 'commitSale' &&
+        (args.contains('bad-error-code') ||
+            args.contains('bad-error-message') ||
+            args.contains('bad-error-proof'))) {
       stdout.writeln(
         jsonEncode({
           'version': 1,

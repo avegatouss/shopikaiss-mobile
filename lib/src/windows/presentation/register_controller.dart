@@ -54,7 +54,10 @@ class WindowsRegisterController extends ChangeNotifier {
 
   late final StreamSubscription<Map<String, dynamic>> _subscription;
   Map<String, dynamic> view = const {};
+  Map<String, dynamic> capabilities = const {};
   bool ready = false;
+  bool? sessionOpen;
+  String? webOrigin;
   bool busy = false;
   bool _disposed = false;
   bool _transportAvailable = true;
@@ -64,6 +67,8 @@ class WindowsRegisterController extends ChangeNotifier {
   String? receipt;
   String? _checkoutId;
   List<Map<String, dynamic>> paymentMethods = const [];
+  int? paymentChange;
+  int? paymentPayable;
 
   List<Map<String, dynamic>> get products => _rows('products');
   List<Map<String, dynamic>> get lines => _rows('lines');
@@ -86,6 +91,7 @@ class WindowsRegisterController extends ChangeNotifier {
     if (_disposed || !_transportAvailable || _journalBlocked) return;
     final generation = ++_refreshGeneration;
     try {
+      final status = await host.call(HostCommand.status);
       final next = await host.call(HostCommand.view);
       if (_disposed || generation != _refreshGeneration) return;
       if (next['schema'] != 1 || next['revision'] is! int) {
@@ -96,6 +102,13 @@ class WindowsRegisterController extends ChangeNotifier {
       }
       if ((next['revision'] as int) < (view['revision'] as int? ?? -1)) return;
       view = next;
+      webOrigin = status['web_origin'] as String?;
+      sessionOpen = status['session_open'] is bool
+          ? status['session_open'] as bool
+          : null;
+      capabilities = status['capabilities'] is Map<String, dynamic>
+          ? status['capabilities'] as Map<String, dynamic>
+          : const {};
       ready = next['ready'] == true;
     } on HostFailure catch (error) {
       if (_disposed || generation != _refreshGeneration) return;
@@ -118,27 +131,64 @@ class WindowsRegisterController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> command(
+  Future<Map<String, dynamic>?> command(
     HostCommand command,
-    Map<String, dynamic> arguments,
-  ) async {
-    if (_journalBlocked || !ready || busy || uncertainOperation != null) return;
+    Map<String, dynamic> arguments, {
+    String? operationId,
+  }) async {
+    if (_journalBlocked || !ready || busy || uncertainOperation != null) {
+      return null;
+    }
     busy = true;
     message = null;
-    if (command == HostCommand.preparePayment) paymentMethods = const [];
+    if (command == HostCommand.preparePayment) {
+      paymentMethods = const [];
+      paymentChange = null;
+      paymentPayable = null;
+    }
     notifyListeners();
     try {
-      final result = await host.call(command, arguments: arguments);
+      final result = await host.call(
+        command,
+        arguments: arguments,
+        operationId: operationId,
+      );
+      if (command == HostCommand.setPayment) {
+        paymentChange = result['change'] is int
+            ? result['change'] as int
+            : null;
+      }
       if (command == HostCommand.preparePayment) {
+        paymentPayable = result['payable'] as int?;
         paymentMethods = (result['methods'] as List? ?? const [])
             .whereType<Map<String, dynamic>>()
             .where((m) => m['code'] is String && m['name'] is String)
             .toList();
       }
       _checkoutId = null;
-      await refresh();
+      if ((command == HostCommand.setPayment ||
+              command == HostCommand.setPayments) &&
+          !_disposed &&
+          _transportAvailable &&
+          result['schema'] == 1 &&
+          result['revision'] is int &&
+          (result['revision'] as int) >= (view['revision'] as int? ?? -1)) {
+        // The local engine already returns the authoritative calculated view.
+        // Avoid two extra IPC calls and a second catalogue calculation per edit.
+        ++_refreshGeneration;
+        view = result;
+        ready = result['ready'] == true;
+      } else if (command != HostCommand.preparePayment) {
+        await refresh();
+      }
+      return result;
     } on HostFailure catch (error) {
       message = error.message;
+      if (command == HostCommand.setPayments ||
+          command == HostCommand.setPayment) {
+        paymentChange = null;
+        await refresh();
+      }
       // A timed-out basket command might have committed. Disable editing until
       // the authoritative draft is reloaded; never replay a scan blindly.
       if (error.code == 'host_unavailable') ready = false;
@@ -149,9 +199,10 @@ class WindowsRegisterController extends ChangeNotifier {
       busy = false;
       if (!_disposed) notifyListeners();
     }
+    return null;
   }
 
-  Future<void> commitSale() async {
+  Future<void> commitSale({Map<String, dynamic>? approval}) async {
     if (!canPay) return;
     final operation = _checkoutId ??= const Uuid().v4();
     busy = true;
@@ -170,7 +221,11 @@ class WindowsRegisterController extends ChangeNotifier {
     try {
       final result = await host.call(
         HostCommand.commitSale,
-        arguments: {'draft_id': view['draft_id'], 'revision': view['revision']},
+        arguments: {
+          'draft_id': view['draft_id'],
+          'revision': view['revision'],
+          'approval': ?approval,
+        },
         operationId: operation,
       );
       if (result['state'] != 'committed' ||

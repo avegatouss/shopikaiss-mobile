@@ -288,7 +288,7 @@ class _SettingsPageState extends State<SettingsPage> {
               Wrap(
                 spacing: 8,
                 children: [
-                  for (final color in const [AppSettings.defaultBrandColor, 0xFF1D4ED8, 0xFF7C3AED, 0xFFBE123C, 0xFFB45309, 0xFF0F766E, 0xFF111827])
+                  for (final color in AppSettings.brandColors)
                     ChoiceChip(
                       label: const SizedBox.square(dimension: 18),
                       selected: _brandColor == color,
@@ -306,18 +306,18 @@ class _SettingsPageState extends State<SettingsPage> {
                 onChanged: (v) => setState(() => _catalogList = v),
               ),
               Text('Taille des produits : $_tileWidth', style: theme.textTheme.labelLarge),
-              Slider(value: _tileWidth.toDouble(), min: 140, max: 300, divisions: 8, label: '$_tileWidth', onChanged: (v) => setState(() => _tileWidth = v.round())),
+              Slider(value: _tileWidth.toDouble().clamp(150, 330), min: 150, max: 330, divisions: 18, label: '$_tileWidth', onChanged: (v) => setState(() => _tileWidth = v.round())),
               Text('Largeur du panier (tablette) : $_cartWidth', style: theme.textTheme.labelLarge),
               Slider(value: _cartWidth.toDouble(), min: 300, max: 520, divisions: 11, label: '$_cartWidth', onChanged: (v) => setState(() => _cartWidth = v.round())),
               DropdownButtonFormField<String>(
                 initialValue: _imageMode,
                 decoration: const InputDecoration(labelText: 'Disposition des images'),
                 items: const [
-                  DropdownMenuItem(value: 'left', child: Text('À gauche du nom')),
                   DropdownMenuItem(value: 'top', child: Text('Au-dessus du nom')),
+                  DropdownMenuItem(value: 'left', child: Text('À gauche du nom')),
                   DropdownMenuItem(value: 'hidden', child: Text('Masquées')),
                 ],
-                onChanged: (v) => setState(() => _imageMode = v ?? 'left'),
+                onChanged: (v) => setState(() => _imageMode = v ?? 'top'),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(

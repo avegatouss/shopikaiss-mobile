@@ -20,13 +20,15 @@ class AppSettings {
     this.fastRendering = true,
     this.brandColor = defaultBrandColor,
     this.catalogList = false,
-    this.tileWidth = 200,
+    this.tileWidth = 175,
     this.cartWidth = 380,
-    this.imageMode = 'left',
+    this.imageMode = 'top',
     this.imageFit = 'cover',
   });
 
-  static const defaultBrandColor = 0xFF0F3E2E;
+  /// Couleurs de la caisse Windows : vert, bleu, prune, terre cuite.
+  static const defaultBrandColor = 0xFF164E42;
+  static const brandColors = [defaultBrandColor, 0xFF234E86, 0xFF713C70, 0xFF91462D];
 
   /// Couleur principale de la caisse locale (ARGB).
   int brandColor;
@@ -120,9 +122,9 @@ class AppSettings {
       fastRendering: p.getBool('fastRendering') ?? true,
       brandColor: p.getInt('brandColor') ?? defaultBrandColor,
       catalogList: p.getBool('catalogList') ?? false,
-      tileWidth: p.getInt('tileWidth') ?? 200,
+      tileWidth: p.getInt('tileWidth') ?? 175,
       cartWidth: p.getInt('cartWidth') ?? 380,
-      imageMode: p.getString('imageMode') ?? 'left',
+      imageMode: p.getString('imageMode') ?? 'top',
       imageFit: p.getString('imageFit') ?? 'cover',
     );
   }

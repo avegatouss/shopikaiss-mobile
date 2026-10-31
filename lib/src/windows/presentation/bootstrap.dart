@@ -9,6 +9,7 @@ import '../ipc/protocol.dart';
 import '../ipc/supervised_host.dart';
 import '../platform/sale_intent.dart';
 import 'register_app.dart';
+import 'brand_logo.dart';
 import 'register_controller.dart';
 
 /// Explicit integration build only. No path received from the server is run.
@@ -24,6 +25,7 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
   final origin = TextEditingController();
   final code = TextEditingController();
   final pin = TextEditingController();
+  final openingFloat = TextEditingController(text: '0');
   Map<String, dynamic> status = {};
   int? operatorId;
   bool busy = false;
@@ -56,6 +58,14 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
       // Same default as EngineHost; this directory must not be changed to
       // bypass an unresolved intent or an existing engine lock.
       final data = p.join(local, 'ShopiKaiss', 'caisse');
+      // A v1 intent must never be reconciled as "not found" by a v2-only
+      // lookup. Keep it intact and require its resolution with the old host.
+      if (await File(p.join(data, 'pending-sale.json')).exists()) {
+        throw const HostFailure(
+          'legacy_intent',
+          'Un encaissement de l’ancienne caisse reste à vérifier. Reprenez l’ancienne version pour le résoudre avant le passage en v2. Ne supprimez pas son journal.',
+        );
+      }
       final bundle = p.join(p.dirname(Platform.resolvedExecutable), 'moteur');
       final exe = p.join(bundle, 'bin', 'shopikaiss_moteur.exe');
       host = SupervisedWindowsHost(() async {
@@ -75,7 +85,7 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
       });
       controller = WindowsRegisterController(
         host!,
-        journal: SaleIntentJournal(File(p.join(data, 'pending-sale.json'))),
+        journal: SaleIntentJournal(File(p.join(data, 'pending-sale-v2.json'))),
       );
       await controller!.recoverIntent();
     }
@@ -114,6 +124,7 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
     origin.dispose();
     code.dispose();
     pin.dispose();
+    openingFloat.dispose();
     super.dispose();
   }
 
@@ -123,8 +134,13 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
       return WindowsRegisterApp(
         controller: controller,
         onConnection: () {
+          pin.clear();
+          operatorId = null;
           setState(() => entered = false);
-          _run(_connect);
+          _run(() async {
+            await host!.call(HostCommand.logout);
+            await _status();
+          });
         },
       );
     }
@@ -142,6 +158,8 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    const Center(child: ShopikaissLogo(width: 300)),
+                    const SizedBox(height: 24),
                     const Text(
                       'Mise en service de la caisse',
                       style: TextStyle(fontSize: 24),
@@ -233,14 +251,54 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
                                 }
                                 await _status();
                                 await controller!.refresh();
-                                entered = true;
+                                entered = status['session_open'] == true;
                               }),
                         child: const Text('Ouvrir la caisse'),
                       ),
-                      if (status['session_open'] != true)
-                        const Text(
-                          'Ouvrez une session de caisse depuis un terminal compatible. L’ouverture depuis Windows reste à intégrer.',
+                      if (status['session_open'] != true &&
+                          status['operator'] != null) ...[
+                        TextField(
+                          controller: openingFloat,
+                          keyboardType: TextInputType.number,
+                          decoration: const InputDecoration(
+                            labelText: 'Fond de caisse compté (F CFA)',
+                          ),
                         ),
+                        FilledButton(
+                          onPressed:
+                              busy ||
+                                  ((status['capabilities']
+                                              as Map?)?['open_session']
+                                          as Map?)?['allowed'] !=
+                                      true
+                              ? null
+                              : () => _run(() async {
+                                  final amount = int.tryParse(
+                                    openingFloat.text.trim(),
+                                  );
+                                  if (amount == null || amount < 0) {
+                                    throw const HostFailure(
+                                      'amount',
+                                      'Saisissez un fond de caisse entier positif ou nul.',
+                                    );
+                                  }
+                                  await host!.call(
+                                    HostCommand.openSession,
+                                    arguments: {'float': amount},
+                                  );
+                                  await _status();
+                                  await controller!.refresh();
+                                  entered = status['session_open'] == true;
+                                }),
+                          child: const Text('Ouvrir la session locale'),
+                        ),
+                        if (((status['capabilities'] as Map?)?['open_session']
+                                as Map?)?['reason'] !=
+                            null)
+                          Text(
+                            '${((status['capabilities'] as Map)['open_session'] as Map)['reason']}',
+                          ),
+                      ],
                     ],
                     TextButton(
                       onPressed: busy ? null : () => _run(_connect),

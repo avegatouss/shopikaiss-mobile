@@ -1,5 +1,7 @@
 #include "platform_channel.h"
 #include "secret_protection.h"
+#include "customer_display.h"
+#include <regex>
 #include <windows.h>
 #include <shlobj.h>
 #include <wincrypt.h>
@@ -8,6 +10,13 @@
 #include <vector>
 
 namespace {
+std::wstring Wide(const std::string& text) {
+  const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
+  if (size <= 0) return {};
+  std::wstring result(size, L'\0');
+  MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), result.data(), size);
+  return result;
+}
 std::string Utf8(const std::wstring& value) {
   const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
       value.data(), static_cast<int>(value.size()), nullptr, 0, nullptr, nullptr);
@@ -20,11 +29,71 @@ std::string Utf8(const std::wstring& value) {
 }  // namespace
 
 std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
-CreatePlatformChannel(flutter::BinaryMessenger* messenger) {
+CreatePlatformChannel(flutter::BinaryMessenger* messenger, HWND window) {
   auto channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       messenger, "ci.khoga.shopikaiss/windows",
       &flutter::StandardMethodCodec::GetInstance());
-  channel->SetMethodCallHandler([](const auto& call, auto result) {
+  channel->SetMethodCallHandler([window, display = std::make_shared<CustomerDisplay>(), fullscreen = false,
+      saved = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)}, style = LONG_PTR{0}](const auto& call, auto result) mutable {
+    if (call.method_name() == "displayMonitors") {
+      flutter::EncodableList list;
+      const auto monitors = CustomerDisplay::Monitors();
+      for (size_t i = 0; i < monitors.size(); ++i) {
+        if (monitors[i] != MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST)) list.push_back(flutter::EncodableValue(static_cast<int>(i)));
+      }
+      result->Success(flutter::EncodableValue(list)); return;
+    }
+    if (call.method_name() == "displayError") { result->Success(flutter::EncodableValue(display->Error())); return; }
+    if (call.method_name() == "configureDisplay" || call.method_name() == "updateDisplay") {
+      const auto* args = call.arguments() ? std::get_if<flutter::EncodableMap>(call.arguments()) : nullptr;
+      if (!args) { result->Error("display_args", "Configuration invalide."); return; }
+      const auto text = [args](const char* key) -> std::string {
+        const auto it = args->find(flutter::EncodableValue(key));
+        if (it == args->end()) return {};
+        const auto* value = std::get_if<std::string>(&it->second); return value ? *value : "";
+      };
+      if (call.method_name() == "updateDisplay") {
+        const auto screen = text("screen"), serial = text("serial");
+        if (screen.size() > 8192 || serial.size() > 128) { result->Error("display_args", "Affichage trop long."); return; }
+        display->Update(Wide(screen), serial); result->Success(); return;
+      }
+      display->CloseScreen(); display->ConfigureSerial(L"", 9600);
+      const auto mode = text("mode");
+      if (mode == "screen") {
+        const auto index = text("monitor");
+        if (!std::regex_match(index, std::regex("[0-9]{1,2}")) || !display->Screen(window, std::stoi(index))) {
+          result->Error("display_monitor", "Selectionnez un second ecran etendu, distinct de la caisse."); return;
+        }
+      } else if (mode == "serial") {
+        const auto port = text("port"), baud = text("baud");
+        if (!std::regex_match(port, std::regex("COM[1-9][0-9]{0,2}")) ||
+            !std::regex_match(baud, std::regex("9600|19200|38400|115200"))) {
+          result->Error("display_serial", "Port COM ou vitesse invalide."); return;
+        }
+        display->ConfigureSerial(Wide(port), static_cast<DWORD>(std::stoul(baud)));
+      } else if (mode != "off") { result->Error("display_mode", "Mode inconnu."); return; }
+      result->Success(); return;
+    }
+    if (call.method_name() == "toggleFullscreen") {
+      if (!fullscreen) {
+        saved.length = sizeof(WINDOWPLACEMENT);
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        if (!GetWindowPlacement(window, &saved) || !GetMonitorInfo(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST), &monitor)) {
+          result->Error("fullscreen", "Plein ecran indisponible."); return;
+        }
+        style = GetWindowLongPtr(window, GWL_STYLE);
+        SetWindowLongPtr(window, GWL_STYLE, style & ~WS_OVERLAPPEDWINDOW);
+        SetWindowPos(window, nullptr, monitor.rcMonitor.left, monitor.rcMonitor.top,
+          monitor.rcMonitor.right - monitor.rcMonitor.left,
+          monitor.rcMonitor.bottom - monitor.rcMonitor.top, SWP_NOZORDER | SWP_FRAMECHANGED);
+      } else {
+        SetWindowLongPtr(window, GWL_STYLE, style);
+        SetWindowPlacement(window, &saved);
+        SetWindowPos(window, nullptr, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+      }
+      fullscreen = !fullscreen;
+      result->Success(flutter::EncodableValue(fullscreen)); return;
+    }
     if (call.method_name() == "dataDirectory") {
       PWSTR local = nullptr;
       if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_CREATE,

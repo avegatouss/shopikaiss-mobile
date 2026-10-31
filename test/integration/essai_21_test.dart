@@ -22,6 +22,10 @@ import 'package:uuid/uuid.dart';
 /// arrondi espèces ; SK_REMISE_LIGNE et SK_REMISE_GLOBALE en %) ; `catalogue` (badges et images, sans vente) ; `etat` (synchronisation et sort des ventes).
 void main() {
   final env = Platform.environment;
+  if (env['SK_BASE'] == null) {
+    test('essai réel 2.1', () {}, skip: 'SK_BASE absent : recette démo non demandée.');
+    return;
+  }
   final origin = env['SK_ORIGINE'] ?? 'https://demo.khoga.ci';
   final phase = env['SK_PHASE'] ?? 'etat';
   final dir = env['SK_BASE'] ?? (throw StateError('SK_BASE requis (dossier de la base conservée).'));
