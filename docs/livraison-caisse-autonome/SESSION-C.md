@@ -285,3 +285,11 @@ Validation de ce lot : 59 tests Windows reussis (dont executable moteur reel), a
 Les messages moteur sont presentes dans un bandeau colore du titre des fenetres paiement simple et multiple. Multipaiement : premier montant propose depuis preparePayment.payable, puis chaque nouvelle ligne reprend le solde non affecte ; affichage du reste a repartir, ajout desactive quand il est nul. Ce calcul est une proposition de saisie seulement : le moteur reste autorite pour les montants, l'arrondi, la monnaie et l'encaissement.
 
 preparePayment ne declenche plus une relecture status/view inutile. setPayment/setPayments reutilisent la vue moteur retournee si schema/revision valides, au lieu de deux appels IPC supplementaires et d'un second calcul de catalogue. Erreur ou reponse sans vue : chemin de rafraichissement conserve. Temporisation de saisie 250 ms conservee, validation explicite de l'encaissement. Synchronisation du moteur deja executee en dehors de la file des commandes locales ; aucune promesse de temps maximal sans mesure sur poste reel.
+
+## Paniers partages, cloture, retours et badges
+
+Liste items + shared, reprise/suppression par shared_id, taken_elsewhere non actionnable et besoin reseau indique. Priorite A du 31 octobre traitee.
+Menu du poste : cloture a l'aveugle (comptage especes/autres moyens, justifications), retour especes (vente connue, quantites en unites de base, previsualisation moteur et motif obligatoire). Confirmation avant ecriture. Z attendu du serveur. Aucun remboursement physique automatise.
+Requete et UUID conserves avant envoi dans pending-close-v2.json ou pending-return-v2.json, a cote de la base. Reponse inconnue : requete immuable reprise avec le meme UUID, y compris apres redemarrage. Fichier illisible bloque cette operation sans ecrasement ; reponse incoherente ne vaut pas succes.
+Badges stock faible/promotion/nouveau/favori depuis la vue moteur, sans recalcul. Stock projete apres panier encore attendu de B. Texte obsolete des reglages images corrige.
+Validation finale : 64 tests Windows PASS en serie, analyse sans remarque. Premiere passe parallele : timeout demarrage JIT du test de fermeture et test disque execute dans zone de temps simulee ; test disque corrige via runAsync, aucun controle metier retire. Pas de recette demo supplementaire.

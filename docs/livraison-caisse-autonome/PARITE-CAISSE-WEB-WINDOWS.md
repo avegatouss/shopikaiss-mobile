@@ -1,5 +1,15 @@
 ﻿# Parité de la caisse Windows avec la caisse web
 
+## Actualisation du 31 octobre 2026
+
+Le tableau historique ci-dessous décrit le premier lot, pas l'installation actuelle. Filtres, pagination, quantité +/−, clients, remises/livraison/note, paiement multiple déclaré, code responsable, calculatrice, liens web et impression sont raccordés.
+
+Dernier lot C : paniers locaux ET partagés, clôture à l'aveugle, retours espèces avec prévisualisation moteur, journal durable des demandes de clôture/retour et reprise avec le même UUID, badges produits. Recette réelle de ces nouveaux parcours encore ouverte.
+
+À fournir par B : projection du stock après panier et programmation/pause des téléchargements images. À fournir par A/B : tarif gros, autres frais hors livraison, lots/variantes/coffrets et création produit complète, bons/cartes/points/crédit en ligne, journal de caisse/X/historique serveur, paniers de rayon, règles avancées de session/horaires/inactivité. Raccordement C ensuite. Le bouton Reçus actuel n'est pas la file des paniers de rayon.
+
+À qualifier par C avec matériel/serveur de recette : impression papier et tiroir, afficheur selon modèle, latences réelles, reprise après coupure/redémarrage, comparaison native au web. Installation de recette non signée ; aucune validation production ni fusion main.
+
 ## Objectif demandé
 
 Même disposition, mêmes parcours, mêmes options et mêmes droits que la caisse web. Seuls le stockage local et la synchronisation changent. Une fonction absente du moteur n'est ni supprimée du périmètre ni remplacée par un bouton factice. La caisse Windows n'est pas prête pour la production tant que cette parité et la recette v2 ne sont pas démontrées.

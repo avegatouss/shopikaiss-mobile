@@ -299,7 +299,7 @@ class ScreenSettingsPanel extends StatelessWidget {
             leading: Icon(Icons.image_outlined),
             title: Text('Images des produits'),
             subtitle: Text(
-              'Synchronisation par lots nocturnes en préparation. Elle ne sera pas lancée à chaque vente. Le moteur ne fournit pas encore les images.',
+              'Photos conservées sur ce poste : téléchargement par lots de 30 images manquantes ou modifiées, démarré panier vide. La programmation nocturne et la pause à la reprise des ventes restent à raccorder au moteur.',
             ),
           ),
         ],

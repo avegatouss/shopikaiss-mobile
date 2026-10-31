@@ -22,6 +22,8 @@ import 'discount_approval.dart';
 import 'web_destinations.dart';
 import 'customer_picker.dart';
 import 'payment_message.dart';
+import 'cash_operations.dart';
+import 'product_badges.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -638,11 +640,31 @@ class _RegisterState extends State<_Register> {
                   if (value == 'web') _backOffice(cashRegister: true);
                   if (value == 'help') _shortcuts();
                   if (value == 'session') _session();
+                  if (value == 'close' || value == 'return') {
+                    showDialog<void>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) => CashOperationsDialog(
+                        controller: c,
+                        returns: value == 'return',
+                      ),
+                    );
+                  }
                   if (value == 'lock' || value == 'logout') {
                     widget.onConnection?.call();
                   }
                 },
                 itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'close',
+                    enabled: _canEdit,
+                    child: const Text('Clôturer ma session'),
+                  ),
+                  PopupMenuItem(
+                    value: 'return',
+                    enabled: _canEdit,
+                    child: const Text('Retour en espèces'),
+                  ),
                   PopupMenuItem(
                     value: 'lock',
                     enabled:
@@ -1039,8 +1061,12 @@ class _RegisterState extends State<_Register> {
                           ? null
                           : _imageSlot(product: p),
                       title: Text(p['name'] as String? ?? ''),
-                      subtitle: Text(
-                        'Stock : ${p['stock_label'] ?? "à vérifier"}',
+                      subtitle: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Stock : ${p['stock_label'] ?? "à vérifier"}'),
+                          ProductBadges(product: p),
+                        ],
                       ),
                       trailing: Text(p['price_label'] as String? ?? '—'),
                       onTap: _canEdit ? () => _addProduct(p) : null,
@@ -1052,6 +1078,7 @@ class _RegisterState extends State<_Register> {
                     maxCrossAxisExtent: _screen.tileWidth,
                     mainAxisExtent:
                         _screen.tileWidth * 115 / 175 +
+                        24 +
                         (_screen.imageLayout == 'top' ? 68 : 0),
                     crossAxisSpacing: 4,
                     mainAxisSpacing: 4,
@@ -1126,6 +1153,7 @@ class _RegisterState extends State<_Register> {
                                 ],
                               ),
                               const SizedBox(height: 4),
+                              ProductBadges(product: p),
                               Text(
                                 p['stock_label'] as String? ??
                                     'Stock à vérifier',

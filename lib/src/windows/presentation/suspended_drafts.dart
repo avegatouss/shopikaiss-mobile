@@ -29,6 +29,14 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
       final result = await widget.controller.host.call(HostCommand.drafts);
       if (mounted) {
         items = (result['items'] as List).cast<Map<String, dynamic>>();
+        items.addAll(
+          (result['shared'] as List? ?? []).whereType<Map>().map(
+            (row) => {
+              ...Map<String, dynamic>.from(row),
+              'summary': row['label'],
+            },
+          ),
+        );
       }
     } catch (_) {
       if (mounted) error = 'Impossible de lire les paniers locaux. Réessayez.';
@@ -39,11 +47,19 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
 
   Future<void> resume(Map<String, dynamic> item) async {
     setState(() => busy = true);
-    await widget.controller.command(HostCommand.resumeDraft, {
-      'draft_id': item['draft_id'],
-    });
+    final result = await widget.controller.command(
+      item['shared_id'] == null
+          ? HostCommand.resumeDraft
+          : HostCommand.resumeShared,
+      {
+        if (item['shared_id'] == null)
+          'draft_id': item['draft_id']
+        else
+          'shared_id': item['shared_id'],
+      },
+    );
     if (!mounted) return;
-    if (widget.controller.message == null) {
+    if (result != null && widget.controller.message == null) {
       Navigator.pop(context);
     } else {
       setState(() {
@@ -59,7 +75,7 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
       builder: (context) => AlertDialog(
         title: const Text('Supprimer ce panier en attente ?'),
         content: Text(
-          '${item['summary'] ?? 'Panier'}\nCette action retire ce panier local. Aucune vente ne sera annulée.',
+          '${item['summary'] ?? 'Panier'}\nCette action supprime le panier ${item['shared_id'] == null ? 'local' : 'partagé'}. Aucune vente ne sera annulée.',
         ),
         actions: [
           TextButton(
@@ -77,7 +93,17 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
     final c = widget.controller;
     if (!c.ready || c.busy || c.uncertainOperation != null) return;
     setState(() => busy = true);
-    await c.command(HostCommand.deleteDraft, {'draft_id': item['draft_id']});
+    await c.command(
+      item['shared_id'] == null
+          ? HostCommand.deleteDraft
+          : HostCommand.deleteShared,
+      {
+        if (item['shared_id'] == null)
+          'draft_id': item['draft_id']
+        else
+          'shared_id': item['shared_id'],
+      },
+    );
     if (!mounted) return;
     if (c.message != null) {
       setState(() {
@@ -91,7 +117,7 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Paniers en attente sur ce poste'),
+    title: const Text('Paniers en attente et partagés'),
     content: SizedBox(
       width: 560,
       height: 340,
@@ -115,7 +141,7 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
                       return ListTile(
                         title: Text('${item['summary'] ?? "Panier"}'),
                         subtitle: Text(
-                          '${item['lines_count']} ligne(s) · ${item['total_label'] ?? "—"}',
+                          '${item['lines_count']} ligne(s) · ${item['shared_id'] == null ? 'Ce poste' : 'Partagé · connexion requise'}${item['taken_elsewhere'] == true ? ' · Déjà repris ailleurs' : ''}',
                         ),
                         trailing: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -123,16 +149,22 @@ class _SuspendedDraftsDialogState extends State<SuspendedDraftsDialog> {
                             IconButton(
                               tooltip: 'Reprendre ce panier',
                               icon: const Icon(Icons.play_arrow),
-                              onPressed: () => resume(item),
+                              onPressed: item['taken_elsewhere'] == true
+                                  ? null
+                                  : () => resume(item),
                             ),
                             IconButton(
                               tooltip: 'Supprimer ce panier en attente',
                               icon: const Icon(Icons.delete_outline),
-                              onPressed: () => remove(item),
+                              onPressed: item['taken_elsewhere'] == true
+                                  ? null
+                                  : () => remove(item),
                             ),
                           ],
                         ),
-                        onTap: () => resume(item),
+                        onTap: item['taken_elsewhere'] == true
+                            ? null
+                            : () => resume(item),
                       );
                     },
                   ),
