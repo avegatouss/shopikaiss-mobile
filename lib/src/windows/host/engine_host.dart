@@ -33,7 +33,7 @@ class EngineHostBusy implements Exception {
 /// - Synchronisation planifiée périodiquement, jamais attendue par une commande ; la fermeture attend la
 ///   synchronisation et les commandes en cours, puis ferme la base et libère le verrou.
 class EngineHost {
-  EngineHost._(this.directory, this._lock, this.store, this.engine, this.adapter);
+  EngineHost._(this.directory, this._lock, this.store, this.engine, this.adapter, this._ownedTransport);
 
   final String directory;
   final RandomAccessFile _lock;
@@ -41,7 +41,8 @@ class EngineHost {
   final CaisseEngine engine;
   final LocalRegisterAdapter adapter;
   Timer? _timer;
-  bool _closed = false;
+  final HttpV2Transport? _ownedTransport;
+  Future<void>? _closing;
 
   static const databaseName = 'caisse.db';
   static const lockName = 'caisse.lock';
@@ -72,11 +73,13 @@ class EngineHost {
       await lock.close();
       throw EngineHostBusy(directory);
     }
+    final ownedTransport = transport == null ? HttpV2Transport() : null;
+    SqfliteOfflineStore? openedStore;
     try {
-      final store = await SqfliteOfflineStore.open(name: p.join(directory, databaseName), factory: factory);
+      final store = openedStore = await SqfliteOfflineStore.open(name: p.join(directory, databaseName), factory: factory);
       final engine = V2Engine.onStore(
         store,
-        transport: transport ?? HttpV2Transport(),
+        transport: transport ?? ownedTransport!,
         appVersion: appVersion,
         platform: 'windows',
         newUuid: newUuid,
@@ -89,7 +92,7 @@ class EngineHost {
       if (origin != null) await engine.load(origin);
       final adapter = LocalRegisterAdapter(engine, paperWidth: paperWidth);
       await adapter.start();
-      final host = EngineHost._(directory, lock, store, engine, adapter);
+      final host = EngineHost._(directory, lock, store, engine, adapter, ownedTransport);
       if (syncEvery != null) {
         host._timer = Timer.periodic(syncEvery, (_) {
           if (engine.paired) adapter.scheduleSynchronization();
@@ -98,6 +101,8 @@ class EngineHost {
       }
       return host;
     } catch (_) {
+      ownedTransport?.close();
+      await openedStore?.close();
       await lock.unlock();
       await lock.close();
       rethrow;
@@ -113,11 +118,14 @@ class EngineHost {
     }
   }
 
-  Future<void> close() async {
-    if (_closed) return;
-    _closed = true;
+  Future<void> close() => _closing ??= _finishClose();
+
+  Future<void> _finishClose() async {
     _timer?.cancel();
     await adapter.close();
+    // All accepted commands and sync work are drained before sockets close.
+    // Keep-alive HTTP sockets otherwise keep the Dart process alive after EOF.
+    _ownedTransport?.close();
     await store.close();
     await _lock.unlock();
     await _lock.close();

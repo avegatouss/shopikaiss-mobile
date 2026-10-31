@@ -317,3 +317,9 @@ Validation : 94 tests Windows/moteur puis 69 tests Windows avec afficheurs, tous
 Moteur AOT reel, IPC stdin/stdout, SQLite synthetique dediee de 5000 produits, aucun reseau ni donnees boutique : mediane de 20 appels view 74,72 ms, search 48,47 ms, scan 55,38 ms ; maxima 130,51 / 107,99 / 115,23 ms. Demarrage + premiere vue 1020,95 ms. Script reproductible tool/windows/benchmark_release.py ; ce n'est pas une mesure de rendu visuel ni de synchronisation reelle. Compilation initiale native reussie.
 Test natif afficheur (echec de peripherique absent + arret du worker) PASS. Test natif securite non validable avec caisse ouverte : assertion first instance refusee normalement ; ne pas fermer la caisse de l'utilisateur pour ce test. Dernier correctif : reglages corrompus rejetes sans contaminer les menus ; 3 tests afficheur Dart PASS.
 
+
+## 31 octobre — corrections paniers et arret du moteur
+Moteur B a6e3dce integre (7c5af2c inclus) : panier partage conserve avant retour du journal, suppression visible immediatement pour eviter une seconde suppression.
+EngineHost ferme maintenant son propre client HTTP apres drainage des commandes/synchronisation, puis SQLite et le verrou. Les transports injectes restent possedes par leur appelant. Tous les appels close attendent la meme Future. Nettoyage aussi en echec de demarrage.
+86 tests Windows + moteur v2 PASS ; analyse ciblee sans remarque. Test avec vraie connexion TCP keep-alive : fermeture et reouverture de la base PASS. Script tool/windows/check_host_shutdown.py : ancien exe ne quitte pas apres EOF sous 5s (reproduit sur base synthetique seulement). Revalidation du nouvel exe apres compilation, resultat dans JOURNAL. Aucun processus utilisateur termine, aucune modification de donnees demo.
+

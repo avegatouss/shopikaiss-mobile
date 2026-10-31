@@ -7,6 +7,8 @@ import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/windows/host/engine_host.dart';
 import 'package:shopikaiss_terminal/src/windows/ipc/process_host.dart';
 import 'package:shopikaiss_terminal/src/windows/ipc/protocol.dart';
+import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
+import 'package:shopikaiss_terminal/src/sync_v2/v2_transport.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../support/fake_v2_server.dart';
@@ -17,6 +19,40 @@ void main() {
   late Directory dir;
   setUp(() => dir = Directory.systemTemp.createTempSync('hote_moteur_'));
   tearDown(() => dir.deleteSync(recursive: true));
+
+  test('close drains the host and closes its real HTTP keep-alive connection', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final disconnected = Completer<void>();
+    final sockets = <Socket>[];
+    server.listen((socket) {
+      sockets.add(socket);
+      var replied = false;
+      socket.listen((bytes) {
+        if (!replied) {
+          replied = true;
+          socket.write('HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: keep-alive\r\n\r\n{}');
+        }
+      }, onDone: () { if (!disconnected.isCompleted) disconnected.complete(); });
+    });
+    final host = await EngineHost.open(directory: dir.path, appVersion: 'test', factory: databaseFactoryFfi, syncEvery: null);
+    final transport = (host.engine as V2Engine).transport as HttpV2Transport;
+    try {
+      final response = await transport.send('GET', 'http://127.0.0.1:${server.port}', '/test');
+      expect(response.status, 200);
+      expect(disconnected.isCompleted, isFalse);
+      final closing = host.close();
+      expect(identical(closing, host.close()), isTrue, reason: 'concurrent callers await the same completed cleanup');
+      await closing;
+      await disconnected.future.timeout(const Duration(seconds: 3));
+      final reopened = await EngineHost.open(directory: dir.path, appVersion: 'test', factory: databaseFactoryFfi, syncEvery: null);
+      await reopened.close();
+    } finally {
+      transport.close();
+      await host.close();
+      for (final socket in sockets) { socket.destroy(); }
+      await server.close();
+    }
+  });
 
   Future<EngineHost> open(FakeV2Server transport) => EngineHost.open(
     directory: dir.path,

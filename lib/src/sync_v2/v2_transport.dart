@@ -40,6 +40,9 @@ class HttpV2Transport implements V2Transport {
 
   final http.Client _client;
 
+  /// Release keep-alive sockets after the owner has drained its pending work.
+  void close() => _client.close();
+
   static const defaultTimeout = Duration(seconds: 45);
 
   @override
