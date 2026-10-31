@@ -7,6 +7,8 @@ import 'package:uuid/uuid.dart';
 
 import '../diagnostics.dart';
 import '../terminal/terminal_session.dart';
+import '../web/shop_browser_page.dart';
+import '../web/shop_browser_policy.dart';
 import 'engine.dart';
 import 'models.dart';
 import 'money.dart';
@@ -43,6 +45,27 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Timer? _probe;
   Map<int, BigInt> _sold = {};
   bool _probing = false;
+  bool _webOpen = false;
+
+  Future<void> _openShopWeb({required bool admin}) async {
+    if (_webOpen) return;
+    _webOpen = true;
+    try {
+      final origin = await _engine.storedOrigin() ?? widget.session.settings.origin;
+      final policy = ShopBrowserPolicy(origin);
+      await widget.session.channel.setSoftKeyboardBlocked(false);
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(MaterialPageRoute(builder: (_) => ShopBrowserPage(
+        policy: policy, admin: admin, deviceCookie: _engine.webToken,
+      )));
+    } on FormatException catch (error) {
+      _toast(error.message);
+    } catch (_) {
+      _toast('Impossible d’ouvrir le site. Votre panier est conservé.');
+    } finally {
+      _webOpen = false;
+    }
+  }
   String? _lastSyncMessage;
 
   /// Filtres du catalogue (catalogue complet) et nombre de produits affichés, une page de plus à chaque « Afficher plus ».
@@ -752,7 +775,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _toast('Connexion rétablie : terminez cette vente, puis revenez à la caisse en ligne.');
         return;
       }
-      if (!automatic || (_snapshot?.rules.automaticSwitch ?? true)) widget.onBackOnline();
+      if (!_webOpen && (!automatic || (_snapshot?.rules.automaticSwitch ?? true))) widget.onBackOnline();
     } finally {
       _probing = false;
     }
@@ -834,7 +857,21 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 icon: const Icon(Icons.person),
                 label: Text(_operator!.name),
               ),
-            IconButton(tooltip: 'Opérations hors ligne', color: Colors.white, onPressed: _openJournal, icon: const Icon(Icons.receipt_long)),
+            PopupMenuButton<String>(
+              tooltip: 'Opérations, site et back-office', iconColor: Colors.white, icon: const Icon(Icons.more_vert),
+              onSelected: (choice) {
+                if (choice == 'journal') {
+                  _openJournal();
+                } else {
+                  _openShopWeb(admin: choice == 'admin');
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'journal', child: Text('Opérations hors ligne')),
+                PopupMenuItem(value: 'admin', child: Text('Back-office')),
+                PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
+              ],
+            ),
             FilledButton.tonalIcon(
               onPressed: _engine.syncing ? null : () => _tryOnline(),
               icon: _engine.syncing
@@ -904,7 +941,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             PopupMenuButton<String>(
               iconColor: Colors.white,
               onSelected: (choice) {
-                if (choice == 'journal') {
+                if (choice == 'admin' || choice == 'site') {
+                  _openShopWeb(admin: choice == 'admin');
+                } else if (choice == 'journal') {
                   _openJournal();
                 } else if (choice == 'caissier') {
                   setState(() => _operator = null);
@@ -915,6 +954,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               itemBuilder: (context) => [
                 if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
                 const PopupMenuItem(value: 'journal', child: Text('Opérations hors ligne')),
+                const PopupMenuItem(value: 'admin', child: Text('Back-office')),
+                const PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
                 if (_operator != null && _engine.canCloseSession(_operator!))
                   PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
                 if (_operator != null)

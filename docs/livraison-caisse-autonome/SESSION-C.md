@@ -327,3 +327,8 @@ EngineHost ferme maintenant son propre client HTTP apres drainage des commandes/
 ## 31 octobre — maintien client et session avant retour du journal
 Fusion du moteur B a846ebd (f000212 inclus) : client cree maintenu dans la selection et session ouverte localement maintenue pendant l'attente de publication serveur. Les corrections Windows precedentes, notamment la fermeture HTTP du moteur, sont conservees. 86 tests Windows/v2 PASS, analyse ciblee sans remarque. Aucun nouvel essai sur la demo pour ce lot. Compilation et installation tracees dans JOURNAL.
 
+
+## 31 octobre — transmission Windows vers mobile et navigateur interne
+Le dossier TRANSMISSION-WINDOWS-VERS-MOBILE.md décrit les parcours intégrés, leurs fichiers, les règles communes, la reprise par B et la parité encore incomplète. Moteur B 39ec7f1 intégré par cf6b5f3 (capacités 2.1 conservées après redémarrage sans réseau).
+Navigateur mobile séparé de CaissePage : entrées Site/Back-office, origine HTTPS configurée, navigation et fermeture vers le panier conservé, aucun pont natif de caisse, droits web conservés, erreur réseau explicite. Dépendances existantes uniquement. Téléchargements via navigateur système pour ce premier lot.
+Validation : 74 tests Windows/navigation PASS ; 27 tests moteur v2/adaptateur PASS ; après correction du débordement du menu sur téléphone 6,5 pouces, 18 tests disposition/navigation PASS (dont 3 déjà comptés dans les 74). Analyse ciblée sans remarque. Pas de recette native navigateur sur téléphone ni de release signée produite par C. Aucune installation Windows nouvelle pour ce lot.
