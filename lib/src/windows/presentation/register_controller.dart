@@ -57,6 +57,7 @@ class WindowsRegisterController extends ChangeNotifier {
   Map<String, dynamic> capabilities = const {};
   bool ready = false;
   bool? sessionOpen;
+  String? webOrigin;
   bool busy = false;
   bool _disposed = false;
   bool _transportAvailable = true;
@@ -100,6 +101,7 @@ class WindowsRegisterController extends ChangeNotifier {
       }
       if ((next['revision'] as int) < (view['revision'] as int? ?? -1)) return;
       view = next;
+      webOrigin = status['web_origin'] as String?;
       sessionOpen = status['session_open'] is bool
           ? status['session_open'] as bool
           : null;

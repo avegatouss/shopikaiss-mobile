@@ -19,6 +19,7 @@ import 'multiple_payments.dart';
 import 'searchable_choice.dart';
 import 'calculator.dart';
 import 'discount_approval.dart';
+import 'web_destinations.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -303,9 +304,20 @@ class _RegisterState extends State<_Register> {
     }
   }
 
-  Future<void> _backOffice() async {
-    final uri = _screen.backOfficeUri;
-    if (uri == null) return;
+  Future<void> _backOffice({bool cashRegister = false}) async {
+    final uri = cashRegister
+        ? caisseWebsite(c.webOrigin, '/caisse')
+        : _screen.backOfficeUri ?? caisseWebsite(c.webOrigin, '/accueil');
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Adresse de la boutique indisponible. Reconnectez le moteur ou renseignez le back-office dans les réglages.',
+          ),
+        ),
+      );
+      return;
+    }
     try {
       if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
         throw StateError('launch');
@@ -313,7 +325,9 @@ class _RegisterState extends State<_Register> {
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Impossible d’ouvrir le back-office.')),
+          const SnackBar(
+            content: Text('Impossible d’ouvrir le site dans le navigateur.'),
+          ),
         );
       }
     }
@@ -594,6 +608,7 @@ class _RegisterState extends State<_Register> {
                 onSelected: (value) {
                   if (value == 'full') _toggleFullscreen();
                   if (value == 'back') _backOffice();
+                  if (value == 'web') _backOffice(cashRegister: true);
                   if (value == 'help') _shortcuts();
                   if (value == 'session') _session();
                   if (value == 'lock' || value == 'logout') {
@@ -636,8 +651,11 @@ class _RegisterState extends State<_Register> {
                   ),
                   PopupMenuItem(
                     value: 'back',
-                    enabled: _screen.backOfficeUri != null,
                     child: const Text('Retour au back-office'),
+                  ),
+                  const PopupMenuItem(
+                    value: 'web',
+                    child: Text('Ouvrir la caisse web'),
                   ),
                   const PopupMenuItem(
                     value: 'help',
@@ -779,6 +797,16 @@ class _RegisterState extends State<_Register> {
                           onPressed: _shortcuts,
                           icon: const Icon(Icons.help_outline),
                           label: const Text('Aide'),
+                        ),
+                        TextButton.icon(
+                          onPressed: _backOffice,
+                          icon: const Icon(Icons.dashboard_outlined),
+                          label: const Text('Back-office web'),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => _backOffice(cashRegister: true),
+                          icon: const Icon(Icons.open_in_browser),
+                          label: const Text('Ouvrir la caisse web'),
                         ),
                       ],
                     ),

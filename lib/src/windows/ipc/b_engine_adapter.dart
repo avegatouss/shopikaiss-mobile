@@ -42,7 +42,11 @@ class BEngineAdapter implements WindowsEngineAdapter {
       effectiveId ??= argumentId as String?;
     }
     try {
-      return await inner.execute(command.name, arguments, effectiveId);
+      final result = await inner.execute(command.name, arguments, effectiveId);
+      if (command == HostCommand.status) {
+        return {...result, 'web_origin': await inner.engine.storedOrigin()};
+      }
+      return result;
     } on AdapterFailure catch (error) {
       throw HostFailure(
         error.code,

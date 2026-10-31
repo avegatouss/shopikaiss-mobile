@@ -257,3 +257,16 @@ Validation : 53 tests Windows (dont rendu fictif), analyse sans remarque ; 62 te
 
 Le code est transitoire a la tentative, jamais ajoute au journal durable, puis les champs de preuve sont effaces ; nouvelle saisie a chaque tentative. Panier/revision controles apres fermeture de la demande : changement impose une nouvelle verification. Le moteur reste autorite sur code, plafonds, verrouillage apres echecs et droits. Le lot ne couvre pas survente/prix manuel. Pas d'essai avec code reel sur la demo par C.
 Validation : 67 tests Windows/moteur v2 reussis, analyse sans remarque. Test specifique annulation/refus/code masque/effacement/nouvelle saisie ; erreur de cycle de vie du dialogue corrigee avant passe finale.
+
+## Reference moteur 0816fbf et compatibilite des lots 2.1
+
+Fusion de 0816fbf (pas bac42bc seul) : schemas retour_residuel a3d86150 et lots clients, cloture, paniers partages, retours. Enumeration IPC completee : searchCustomers/createCustomer/setCustomer, closeSession, resumeShared/deleteShared, returnableSale/previewReturn/commitReturn. Cela rend les commandes transportables mais ne constitue pas une recette des nouveaux ecrans : selection/creation clients, cloture aveugle, paniers partages et retours Windows restent a raccorder.
+
+Suite automatique complete lancee sans variables de recette serveur. Le scenario reel essai_21_test exigeait SK_BASE pendant son chargement ; il est maintenant marque ignore explicitement si aucune base de recette n'est fournie, comme les autres scenarios reels. Aucun contact demo ni vente reelle dans cette passe. Analyse globale du depot : aucune remarque. Feu vert a borner a la compatibilite moteur et a l'executable effectivement lance, sans validation production ni recette physique.
+
+## Calculatrice tactile et destinations web
+
+Remplacement des deux champs par une calculatrice avec pavé tactile 48 px, operations en chaine, priorites, parentheses, pourcentage relatif (200 + 10 % = 220), changement de signe, effacement/correction, memoire MC/MR/M+/M-, historique de 20 calculs reutilisables et copie. Saisie clavier/Entree possible. Calcul fractionnaire exact, arrondi d'affichage a 12 decimales, aucune modification de vente. Petit ecran : contenu defilant teste sans debordement.
+
+Retour au back-office : adresse personnalisee si renseignee, sinon origine appairee + /accueil (route web verifiee). Bouton distinct Ouvrir la caisse web : origine appairee + /caisse. L'origine publique est fournie par status de l'adaptateur Windows ; aucun jeton transmis au navigateur. Les boutons sont accessibles sans configuration manuelle supplementaire. Session du navigateur distincte, authentification web normale.
+Bilan final avant compilation : suite complete 243 tests reussis, 6 scenarios reels ignores faute de configuration, 0 echec ; analyse globale avant ajustements et analyse Windows finale sans remarque. Journal build/full-final-0816fbf.log.
