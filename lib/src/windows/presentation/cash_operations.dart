@@ -158,6 +158,7 @@ class _CashOperationsState extends State<CashOperationsDialog> {
 
   Future<void> submit() async {
     if (busy || broken || (!allowed && pending == null)) return;
+    final recovering = pending != null;
     if (pending == null) {
       Map<String, dynamic> args;
       try {
@@ -264,7 +265,8 @@ class _CashOperationsState extends State<CashOperationsDialog> {
       await c.refresh();
     } on HostFailure catch (e) {
       message = e.message;
-      if (!e.outcomeUnknown &&
+      if (!recovering &&
+          !e.outcomeUnknown &&
           e.code != 'host_unavailable' &&
           e.code != 'timeout') {
         try {

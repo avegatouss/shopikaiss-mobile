@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
-import 'customer_picker.dart';
 
 class SaleOptionsPreview extends StatefulWidget {
   const SaleOptionsPreview({super.key, required this.controller});
@@ -60,27 +59,12 @@ class _SaleOptionsState extends State<SaleOptionsPreview> {
     animation: c,
     builder: (context, _) => AlertDialog(
       scrollable: true,
-      title: const Text('Client, remise et livraison'),
+      title: const Text('Remise et livraison'),
       content: SizedBox(
         width: 480,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.person_outline),
-              title: Text(customerLabel(c)),
-              subtitle: const Text('Sélectionner ou créer un client'),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: allowed('customer')
-                  ? () => showDialog<void>(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (_) => CustomerPicker(controller: c),
-                    )
-                  : null,
-            ),
-            const Divider(),
             const Text('Remise globale'),
             DropdownButton<bool>(
               value: percent,

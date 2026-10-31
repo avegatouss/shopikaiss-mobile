@@ -293,3 +293,14 @@ Menu du poste : cloture a l'aveugle (comptage especes/autres moyens, justificati
 Requete et UUID conserves avant envoi dans pending-close-v2.json ou pending-return-v2.json, a cote de la base. Reponse inconnue : requete immuable reprise avec le meme UUID, y compris apres redemarrage. Fichier illisible bloque cette operation sans ecrasement ; reponse incoherente ne vaut pas succes.
 Badges stock faible/promotion/nouveau/favori depuis la vue moteur, sans recalcul. Stock projete apres panier encore attendu de B. Texte obsolete des reglages images corrige.
 Validation finale : 64 tests Windows PASS en serie, analyse sans remarque. Premiere passe parallele : timeout demarrage JIT du test de fermeture et test disque execute dans zone de temps simulee ; test disque corrige via runAsync, aucun controle metier retire. Pas de recette demo supplementaire.
+
+## Afficheur client : deux modes demandes le 31 octobre
+
+Le responsable ne dispose pas encore d'afficheur et demande les deux familles. A implementer et qualifier, pas presente comme support livre :
+- Second ecran Windows : fenetre de presentation separee, choix du moniteur, lignes/prix/totaux venant de la vue moteur, accueil apres fin de vente, aucune saisie caissier ni code/raison d'autorisation affiche. Perte du moniteur sans blocage de la caisse.
+- Afficheur USB/serie : adaptateur de protocole materiel, port COM, debit et encodage configurables. USB peut etre un port serie virtuel ou un peripherique proprietaire : aucune compatibilite universelle presumee. File de sortie bornee, dernier etat prioritaire, erreurs/debranchement sans attente de la caisse. Commandes exactes a valider selon modele.
+Les deux sorties utilisent les montants calcules par B, sans recalcul et sans requete reseau. Un simulateur ne remplacera pas la recette du materiel. Aucun pilote ni nouvelle dependance ajoute dans ce lot.
+
+POS-80 (redirection de 2) choisie explicitement par le responsable : configuration applicative sauvegardee et remplacee, aucune modification du defaut Windows. Ticket TEST SANS VENTE transmis au pilote Windows ; sortie papier a confirmer. Ce test de pilote ne constitue pas une recette du ticket PDF Flutter.
+Disposition demandee : selecteur Client de passage et Remise et livraison sur une ligne ; selection client retiree du panneau remise. Reprise inconnue : un refus lors d'une tentative ulterieure ne supprime plus l'intention precedente.
+Ajustements finaux : 31 tests parcours caisse/operations PASS, dont refus pendant reprise inconnue et dispositions 800x600/1280x800 ; analyse propre.

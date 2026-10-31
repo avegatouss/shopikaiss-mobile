@@ -1195,30 +1195,36 @@ class _RegisterState extends State<_Register> {
             ],
           ),
           const Divider(height: 18),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              icon: const Icon(Icons.person_outline),
-              label: Text(customerLabel(c)),
-              onPressed: c.ready && !c.busy && c.uncertainOperation == null
-                  ? () => showDialog<void>(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (_) => CustomerPicker(controller: c),
-                    )
-                  : null,
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => showDialog<void>(
-                context: context,
-                builder: (_) => SaleOptionsPreview(controller: c),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton.icon(
+                  icon: const Icon(Icons.person_outline),
+                  label: Text(
+                    customerLabel(c),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onPressed: c.ready && !c.busy && c.uncertainOperation == null
+                      ? () => showDialog<void>(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (_) => CustomerPicker(controller: c),
+                        )
+                      : null,
+                ),
               ),
-              icon: const Icon(Icons.person_outline, size: 18),
-              label: const Text('Client, remise et livraison'),
-            ),
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => SaleOptionsPreview(controller: c),
+                  ),
+                  icon: const Icon(Icons.tune, size: 18),
+                  label: const Text('Remise et livraison', maxLines: 2),
+                ),
+              ),
+            ],
           ),
           Expanded(
             child: c.lines.isEmpty

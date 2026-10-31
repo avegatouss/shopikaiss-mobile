@@ -501,7 +501,7 @@ void main() {
     });
     await tester.pumpWidget(WindowsRegisterApp(controller: c));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Client, remise et livraison'));
+    await tester.tap(find.text('Remise et livraison'));
     await tester.pumpAndSettle();
     expect(
       tester
@@ -519,7 +519,7 @@ void main() {
     };
     await c.refresh();
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Client, remise et livraison'));
+    await tester.tap(find.text('Remise et livraison'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'Remise globale (0 pour retirer)'),

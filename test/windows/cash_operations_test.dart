@@ -14,6 +14,7 @@ class OperationsHost implements WindowsHost {
   final changes = StreamController<Map<String, dynamic>>.broadcast();
   final calls = <(HostCommand, Map<String, dynamic>, String?)>[];
   bool lose = false;
+  bool refuse = false;
   @override
   Stream<Map<String, dynamic>> get events => changes.stream;
   @override
@@ -30,6 +31,9 @@ class OperationsHost implements WindowsHost {
         return {'methods': []};
       case HostCommand.closeSession:
       case HostCommand.commitReturn:
+        if (refuse) {
+          throw const HostFailure('caissier_requis', 'Identifiez le caissier.');
+        }
         if (lose) {
           lose = false;
           throw const HostFailure(
@@ -85,6 +89,37 @@ class OperationsHost implements WindowsHost {
 }
 
 void main() {
+  testWidgets('refusal during recovery never discards unknown operation', (
+    tester,
+  ) async {
+    final host = OperationsHost()..lose = true;
+    final c = WindowsRegisterController(host)
+      ..ready = true
+      ..capabilities = {
+        'close_session': {'allowed': true},
+      };
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: CashOperationsDialog(controller: c)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).first, '0');
+    await tester.tap(find.text('Clôturer la session'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Confirmer'));
+    await tester.pumpAndSettle();
+    host.refuse = true;
+    await tester.tap(find.text('Vérifier / reprendre la même opération'));
+    await tester.pumpAndSettle();
+    expect(find.text('Vérifier / reprendre la même opération'), findsOneWidget);
+    expect(find.text('Clôturer la session'), findsNothing);
+    final calls = host.calls
+        .where((x) => x.$1 == HostCommand.closeSession)
+        .toList();
+    expect(calls.first.$3, calls.last.$3);
+    c.dispose();
+  });
   Future<WindowsRegisterController> controller(
     OperationsHost host, {
     Directory? dir,
@@ -200,8 +235,13 @@ void main() {
     final host = OperationsHost();
     final c = (await tester.runAsync(() => controller(host, dir: dir)))!;
     await tester.runAsync(() async {
-      await tester.pumpWidget(MaterialApp(home: Scaffold(
-        body: CashOperationsDialog(controller: c, returns: true))));
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: CashOperationsDialog(controller: c, returns: true),
+          ),
+        ),
+      );
       await Future<void>.delayed(const Duration(milliseconds: 200));
     });
     await tester.pumpAndSettle();
