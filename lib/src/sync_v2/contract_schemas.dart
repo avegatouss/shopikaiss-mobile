@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 5) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 5, retour_residuel) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -895,6 +895,15 @@ const contractV2Schemas = <String, String>{
                                     "type": "integer",
                                     "minimum": 1
                                 }
+                            ]
+                        },
+                        "retour_residuel": {
+                            "description": "Règle du reste d'arrondi d'un retour partiel (référentiel §3.13). Facultative : reçue avec la capacité retour.especes.",
+                            "enum": [
+                                "refuse",
+                                "last_line",
+                                "largest_share",
+                                "largest_fraction"
                             ]
                         }
                     }

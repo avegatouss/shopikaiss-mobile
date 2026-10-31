@@ -437,9 +437,9 @@ class V2Engine extends CaisseEngine {
       hasRight(operator, 'retour_creer') &&
       hasRight(operator, 'retour_rembourser_especes');
 
-  /// Vente du terminal, quantités déjà retournées par ligne et total déjà rendu. Refus si le montant dépendrait de la règle
-  /// de reste de la boutique, que le serveur ne publie pas : un retour se chiffre ici exactement ou se fait en ligne.
-  Future<({Map content, Map<String, int> before, int refunded})> _returnBasis(String saleUuid) async {
+  /// Vente du terminal, parts archivées par ligne, quantités déjà retournées et total déjà rendu. Si la boutique change de
+  /// règle entre deux retours d'une vente, le serveur garde la première : écart, donc arbitrage.
+  Future<({Map content, Map<String, int> shares, Map<String, int> before, int refunded})> _returnBasis(String saleUuid) async {
     final row = await v2.operation(saleUuid);
     final operation = row?['operation'] as Map?;
     if (operation == null || operation['type'] != 'vente') throw const OfflineRefusal('Seules les ventes de ce terminal se retournent hors ligne.');
@@ -452,11 +452,9 @@ class V2Engine extends CaisseEngine {
     if (age > _returnRules.days) throw OfflineRefusal('Vente trop ancienne pour un retour hors ligne (${_returnRules.days} jour(s) au plus).');
     final content = operation['contenu'] as Map;
     final lines = (content['lignes'] as List).cast<Map>();
-    final gross = lines.fold<int>(0, (sum, l) => sum + (l['total'] as int));
-    final net = _saleNet(content);
-    if (lines.fold<int>(0, (sum, l) => sum + archivedShare(net, l['total'] as int, gross)) != net) {
-      throw const OfflineRefusal('Le montant de ce retour dépend d’une règle d’arrondi de la boutique : faites-le en ligne.');
-    }
+    final parts = archivedShares(_saleNet(content), [for (final l in lines) l['total'] as int], _shopRules?['retour_residuel'] as String?);
+    if (parts == null) throw const OfflineRefusal('Le montant de ce retour dépend d’une règle d’arrondi de la boutique : faites-le en ligne.');
+    final shares = {for (final (i, l) in lines.indexed) l['ligne_uuid'] as String: parts[i]};
     final before = <String, int>{};
     var refunded = 0;
     for (final other in await v2.operationRows()) {
@@ -469,7 +467,7 @@ class V2Engine extends CaisseEngine {
         before.update(l['ligne_uuid'] as String, (v) => v + Decimal6.parse(l['quantite'] as String), ifAbsent: () => Decimal6.parse(l['quantite'] as String));
       }
     }
-    return (content: content, before: before, refunded: refunded);
+    return (content: content, shares: shares, before: before, refunded: refunded);
   }
 
   /// Net archivé : à payer, livraison exclue.
@@ -485,10 +483,8 @@ class V2Engine extends CaisseEngine {
     ];
   }
 
-  int _amountOf(({Map content, Map<String, int> before, int refunded}) basis, Map<String, int> quantities) {
+  int _amountOf(({Map content, Map<String, int> shares, Map<String, int> before, int refunded}) basis, Map<String, int> quantities) {
     final lines = (basis.content['lignes'] as List).cast<Map>();
-    final gross = lines.fold<int>(0, (sum, l) => sum + (l['total'] as int));
-    final net = _saleNet(basis.content);
     var amount = 0;
     for (final e in quantities.entries) {
       final line = lines.where((l) => l['ligne_uuid'] == e.key).firstOrNull ?? (throw const OfflineRefusal('Cette ligne n’appartient pas à la vente.'));
@@ -496,7 +492,7 @@ class V2Engine extends CaisseEngine {
       final before = basis.before[e.key] ?? 0;
       if (e.value <= 0) throw const OfflineRefusal('Quantité invalide.');
       if (before + e.value > sold) throw const OfflineRefusal('La quantité retournée dépasse la quantité vendue restante.');
-      amount += returnedAmount(archivedShare(net, line['total'] as int, gross), before, e.value, sold);
+      amount += returnedAmount(basis.shares[e.key]!, before, e.value, sold);
     }
     return amount;
   }

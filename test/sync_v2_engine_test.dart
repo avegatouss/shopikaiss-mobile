@@ -783,6 +783,27 @@ void main() {
       extras: const SaleExtras(globalDiscount: 1),
     );
     await expectLater(e.returnableLines(split.uuid), refused('faites-le en ligne'));
+    // Règle publiée : le même retour se chiffre sur le terminal.
+    server.publish([
+      {'type': 'boutique', 'critique': true, 'cle': fakeShop, 'revision': '9', 'action': 'upsert', 'donnees': {
+        ...(server.entities['boutique|$fakeShop']!['donnees'] as Map<String, dynamic>),
+        'regles': {...(server.entities['boutique|$fakeShop']!['donnees'] as Map)['regles'] as Map, 'retour_residuel': 'largest_fraction'},
+      }},
+    ]);
+    await e.sync();
+    expect(e.blockReason, isNull, reason: 'clé acceptée par le schéma');
+    final splitLines = await e.returnableLines(split.uuid);
+    expect(await e.returnAmount(split.uuid, {splitLines.first.lineUuid: 1000000}), 100);
+    expect(await e.returnAmount(split.uuid, {splitLines.last.lineUuid: 1000000}), 99);
+    // Règles de reste, comme ReturnService : net 100 sur trois lignes égales, parts arrondies 33 × 3 ; net 200 : 67 × 3 = 201.
+    expect(archivedShares(100, [1, 1, 1], null), isNull, reason: 'règle non publiée');
+    expect(archivedShares(100, [1, 1, 1], 'refuse'), [33, 33, 33], reason: 'parts sous le net : le serveur les garde');
+    expect(archivedShares(100, [1, 1, 1], 'largest_fraction'), [34, 33, 33]);
+    expect(archivedShares(200, [1, 1, 1], 'refuse'), isNull);
+    expect(archivedShares(200, [1, 1, 1], 'last_line'), [66, 66, 68]);
+    expect(archivedShares(200, [1, 1, 1], 'largest_share'), [68, 66, 66]);
+    expect(archivedShares(200, [1, 1, 1], 'largest_fraction'), [67, 67, 66]);
+    expect(archivedShares(90, [1, 2], 'refuse'), [30, 60], reason: 'parts exactes : la règle ne joue pas');
     // Arrondi demi vers le haut, cumul par ligne : 333 + 334 + 333.
     expect(archivedShare(100, 33, 99), 33);
     expect(archivedShare(1000, 1, 3), 333);

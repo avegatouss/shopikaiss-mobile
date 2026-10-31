@@ -61,6 +61,46 @@ BigInt _halfUp(BigInt numerator, BigInt denominator) => (numerator * BigInt.two 
 /// Part archivée d'une ligne : `arrondi(net × total_ligne / brut)`, demi vers le haut (référentiel §3.13).
 int archivedShare(int net, int lineTotal, int gross) => gross == 0 ? 0 : _halfUp(BigInt.from(net) * BigInt.from(lineTotal), BigInt.from(gross)).toInt();
 
+/// Parts archivées de toutes les lignes selon `retour_residuel` (`ReturnService::archivedShares`), ou null si le retour ne se
+/// chiffre pas ici : règle inconnue et parts inexactes, règle `refuse`, reste impossible à répartir.
+List<int>? archivedShares(int net, List<int> totals, String? rule) {
+  final gross = totals.fold<int>(0, (sum, t) => sum + t);
+  final shares = [for (final t in totals) archivedShare(net, t, gross)];
+  final allocated = shares.fold<int>(0, (sum, s) => sum + s);
+  if (allocated == net) return shares;
+  if (rule == null) return null;
+  if (rule == 'largest_fraction') return _largestFractionShares(net, totals, gross);
+  if (allocated < net) return shares;
+  if (rule == 'refuse') return null;
+  final floors = [for (final t in totals) gross == 0 ? 0 : net * t ~/ gross];
+  var target = totals.length - 1;
+  if (rule == 'largest_share') {
+    for (var i = 0; i < totals.length; i++) {
+      if (totals[i] > totals[target] || (totals[i] == totals[target] && i < target)) target = i;
+    }
+  }
+  floors[target] += net - floors.fold<int>(0, (sum, f) => sum + f);
+  return floors;
+}
+
+/// Plus forts restes, un franc par ligne, à fraction égale la première ligne du ticket (ADR-185).
+List<int>? _largestFractionShares(int net, List<int> totals, int gross) {
+  if (gross == 0) return List.filled(totals.length, 0);
+  final shares = [for (final t in totals) net * t ~/ gross];
+  final candidates = [
+    for (var i = 0; i < totals.length; i++)
+      if ((net * totals[i]).remainder(gross) > 0) i,
+  ]..sort((a, b) => (net * totals[b]).remainder(gross).compareTo((net * totals[a]).remainder(gross)) != 0
+      ? (net * totals[b]).remainder(gross).compareTo((net * totals[a]).remainder(gross))
+      : a.compareTo(b));
+  final residual = net - shares.fold<int>(0, (sum, s) => sum + s);
+  if (residual < 0 || residual > candidates.length) return null;
+  for (final i in candidates.take(residual)) {
+    shares[i]++;
+  }
+  return shares;
+}
+
 /// Montant rendu pour [quantity] après [before] déjà retournés sur une ligne de quantité [sold], en millionièmes.
 int returnedAmount(int share, int before, int quantity, int sold) {
   int cumulated(int q) => _halfUp(BigInt.from(share) * BigInt.from(q), BigInt.from(sold)).toInt();

@@ -228,5 +228,5 @@ Fermés par défaut : capacité `retour.especes`, `retours.mode` = `especes`, fo
 
 - Adaptateur : `returnableSale` {sale_id}, `previewReturn` {sale_id, lines: [{line_id, quantity}]}, `commitReturn` {sale_id, lines, reason}. Capacité `returns`. Erreur `retour_refuse`. Quantités en unité de base.
 - Montant selon §3.13 : part = arrondi(net × total_ligne / brut), demi vers le haut ; rendu = arrondi(part × (avant + q) / Q) − arrondi(part × avant / Q).
-- Si les parts ne totalisent pas le net, le montant dépend de `return_residual`, non publié : le terminal refuse et renvoie en ligne.
+- Parts inexactes : règle `boutique.regles.retour_residuel` (`refuse`, `last_line`, `largest_share`, `largest_fraction`), appliquée comme `ReturnService`. Clé absente ou cas non chiffrable : le terminal refuse et renvoie en ligne. Si la règle change entre deux retours d'une vente, le serveur garde la première : `a_arbitrer`.
 - Limites : un retour fait en ligne sur la même vente n'est pas vu du terminal (écart `a_arbitrer`) ; produit à lots non détecté (`a_arbitrer`) ; aucun bon de retour imprimé ; tiroir ouvert si une imprimante est branchée.

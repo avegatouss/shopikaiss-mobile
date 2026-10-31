@@ -675,6 +675,15 @@
                                     "minimum": 1
                                 }
                             ]
+                        },
+                        "retour_residuel": {
+                            "description": "Règle du reste d'arrondi d'un retour partiel (référentiel §3.13). Facultative : reçue avec la capacité retour.especes.",
+                            "enum": [
+                                "refuse",
+                                "last_line",
+                                "largest_share",
+                                "largest_fraction"
+                            ]
                         }
                     }
                 },
