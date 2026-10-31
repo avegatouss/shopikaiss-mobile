@@ -34,6 +34,8 @@ enum HostCommand {
   view,
   search,
   moreProducts,
+  imageSettings,
+  setImageSettings,
   scan,
   changeQuantity,
   removeLine,

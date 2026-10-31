@@ -6,7 +6,11 @@ Le tableau historique ci-dessous décrit le premier lot, pas l'installation actu
 
 Dernier lot C : paniers locaux ET partagés, clôture à l'aveugle, retours espèces avec prévisualisation moteur, journal durable des demandes de clôture/retour et reprise avec le même UUID, badges produits. Recette réelle de ces nouveaux parcours encore ouverte.
 
-À fournir par B : projection du stock après panier et programmation/pause des téléchargements images. À fournir par A/B : tarif gros, autres frais hors livraison, lots/variantes/coffrets et création produit complète, bons/cartes/points/crédit en ligne, journal de caisse/X/historique serveur, paniers de rayon, règles avancées de session/horaires/inactivité. Raccordement C ensuite. Le bouton Reçus actuel n'est pas la file des paniers de rayon.
+B 4a61829 intégré : projection du stock après panier affichée, alertes indicatives, programmation locale des images (plage traversant minuit), pause pendant la vente et indexation du catalogue accélérée. Réglage dans le panneau de l'écran ; aucune heure imposée aux installations existantes. Compteur des paniers partagé/local dédoublonné.
+
+À fournir par A/B : tarif gros, autres frais hors livraison, lots/variantes/coffrets et création produit complète, bons/cartes/points/crédit en ligne, journal de caisse/X/historique serveur, paniers de rayon, règles avancées de session/horaires/inactivité. Raccordement C ensuite. Le bouton Reçus actuel n'est pas la file des paniers de rayon.
+
+Afficheur : sorties natives raccordées, désactivées par défaut, configurables dans les réglages. Second écran étendu distinct de celui de la caisse ; USB/série uniquement profil ESC/POS 20x2 via COM, 8N1 et vitesse configurable. Écriture série sur un fil indépendant, dernière trame privilégiée, délai d'écriture borné ; aucun nom de client envoyé. Modèles HID/propriétaires non couverts sans modèle/pilote. Recette matérielle toujours ouverte.
 
 À qualifier par C avec matériel/serveur de recette : impression papier et tiroir, afficheur selon modèle, latences réelles, reprise après coupure/redémarrage, comparaison native au web. Installation de recette non signée ; aucune validation production ni fusion main.
 

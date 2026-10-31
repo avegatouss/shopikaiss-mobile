@@ -4,6 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../platform/receipt_printing.dart';
+import '../ipc/protocol.dart';
+import 'image_schedule.dart';
+import '../platform/customer_display.dart';
+import 'customer_display_settings.dart';
 
 /// Local presentation preferences only; never changes shop policies or totals.
 class ScreenSettings {
@@ -98,9 +102,13 @@ class ScreenSettingsPanel extends StatelessWidget {
     super.key,
     required this.settings,
     required this.onChanged,
+    this.host,
+    this.display,
   });
   final ScreenSettings settings;
   final VoidCallback onChanged;
+  final WindowsHost? host;
+  final CustomerDisplayService? display;
 
   @override
   Widget build(BuildContext context) => Drawer(
@@ -299,9 +307,11 @@ class ScreenSettingsPanel extends StatelessWidget {
             leading: Icon(Icons.image_outlined),
             title: Text('Images des produits'),
             subtitle: Text(
-              'Photos conservées sur ce poste : téléchargement par lots de 30 images manquantes ou modifiées, démarré panier vide. La programmation nocturne et la pause à la reprise des ventes restent à raccorder au moteur.',
+              'Photos conservées sur ce poste, téléchargées par petits lots. Le téléchargement se met en pause dès qu’un panier est actif. Les photos déjà reçues restent disponibles hors connexion.',
             ),
           ),
+          if (host != null) ImageSchedule(host: host!),
+          if (display != null) CustomerDisplaySettings(service: display!),
         ],
       ),
     ),

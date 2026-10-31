@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../platform/windows_platform.dart';
+import '../platform/customer_display.dart';
 
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
@@ -192,6 +193,7 @@ class _RegisterState extends State<_Register> {
 
   final _scan = TextEditingController();
   final _screen = ScreenSettings.load();
+  late final CustomerDisplayService _display;
   ColorScheme get _palette =>
       ColorScheme.fromSeed(seedColor: _screen.accentColor);
   Widget _imageSlot({
@@ -381,11 +383,14 @@ class _RegisterState extends State<_Register> {
   @override
   void initState() {
     super.initState();
+    _display = CustomerDisplayService(c);
+    unawaited(_display.start());
     c.refresh();
   }
 
   @override
   void dispose() {
+    _display.dispose();
     _saveSettings?.cancel();
     _search.dispose();
     _scan.dispose();
@@ -614,6 +619,8 @@ class _RegisterState extends State<_Register> {
         },
         child: Scaffold(
           endDrawer: ScreenSettingsPanel(
+            display: _display,
+            host: c.host,
             settings: _screen,
             onChanged: _screenChanged,
           ),
@@ -1238,14 +1245,36 @@ class _RegisterState extends State<_Register> {
                         dense: true,
                         minVerticalPadding: 8,
                         contentPadding: EdgeInsets.zero,
-                        title: Text(
-                          line['name'] as String? ?? '',
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 13,
-                          ),
+                        title: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              line['name'] as String? ?? '',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                              ),
+                            ),
+                            if (line['stock_after_label'] != null)
+                              Text(
+                                'Après vente : ${line['stock_after_label']}',
+                                style: const TextStyle(fontSize: 11),
+                              ),
+                            if (line['stock_alert'] is Map)
+                              Text(
+                                '${(line['stock_alert'] as Map)['message'] ?? ''}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color:
+                                      (line['stock_alert'] as Map)['level'] ==
+                                          'short'
+                                      ? Theme.of(context).colorScheme.error
+                                      : Colors.brown,
+                                ),
+                              ),
+                          ],
                         ),
                         onTap:
                             c.ready && !c.busy && c.uncertainOperation == null

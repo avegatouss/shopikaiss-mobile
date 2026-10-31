@@ -305,3 +305,10 @@ POS-80 (redirection de 2) choisie explicitement par le responsable : configurati
 Disposition demandee : selecteur Client de passage et Remise et livraison sur une ligne ; selection client retiree du panneau remise. Reprise inconnue : un refus lors d'une tentative ulterieure ne supprime plus l'intention precedente.
 Ajustements finaux : 31 tests parcours caisse/operations PASS, dont refus pendant reprise inconnue et dispositions 800x600/1280x800 ; analyse propre.
 Pied de panier compacte : remise globale/livraison puis base HT/TVA sur deux lignes et deux colonnes ; En attente/Suspendus sur une ligne. Total a payer et bouton paiement gardent leur prominence. 26 tests caisse PASS avec montants affiches, dont 800x600 et 1280x800, analyse propre.
+
+## 31 octobre — stock, images et afficheurs
+
+Moteur B 4a61829 fusionne. Alertes indicatives et stock apres panier affiches ; horaires images persistants dans le moteur, pause pendant vente. Compteur suspendus local/partage dedoublonne. Afficheur client configurable : second ecran etendu distinct de la caisse ; profil ESC/POS 20x2 via port COM (USB serie), 8N1, vitesse configurable, traitement des ecritures hors fil UI. Aucun nom de client transmis ; test sans vente. Aucun peripherique connecte : validation materielle non faite, USB HID/proprietaire hors profil disponible.
+
+Validation : 94 tests Windows/moteur puis 69 tests Windows avec afficheurs, tous PASS ; analyse Windows sans remarque. Compilation native et installation a confirmer dans JOURNAL. Aucun main/push, aucune nouvelle vente demo ; gate A/B encore attendue. Mesure Release sur catalogue realiste et recette papier restent ouvertes.
+
