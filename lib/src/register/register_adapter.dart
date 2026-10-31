@@ -183,6 +183,10 @@ class LocalRegisterAdapter {
         return _deleteShared(_text(args, 'shared_id', max: 36));
       case 'drafts':
         return _drafts();
+      case 'imageSettings':
+        return _imageSettings();
+      case 'setImageSettings':
+        return _setImageSettings(args);
       case 'resumeDraft':
         return _resume(_text(args, 'draft_id', max: 64));
       case 'deleteDraft':
@@ -267,6 +271,7 @@ class LocalRegisterAdapter {
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
       'close_session': cap(_operator == null ? 'Identifiez le caissier.' : (engine.canCloseSession(_operator!) ? null : 'Clôture non autorisée sur ce terminal.')),
       'returns': cap(_operator != null && engine.returnsOpen(_operator!) ? null : 'Retours hors ligne non autorisés sur ce terminal.'),
+      'image_schedule': cap(engine.imagesSupported ? null : 'Images non disponibles sur ce terminal.'),
       'shared_carts': cap(engine.sharedCartsSupported ? null : 'Paniers partagés non disponibles sur ce terminal.'),
       'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
       'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
@@ -342,6 +347,8 @@ class LocalRegisterAdapter {
     final suspended = (await engine.openDrafts()).where((d) => d.content['suspendu'] == true).length;
     final carts = resolved.map((r) => r.$2).whereType<CartLine>().toList();
     final overLimit = _operator != null && !engine.withinDiscountLimits(_operator!, carts, _draft.globalDiscount);
+    final demand = _stockDemand(resolved);
+    final alerted = <int>{};
     return {
       'customer': _draft.customer == null ? null : _customerJson(_draft.customer!),
       'discount_approval': {
@@ -434,6 +441,7 @@ class LocalRegisterAdapter {
                   : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height, 'path': engine.imagePath(p.image!)},
               'price_label': formatFcfa(p.price, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
+              'stock_after_label': p.unlimitedStock ? '' : _stockLabel(p, (sold[p.id] ?? BigInt.zero) + (demand[p.id] ?? BigInt.zero)),
               'packagings': [for (final k in p.packagings) {'id': k.id, 'name': k.name, 'price_label': formatFcfa(k.price, currency)}],
             },
       ],
@@ -450,6 +458,13 @@ class LocalRegisterAdapter {
             'discount_entry': line.entry?.toJson(),
             'total_label': cart == null ? '' : formatFcfa(cart.total, currency),
             'available': cart != null,
+            'stock_after_label': cart == null || cart.product.unlimitedStock
+                ? ''
+                : _stockLabel(cart.product, (sold[cart.product.id] ?? BigInt.zero) + demand[cart.product.id]!),
+            // Alerte sur la première ligne du produit, comme la caisse web.
+            'stock_alert': cart == null || cart.product.unlimitedStock || !alerted.add(cart.product.id)
+                ? null
+                : _stockAlert(cart.product, sold[cart.product.id] ?? BigInt.zero, demand[cart.product.id]!),
           },
       ],
     };
@@ -501,6 +516,39 @@ class LocalRegisterAdapter {
     final central = p.negativeStock ? -p.stockMicros : p.stockMicros;
     final estimated = central - sold;
     return estimated.isNegative ? '-${formatMicros(-estimated)}' : formatMicros(estimated);
+  }
+
+  /// Quantité demandée par produit suivi, toutes lignes du panier, en unité de base (millionièmes).
+  Map<int, BigInt> _stockDemand(List<(_DraftLine, CartLine?)> resolved) {
+    final demand = <int, BigInt>{};
+    final million = BigInt.from(1000000);
+    for (final (line, cart) in resolved) {
+      if (cart == null || cart.product.unlimitedStock) continue;
+      final coefficient = parseMicros(cart.packaging?.coefficient ?? '1') ?? million;
+      demand[cart.product.id] = (demand[cart.product.id] ?? BigInt.zero) + line.quantity * coefficient ~/ million;
+    }
+    return demand;
+  }
+
+  /// Alerte indicative de la caisse web (F60) : le stock est estimé, plusieurs terminaux vendent le même. N'empêche pas
+  /// l'encaissement ; `level` : `low` ou `short`.
+  Map<String, dynamic>? _stockAlert(Product p, BigInt sold, BigInt demand) {
+    final estimated = p.signedStock - sold;
+    final remaining = estimated - demand;
+    final threshold = p.alertThreshold;
+    if (remaining.isNegative) {
+      final available = estimated.isNegative ? BigInt.zero : estimated;
+      final policy = switch (engine.oversellPolicy) {
+        'refuser' => ' La boutique refuse la survente (refus strict) : réduisez la quantité.',
+        'autoriser_avec_droit' => ' Survente possible seulement avec l’autorisation d’un responsable (code et motif).',
+        _ => '',
+      };
+      return {'level': 'short', 'message': 'Stock insuffisant : ${formatMicros(available)} pour une demande de ${formatMicros(demand)}.$policy'};
+    }
+    if (threshold != null && remaining > BigInt.zero && remaining <= threshold) {
+      return {'level': 'low', 'message': 'Stock faible : il restera ${formatMicros(remaining)} après cette vente (seuil ${formatMicros(threshold)}). Vente possible.'};
+    }
+    return null;
   }
 
   /// Stock estimé au seuil d'alerte du produit ou en dessous (jamais pour un stock illimité).
@@ -800,6 +848,30 @@ class LocalRegisterAdapter {
       _draft = before;
       throw const AdapterFailure('panier_perime', 'Ce panier a changé ou a déjà été encaissé : vue rechargée.');
     }
+  }
+
+  // ------------------------------------------------------------------ Images
+
+  Map<String, dynamic> _imageSettings() {
+    final counts = engine.imageCounts();
+    return {'start': engine.imageWindow?.start, 'end': engine.imageWindow?.end, 'images_cached': counts.cached, 'images_total': counts.total};
+  }
+
+  /// Plage du téléchargement, `HH:MM` locales, qui peut passer minuit ; `start` et `end` absents : à toute heure.
+  Future<Map<String, dynamic>> _setImageSettings(Map<String, dynamic> args) async {
+    if (!engine.imagesSupported) throw const AdapterFailure('fonction_indisponible', 'Images non disponibles sur ce terminal.');
+    final start = args['start'];
+    final end = args['end'];
+    if (start == null && end == null) {
+      await engine.setImageWindow(null);
+      return _imageSettings();
+    }
+    final time = RegExp(r'^([01]\d|2[0-3]):[0-5]\d$');
+    if (start is! String || end is! String || !time.hasMatch(start) || !time.hasMatch(end) || start == end) {
+      throw const AdapterFailure('reglage_refuse', 'Indiquez deux heures différentes, au format HH:MM.');
+    }
+    await engine.setImageWindow((start: start, end: end));
+    return _imageSettings();
   }
 
   // ------------------------------------------------------------------ Paniers en attente
@@ -1204,7 +1276,7 @@ class LocalRegisterAdapter {
         await engine.sync();
         if (engine.snapshotStale) await engine.refreshSnapshot();
         // Images : hors vente seulement, pour ne jamais ralentir un encaissement.
-        if (_draft.lines.isEmpty) await engine.downloadImages();
+        if (_draft.lines.isEmpty) await engine.downloadImages(interrupted: () => _draft.lines.isNotEmpty);
       }
     } catch (_) {
       // Panne réseau ou serveur : la file reste en place, l'état est relu par la vue.
@@ -1372,7 +1444,7 @@ class _DraftLine {
 
   /// Ligne de vente au prix du catalogue courant, ou null si le produit (ou son conditionnement) a disparu.
   CartLine? materialize(Snapshot snapshot) {
-    final product = snapshot.products.where((p) => p.id == productId).firstOrNull;
+    final product = snapshot.byId(productId);
     if (product == null) return null;
     final packaging = packagingId == null ? null : product.packaging(packagingId);
     if (packagingId != null && packaging == null) return null;

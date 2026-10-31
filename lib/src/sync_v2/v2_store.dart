@@ -79,6 +79,7 @@ class V2Keys {
 
   /// Préfixe du Z rendu par le serveur pour une clôture (`details.z`).
   static const zPrefix = 'v2.z.';
+  static const imageWindow = 'v2.images_plage';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).

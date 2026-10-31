@@ -836,6 +836,36 @@ class V2Engine extends CaisseEngine {
 
   static const _imagesPerPass = 30;
   DateTime? _imagesPausedUntil;
+  ({String start, String end})? _imageWindow;
+
+  @override
+  bool get imagesSupported => imageDirectory != null;
+
+  @override
+  ({String start, String end})? get imageWindow => _imageWindow;
+
+  @override
+  Future<void> setImageWindow(({String start, String end})? window) async {
+    await v2.write(V2Keys.imageWindow, window == null ? null : '${window.start}-${window.end}');
+    _imageWindow = window;
+  }
+
+  @override
+  ({int cached, int total}) imageCounts() {
+    final hashes = {for (final x in snapshot?.products ?? const <Product>[]) ?x.image?.hash};
+    return (cached: imageDirectory == null ? 0 : hashes.where((h) => _imageFile(h).existsSync()).length, total: hashes.length);
+  }
+
+  bool get _imageWindowOpen {
+    final window = _imageWindow;
+    if (window == null) return true;
+    int minutes(String time) => int.parse(time.substring(0, 2)) * 60 + int.parse(time.substring(3));
+    final local = now.toLocal();
+    final current = local.hour * 60 + local.minute;
+    final start = minutes(window.start);
+    final end = minutes(window.end);
+    return start < end ? current >= start && current < end : current >= start || current < end;
+  }
 
   File _imageFile(String hash) => File(p.join(imageDirectory!, '$hash.jpg'));
 
@@ -849,17 +879,19 @@ class V2Engine extends CaisseEngine {
   /// Le journal sert de manifeste : une nouvelle empreinte = nouveau fichier. S'arrête sur 429 (Retry-After respecté) ou
   /// sans réseau ; un contenu dont l'empreinte diffère n'est jamais gardé ; les fichiers qui ne servent plus sont retirés.
   @override
-  Future<int> downloadImages() async {
+  Future<int> downloadImages({bool Function()? interrupted}) async {
     final directory = imageDirectory;
     final client = _client;
     final s = snapshot;
     if (directory == null || client == null || s == null || !paired) return 0;
     final paused = _imagesPausedUntil;
     if (paused != null && now.isBefore(paused)) return 0;
+    if (!_imageWindowOpen) return 0;
     Directory(directory).createSync(recursive: true);
     final wanted = {for (final x in s.products) ?x.image?.hash: ?x.image};
     var added = 0;
     for (final image in wanted.values.where((i) => !_imageFile(i.hash).existsSync()).take(_imagesPerPass)) {
+      if (interrupted?.call() == true || !_imageWindowOpen) return added;
       final response = await client.image(image.uuid);
       if (response.status == 429) {
         _imagesPausedUntil = now.add(Duration(seconds: response.retryAfter ?? 60));
@@ -878,6 +910,9 @@ class V2Engine extends CaisseEngine {
     }
     return added;
   }
+
+  @override
+  String? get oversellPolicy => _shopRules?['survente'] as String?;
 
   /// Badge « Nouveau » : produit créé depuis N jours au plus (`regles.nouveau_jours`), null = désactivé.
   @override
@@ -1117,6 +1152,8 @@ class V2Engine extends CaisseEngine {
   Future<void> _rebuild() async {
     _customers = null;
     _blocked = await v2.read(V2Keys.blocked);
+    final window = (await v2.read(V2Keys.imageWindow))?.split('-');
+    _imageWindow = window == null ? null : (start: window.first, end: window.last);
     final device = await v2.read(V2Keys.device);
     _device = device == null ? const {} : {...Map<String, dynamic>.from(jsonDecode(device) as Map), 'epoque': int.tryParse(await v2.read(V2Keys.epoch) ?? '')};
     deviceName = device == null ? null : '${_device['nom'] ?? ''} — ${_device['terminal_nom'] ?? ''}';
@@ -1169,6 +1206,15 @@ class V2Engine extends CaisseEngine {
         operators.add({'id': id, 'nom': o['nom'], 'pin': o['pin_empreinte'], 'approbateur': o['approbateur_remise'], 'code_autorisation': o['code_autorisation_empreinte']});
       }
     }
+    // Index par produit : la reconstruction a lieu à chaque synchronisation et gèle la file des commandes.
+    final packagingsOf = <Object?, List<MapEntry<String, Map<String, dynamic>>>>{};
+    for (final k in packagings.entries) {
+      (packagingsOf[k.value['produit_uuid']] ??= []).add(k);
+    }
+    final barcodesOf = <Object?, List<Map<String, dynamic>>>{};
+    for (final c in barcodes.values) {
+      (barcodesOf[c['produit_uuid']] ??= []).add(c);
+    }
     final session = await _ownSession();
     final changesSeconds = ((_state?['delais'] as Map?)?['changements_secondes'] as int?) ?? 60;
     final raw = <String, dynamic>{
@@ -1212,13 +1258,12 @@ class V2Engine extends CaisseEngine {
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
               'conditionnements': [
-                for (final k in packagings.entries)
-                  if (k.value['produit_uuid'] == e.key && k.value['actif'] == true)
+                for (final k in packagingsOf[e.key] ?? const <MapEntry<String, Map<String, dynamic>>>[])
+                  if (k.value['actif'] == true)
                     {'id': ids[k.key], 'nom': k.value['nom'], 'coefficient': k.value['coefficient'], 'prix': k.value['prix'], 'defaut': k.value['defaut']},
               ],
               'codes': [
-                for (final c in barcodes.values)
-                  if (c['produit_uuid'] == e.key) {'code': c['code'], 'conditionnement_id': c['conditionnement_uuid'] == null ? null : ids[c['conditionnement_uuid']]},
+                for (final c in barcodesOf[e.key] ?? const <Map<String, dynamic>>[]) {'code': c['code'], 'conditionnement_id': c['conditionnement_uuid'] == null ? null : ids[c['conditionnement_uuid']]},
               ],
             },
       ],

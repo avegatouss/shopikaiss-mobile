@@ -230,3 +230,10 @@ Fermés par défaut : capacité `retour.especes`, `retours.mode` = `especes`, fo
 - Montant selon §3.13 : part = arrondi(net × total_ligne / brut), demi vers le haut ; rendu = arrondi(part × (avant + q) / Q) − arrondi(part × avant / Q).
 - Parts inexactes : règle `boutique.regles.retour_residuel` (`refuse`, `last_line`, `largest_share`, `largest_fraction`), appliquée comme `ReturnService`. Clé absente ou cas non chiffrable : le terminal refuse et renvoie en ligne. Si la règle change entre deux retours d'une vente, le serveur garde la première : `a_arbitrer`.
 - Limites : un retour fait en ligne sur la même vente n'est pas vu du terminal (écart `a_arbitrer`) ; produit à lots non détecté (`a_arbitrer`) ; aucun bon de retour imprimé ; tiroir ouvert si une imprimante est branchée.
+
+## Stock après le panier, plage d'images, performances
+
+- Vue : `products[].stock_after_label`, `lines[].stock_after_label`, `lines[].stock_alert` {level: `low`|`short`, message}, sur la première ligne du produit. Conditionnements convertis en unité de base. Message `short` complété selon `regles.survente` (`refuser`, `autoriser_avec_droit`).
+- L'alerte est indicative : elle n'empêche pas l'encaissement. L'autorisation de survente n'est pas livrée. Le seuil global de la boutique n'est pas publié : seul le seuil de la fiche compte. Produits à lots non détectés.
+- Images : `imageSettings` donne {start, end, images_cached, images_total} ; `setImageSettings` {start, end} en `HH:MM` locales, plage pouvant passer minuit, sans argument = à toute heure (défaut). Erreur `reglage_refuse`. Capacité `image_schedule`. Une vente qui commence arrête le lot avant l'image suivante ; l'image en cours se termine.
+- Mesure sur 5 000 produits, moteur v2, poste de dev, mode test : `view` 2 ms, `search` 15 ms, `scan` panier de 15 lignes 20 ms. Le gel d'une synchronisation passe de 1 990 ms à 52 ms (reconstruction du catalogue indexée). Non mesuré sur le poste Windows réel ni en build Release.

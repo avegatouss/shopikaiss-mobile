@@ -298,8 +298,23 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Fichier local de [image] s'il est déjà téléchargé, sinon null (contrat 2.1).
   String? imagePath(ProductImage image) => null;
 
-  /// Télécharge les images manquantes, hors vente ; rend le nombre de fichiers ajoutés.
-  Future<int> downloadImages() async => 0;
+  /// Télécharge les images manquantes, hors vente ; rend le nombre de fichiers ajoutés. [interrupted] est relu avant chaque
+  /// image : une vente qui commence arrête le lot.
+  Future<int> downloadImages({bool Function()? interrupted}) async => 0;
+
+  /// Cache d'images disponible sur ce terminal.
+  bool get imagesSupported => false;
+
+  /// Plage horaire locale du téléchargement (`HH:MM`, peut passer minuit), null = à toute heure.
+  ({String start, String end})? get imageWindow => null;
+
+  Future<void> setImageWindow(({String start, String end})? window) async {}
+
+  /// Images du catalogue déjà en cache et au total.
+  ({int cached, int total}) imageCounts() => (cached: 0, total: 0);
+
+  /// Politique de survente de la boutique (`refuser`, `autoriser_avec_droit`), null si elle n'est pas publiée.
+  String? get oversellPolicy => null;
 
   /// Badge « Nouveau » : nombre de jours depuis la création, null = désactivé (contrat 2.1).
   int? get newBadgeDays => null;
