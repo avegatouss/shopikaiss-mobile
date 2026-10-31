@@ -36,6 +36,12 @@ class _Host implements WindowsHost {
     'draft_id': 'draft-1',
     'store_name': 'Boutique de test',
     'total_label': '2 000 F',
+    'totals': {
+      'global_discount_label': '100 F',
+      'delivery_label': '500 F',
+      'base_ht_label': '1 695 F',
+      'vat_label': '305 F',
+    },
     'products': [
       <String, dynamic>{
         'id': 'p1',

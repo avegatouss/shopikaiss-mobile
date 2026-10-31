@@ -1330,25 +1330,37 @@ class _RegisterState extends State<_Register> {
                   ),
           ),
           const Divider(),
-          Wrap(
-            spacing: 8,
+          Row(
             children: [
-              TextButton.icon(
-                onPressed: _canEdit && _allowed('suspend') && c.lines.isNotEmpty
-                    ? () => c.command(HostCommand.suspendDraft, {})
-                    : null,
-                icon: const Icon(Icons.pause_circle_outline),
-                label: const Text('En attente (F8)'),
+              Expanded(
+                child: TextButton.icon(
+                  onPressed:
+                      _canEdit && _allowed('suspend') && c.lines.isNotEmpty
+                      ? () => c.command(HostCommand.suspendDraft, {})
+                      : null,
+                  icon: const Icon(Icons.pause_circle_outline),
+                  label: const Text(
+                    'En attente (F8)',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ),
-              TextButton.icon(
-                onPressed: _canEdit
-                    ? () => showDialog<void>(
-                        context: context,
-                        builder: (_) => SuspendedDraftsDialog(controller: c),
-                      )
-                    : null,
-                icon: const Icon(Icons.list_alt),
-                label: Text('Suspendus (${c.view['suspended_count'] ?? 0})'),
+              Expanded(
+                child: TextButton.icon(
+                  onPressed: _canEdit
+                      ? () => showDialog<void>(
+                          context: context,
+                          builder: (_) => SuspendedDraftsDialog(controller: c),
+                        )
+                      : null,
+                  icon: const Icon(Icons.list_alt),
+                  label: Text(
+                    'Suspendus (${c.view['suspended_count'] ?? 0})',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
               ),
             ],
           ),
@@ -1357,20 +1369,8 @@ class _RegisterState extends State<_Register> {
               c.view['pay_reason'] as String,
               style: const TextStyle(color: Color(0xff974b0c)),
             ),
-          if (c.view['totals'] is Map) ...[
-            if ((c.view['totals'] as Map)['global_discount_label'] != null)
-              Text(
-                'Remise globale : ${(c.view['totals'] as Map)['global_discount_label']}',
-              ),
-            if ((c.view['totals'] as Map)['delivery_label'] != null)
-              Text(
-                'Livraison : ${(c.view['totals'] as Map)['delivery_label']}',
-              ),
-            Text(
-              'Base HT : ${(c.view['totals'] as Map)['base_ht_label'] ?? "—"}',
-            ),
-            Text('TVA : ${(c.view['totals'] as Map)['vat_label'] ?? "—"}'),
-          ],
+          if (c.view['totals'] is Map)
+            _CompactTotals(totals: c.view['totals'] as Map),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -1413,6 +1413,55 @@ class _RegisterState extends State<_Register> {
         ],
       ),
     ),
+  );
+}
+
+class _CompactTotals extends StatelessWidget {
+  const _CompactTotals({required this.totals});
+  final Map totals;
+  Widget cell(String label, String key) {
+    final raw = totals[key]?.toString() ?? '';
+    final value = raw.isEmpty ? '—' : raw;
+    return Expanded(
+      child: Tooltip(
+        message: '$label : $value',
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 3, horizontal: 4),
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: '$label : ',
+                  style: const TextStyle(color: Color(0xff627168)),
+                ),
+                TextSpan(
+                  text: value,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 12),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      Row(
+        children: [
+          cell('Remise globale', 'global_discount_label'),
+          cell('Livraison', 'delivery_label'),
+        ],
+      ),
+      Row(
+        children: [cell('Base HT', 'base_ht_label'), cell('TVA', 'vat_label')],
+      ),
+    ],
   );
 }
 
