@@ -61,6 +61,7 @@ List<String> offlineTicketLines({
   out.add(pair('Caisse', snapshot.terminal.name));
   out.add(pair('Caissier', operatorName));
   if (operation.content['client_nom'] case final String customer when customer.isNotEmpty) out.add(pair('Client', customer));
+  if (operation.content['tarif'] case final String tier when tier != 'detail') out.add(tier == 'gros' ? 'Tarif gros' : 'Tarif gros par quantite');
   out.add('-' * cols);
   for (final line in lines) {
     wrap(line.label, centered: false);

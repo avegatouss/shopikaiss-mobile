@@ -21,6 +21,7 @@ enum HostCommand {
   commitReturn,
   setLineDiscount,
   setLineLot,
+  setWholesale,
   setGlobalDiscount,
   setDelivery,
   setNote,

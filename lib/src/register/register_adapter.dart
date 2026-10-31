@@ -165,6 +165,8 @@ class LocalRegisterAdapter {
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
       case 'setLineLot':
         return _setLineLot(_text(args, 'line_id', max: 64), args['lot_uuid'] as String?);
+      case 'setWholesale':
+        return _setWholesale(args['active'] == true);
       case 'setGlobalDiscount':
         return _setGlobalDiscount(_entry(args));
       case 'setDelivery':
@@ -281,6 +283,7 @@ class LocalRegisterAdapter {
       'global_discount': {...cap(_extrasRefusal() ?? _globalDiscountRefusal()), 'max_percent': rules?.maxGlobalDiscountPercent ?? 0},
       'delivery': cap(_extrasRefusal() ?? _deliveryRefusal()),
       'note': cap(_extrasRefusal()),
+      'wholesale': cap(_wholesaleRefusal()),
       'suspend': cap(_draft.lines.isEmpty ? 'Le panier est vide.' : null),
     };
   }
@@ -296,6 +299,16 @@ class LocalRegisterAdapter {
 
   /// Remise globale, livraison et note exigent la vente 2.1 (serveur à jour).
   String? _extrasRefusal() => engine.saleExtrasSupported ? null : 'Disponible quand la boutique est passée au contrat 2.1.';
+
+  String? _wholesaleRefusal() {
+    final rules = engine.wholesaleRules;
+    final operator = _operator;
+    if (rules == null || !rules.manual) return 'La bascule « Tarif gros » du panier n’est pas activée dans cette boutique.';
+    if (operator == null) return 'Identifiez le caissier.';
+    return engine.hasRight(operator, rules.right) ? null : '${operator.name} n’a pas le droit d’appliquer le tarif gros.';
+  }
+
+  CartTier _tierOf(_Draft draft) => CartTier(rules: engine.wholesaleRules, cart: draft.wholesale);
 
   String? _deliveryRefusal() {
     final operator = _operator;
@@ -318,7 +331,7 @@ class LocalRegisterAdapter {
     final snapshot = engine.snapshot;
     final reason = engine.blockReason;
     final sold = snapshot == null ? const <int, BigInt>{} : await engine.soldSinceSnapshot();
-    final resolved = snapshot == null ? const <(_DraftLine, CartLine?)>[] : [for (final l in _draft.lines) (l, l.materialize(snapshot))];
+    final resolved = snapshot == null ? const <(_DraftLine, CartLine?)>[] : [for (final l in _draft.lines) (l, l.materialize(snapshot, _tierOf(_draft)))];
     final available = [for (final r in resolved) if (r.$2 != null) r.$2!];
     final totals = snapshot == null ? null : _totalsOf(_draft, snapshot);
     final currency = snapshot?.store.currency == 'FCFA' || snapshot == null ? 'F' : snapshot.store.currency;
@@ -418,6 +431,7 @@ class LocalRegisterAdapter {
       'global_discount_entry': _draft.globalEntry?.toJson(),
       'delivery': _draft.delivery,
       'note': _draft.note,
+      'wholesale': _draft.wholesale,
       'query': _query,
       'category': _category,
       'categories': snapshot?.categories ?? const <String>[],
@@ -464,6 +478,8 @@ class LocalRegisterAdapter {
             'available': cart != null,
             'lot_uuid': line.lotUuid,
             'lot_label': cart?.lot?.label,
+            'wholesale': cart?.wholesale ?? false,
+            'wholesale_skipped': cart?.wholesaleSkipped ?? false,
             'lots': [
               for (final l in cart?.product.lots ?? const <ProductLot>[])
                 if (l.remaining > BigInt.zero)
@@ -508,7 +524,7 @@ class LocalRegisterAdapter {
 
   /// Totaux du panier par la règle du web, ou null si la remise globale dépasse le sous-total.
   WebTotals? _totalsOf(_Draft draft, Snapshot snapshot) {
-    final carts = [for (final l in draft.lines) l.materialize(snapshot)].whereType<CartLine>().toList();
+    final carts = [for (final l in draft.lines) l.materialize(snapshot, _tierOf(draft))].whereType<CartLine>().toList();
     try {
       return webTotals(
         lineBases: [for (final c in carts) c.base],
@@ -702,6 +718,16 @@ class LocalRegisterAdapter {
     return _mutate(() => line.quantity = micros);
   }
 
+  /// Panier entier au tarif gros : même droit et mêmes limites que le bouton de la caisse web.
+  Future<Map<String, dynamic>> _setWholesale(bool active) async {
+    if (_draft.sharedCart != null) throw const AdapterFailure('tarif_fige', 'Le mode tarifaire d’un panier repris est figé.');
+    if (active) {
+      final refusal = _wholesaleRefusal();
+      if (refusal != null) throw AdapterFailure('tarif_refuse', refusal);
+    }
+    return _mutate(() => _draft.wholesale = active);
+  }
+
   /// Lot de la ligne ; null = choix automatique selon la règle de la boutique.
   Future<Map<String, dynamic>> _setLineLot(String lineId, String? lot) async {
     final line = _draft.lines.where((l) => l.id == lineId).firstOrNull;
@@ -721,7 +747,7 @@ class LocalRegisterAdapter {
       final refusal = _discountRefusal();
       if (refusal != null) throw AdapterFailure('remise_refusee', refusal);
       final snapshot = _snapshot();
-      final cart = line.materialize(snapshot);
+      final cart = line.materialize(snapshot, _tierOf(_draft));
       if (cart == null) throw const AdapterFailure('panier_invalide', 'Article retiré du catalogue : retirez-le du panier.');
       amount = _amountOf(entry, cart.base, label: cart.label);
       final max = engine.enterableLineDiscount(_operator!, cart.base);
@@ -816,14 +842,14 @@ class LocalRegisterAdapter {
 
   /// Sous-total du panier (après remises de ligne) : base de la remise globale.
   int _subtotal(Snapshot snapshot) =>
-      [for (final l in _draft.lines) l.materialize(snapshot)].whereType<CartLine>().fold<int>(0, (sum, c) => sum + c.base - c.discount);
+      [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))].whereType<CartLine>().fold<int>(0, (sum, c) => sum + c.base - c.discount);
 
   /// Remises en pourcentage recalculées après un changement du panier (quantité, ligne), comme le web.
   void _recomputePercents() {
     final snapshot = engine.snapshot;
     if (snapshot == null) return;
     for (final line in _draft.lines) {
-      final cart = line.materialize(snapshot);
+      final cart = line.materialize(snapshot, _tierOf(_draft));
       if (cart != null && line.entry != null && line.entry!.isPercent) {
         line.discount = percentDiscount(cart.base, parsePercent(line.entry!.value), rounding: engine.percentRounding);
       }
@@ -881,14 +907,14 @@ class LocalRegisterAdapter {
     if (_draft.lines.isEmpty) throw const AdapterFailure('panier_vide', 'Le panier est vide : rien à mettre en attente.');
     final before = _draft.copy();
     final snapshot = engine.snapshot;
-    final lines = snapshot == null ? const <CartLine?>[] : [for (final l in _draft.lines) l.materialize(snapshot)];
+    final lines = snapshot == null ? const <CartLine?>[] : [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))];
     // Sans caissier ou avec un article disparu : conservé sur ce terminal seulement.
     if (engine.sharedCartsSupported && _operator != null && lines.isNotEmpty && lines.every((l) => l != null)) {
       try {
         _draft.sharedCart = await engine.suspendShared(
           _operator!,
           lines.cast<CartLine>(),
-          SaleExtras(globalDiscount: _draft.globalDiscount, delivery: _draft.delivery, note: _draft.note, customer: _draft.customer),
+          SaleExtras(wholesale: _draft.wholesale, globalDiscount: _draft.globalDiscount, delivery: _draft.delivery, note: _draft.note, customer: _draft.customer),
           previous: _draft.sharedCart,
           label: label,
         );
@@ -921,7 +947,7 @@ class LocalRegisterAdapter {
         }
         linked.add(draft.sharedCart!.uuid);
       }
-      final lines = snapshot == null ? const <CartLine?>[] : [for (final l in draft.lines) l.materialize(snapshot)];
+      final lines = snapshot == null ? const <CartLine?>[] : [for (final l in draft.lines) l.materialize(snapshot, _tierOf(draft))];
       final valid = lines.whereType<CartLine>().toList();
       items.add({
         'draft_id': draft.uuid,
@@ -967,7 +993,8 @@ class LocalRegisterAdapter {
       ..globalEntry = taken.globalDiscount == 0 ? null : DiscountEntry('montant', '${taken.globalDiscount}')
       ..delivery = taken.delivery
       ..note = taken.note
-      ..customer = taken.customer;
+      ..customer = taken.customer
+      ..wholesale = taken.wholesale;
     _draft.lines.addAll([
       for (final l in taken.lines)
         _DraftLine(id: _newUuid(), productId: l.product.id, packagingId: l.packaging?.id, quantity: l.quantity, discount: l.discount, price: l.fixedPrice),
@@ -1113,7 +1140,7 @@ class LocalRegisterAdapter {
     final snapshot = _snapshot();
     final operator = _operator;
     if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant d’encaisser.');
-    final lines = [for (final l in _draft.lines) l.materialize(snapshot)];
+    final lines = [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))];
     if (lines.isEmpty || lines.any((l) => l == null)) {
       throw const AdapterFailure('panier_invalide', 'Panier vide ou article retiré du catalogue : corrigez le panier.');
     }
@@ -1139,7 +1166,7 @@ class LocalRegisterAdapter {
         operator,
         draftUuid: _draft.uuid,
         operationUuid: operationId,
-        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval, customer: _draft.customer, sharedCart: _draft.sharedCart?.uuid),
+        extras: SaleExtras(wholesale: _draft.wholesale, globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval, customer: _draft.customer, sharedCart: _draft.sharedCart?.uuid),
       );
     } on OfflineRefusal catch (e) {
       // Refus d'une règle, levé avant toute écriture : la vente n'existe pas, le panier reste.
@@ -1352,6 +1379,7 @@ class _Draft {
     globalEntry = global is Map ? DiscountEntry.fromJson(global) : null;
     delivery = (stored.content['livraison'] as num?)?.toInt() ?? 0;
     note = stored.content['note'] as String?;
+    wholesale = stored.content['tarif_gros'] == true;
     customer = customerFromDraft(stored.content['client']);
     sharedCart = SharedCartRef.fromJson(stored.content['panier']);
     // `paiement` : panier conservé avant les paiements multiples.
@@ -1385,11 +1413,14 @@ class _Draft {
   Customer? customer;
   SharedCartRef? sharedCart;
 
+  /// Panier entier au tarif gros.
+  bool wholesale = false;
+
   _Draft copy() => _Draft(uuid)
     ..revision = revision
     ..lines.addAll([
       for (final l in lines)
-        _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, quantity: l.quantity, discount: l.discount, entry: l.entry, price: l.price),
+        _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, lotUuid: l.lotUuid, quantity: l.quantity, discount: l.discount, entry: l.entry, price: l.price),
     ])
     ..payments.addAll(payments)
     ..suspended = suspended
@@ -1398,7 +1429,8 @@ class _Draft {
     ..delivery = delivery
     ..note = note
     ..customer = customer
-    ..sharedCart = sharedCart;
+    ..sharedCart = sharedCart
+    ..wholesale = wholesale;
 
   Map<String, dynamic> toJson() => {
     'lignes': [
@@ -1418,6 +1450,7 @@ class _Draft {
     if (globalEntry != null) 'remise_globale_saisie': globalEntry!.toJson(),
     if (delivery != 0) 'livraison': delivery,
     if (note != null) 'note': note,
+    if (wholesale) 'tarif_gros': true,
     if (customer != null) 'client': {'uuid': customer!.uuid, 'nom': customer!.name},
     if (sharedCart != null) 'panier': sharedCart!.toJson(),
     'paiements': [
@@ -1448,13 +1481,13 @@ class _DraftLine {
   int discount;
 
   /// Ligne de vente au prix du catalogue courant, ou null si le produit (ou son conditionnement) a disparu.
-  CartLine? materialize(Snapshot snapshot) {
+  CartLine? materialize(Snapshot snapshot, CartTier tier) {
     final product = snapshot.byId(productId);
     if (product == null) return null;
     final packaging = packagingId == null ? null : product.packaging(packagingId);
     if (packagingId != null && packaging == null) return null;
     final lot = product.lots.where((l) => l.uuid == lotUuid).firstOrNull;
-    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry, fixedPrice: price, lot: lot);
+    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry, fixedPrice: price, lot: lot, tier: tier);
   }
 }
 

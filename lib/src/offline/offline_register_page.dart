@@ -44,6 +44,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   final _scanInput = TextEditingController();
   final _searchFocus = FocusNode();
   final List<CartLine> _cart = [];
+  final CartTier _tier = CartTier();
 
   /// Identifiant du panier en cours : consommé par la vente dans la même transaction, renouvelé après l'encaissement.
   /// Un second encaissement du même panier (double appui, écran rejoué) est refusé par la base.
@@ -194,6 +195,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   void _clearCart() {
     _cart.clear();
+    _tier.cart = false;
     _globalEntry = null;
     _delivery = 0;
     _note = null;
@@ -208,12 +210,24 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _shared = null;
   }
 
+  /// Bascule du panier entier ; une remise en montant qui dépasse la ligne au nouveau prix est retirée.
+  void _toggleWholesale() => setState(() {
+    _tier.cart = !_tier.cart;
+    for (final line in _cart) {
+      if (line.discountEntry case final entry? when !entry.isPercent && line.discount > line.base) {
+        line.discountEntry = null;
+        line.discount = 0;
+      }
+    }
+  });
+
   /// Sous-total du panier (après remises de ligne) : base de la remise globale.
   int get _subtotal => _cart.fold<int>(0, (sum, l) => sum + l.base - l.discount);
 
   /// Remises en pourcentage recalculées sur le panier courant, comme le web ; une remise globale en montant qui dépasse
   /// le nouveau sous-total est retirée. Rend les totaux affichés et encaissés.
   WebTotals _totals(Snapshot snapshot) {
+    _tier.rules = _engine.wholesaleRules;
     for (final line in _cart) {
       final entry = line.discountEntry;
       if (entry != null && entry.isPercent) line.discount = percentDiscount(line.base, parsePercent(entry.value), rounding: _engine.percentRounding);
@@ -619,6 +633,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           if (l.lot != null) 'lot_uuid': l.lot!.uuid,
         },
     ],
+    if (_tier.cart) 'tarif_gros': true,
     if (_globalEntry != null) 'remise_globale_saisie': _globalEntry!.toJson(),
     if (_delivery != 0) 'livraison': _delivery,
     if (_note != null) 'note': _note,
@@ -636,7 +651,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _shared = await _engine.suspendShared(
           _operator!,
           List.of(_cart),
-          SaleExtras(globalDiscount: totals.globalDiscount, delivery: _delivery, note: _note, customer: _customer),
+          SaleExtras(wholesale: _tier.cart, globalDiscount: totals.globalDiscount, delivery: _delivery, note: _note, customer: _customer),
           previous: _shared,
         );
       } on OfflineRefusal catch (e) {
@@ -722,6 +737,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         discountEntry: entry == null ? null : DiscountEntry.fromJson(entry),
         fixedPrice: raw['prix_fige'] as int?,
         lot: product.lots.where((l) => l.uuid == raw['lot_uuid']).firstOrNull,
+        tier: _tier,
       ));
     }
     await _engine.deleteDraft(draft.uuid);
@@ -729,6 +745,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     setState(() {
       _clearCart();
       _cart.addAll(lines);
+      _tier.cart = draft.content['tarif_gros'] == true;
       _globalEntry = global == null ? null : DiscountEntry.fromJson(global);
       _delivery = draft.content['livraison'] as int? ?? 0;
       _note = draft.content['note'] as String?;
@@ -756,7 +773,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (_cart.isNotEmpty) await _suspendCart();
     setState(() {
       _clearCart();
-      _cart.addAll(taken.lines);
+      _cart.addAll([for (final l in taken.lines) l..tier = _tier]);
+      _tier.cart = taken.wholesale;
       _globalEntry = taken.globalDiscount == 0 ? null : DiscountEntry('montant', '${taken.globalDiscount}');
       _delivery = taken.delivery;
       _note = taken.note;
@@ -936,6 +954,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final operator = _operator;
     final canClose = operator != null && _engine.canCloseSession(operator) && _cart.isEmpty;
     final extras = _engine.saleExtrasSupported && _cart.isNotEmpty;
+    final wholesale = _engine.wholesaleRules;
     Widget action(String label, IconData icon, VoidCallback? onPressed) =>
         TextButton.icon(onPressed: onPressed, icon: Icon(icon, size: 18), label: Text(label), style: TextButton.styleFrom(visualDensity: VisualDensity.compact));
     return SingleChildScrollView(
@@ -962,6 +981,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           action('Ventes récentes', Icons.history, _openJournal),
           action('Reçu', Icons.receipt_long_outlined, _openJournal),
           action(_note == null ? 'Note' : 'Note ✓', Icons.note_alt_outlined, extras ? _editNote : null),
+          if (_tier.cart || (wholesale != null && wholesale.manual && operator != null && _engine.hasRight(operator, wholesale.right)))
+            // Comme au web : le mode d'un panier repris est figé.
+            action(_tier.cart ? 'Tarif détail' : 'Tarif gros', Icons.sell_outlined, _shared == null ? _toggleWholesale : null),
           action('Session de caisse', Icons.point_of_sale, canClose ? _closeSession : null),
           action(_look.hideSoftKeyboard ? 'Clavier masqué' : 'Clavier affiché', _look.hideSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard, () {
             setState(() => _look.hideSoftKeyboard = !_look.hideSoftKeyboard);
@@ -1452,7 +1474,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       if (existing != null) {
         existing.quantity += BigInt.from(1000000);
       } else {
-        _cart.add(CartLine(product: product, packaging: chosen));
+        _cart.add(CartLine(product: product, packaging: chosen, tier: _tier));
       }
     });
     _searchFocus.requestFocus();
@@ -1580,6 +1602,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 '${line.lot == null ? 'Automatique : ' : ''}${shownLot.label}${expired ? ' · périmé le ${shownLot.expiresOn}' : ''}',
                 style: TextStyle(fontSize: 11, color: expired ? Colors.red : null),
               ),
+            if (line.wholesale && !_tier.cart) const Text('Prix de gros (seuil atteint)', style: TextStyle(fontSize: 11)),
+            if (line.wholesaleSkipped) const Text('Prix de gros non appliqué : produit à lots', style: TextStyle(fontSize: 11, color: Colors.brown)),
             if (tracked) Text('Après vente : ${_stockText(_stockAfterCart(line.product))}', style: const TextStyle(fontSize: 11)),
             if (alert != null) Text(alert.message, style: TextStyle(fontSize: 11, color: alert.level == 'short' ? Colors.red : Colors.brown)),
             Row(children: [step, const Spacer(), Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: amounts))]),
@@ -1845,7 +1869,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         payments,
         _operator!,
         draftUuid: _draftUuid,
-        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer, sharedCart: _shared?.uuid),
+        extras: SaleExtras(wholesale: _tier.cart, globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer, sharedCart: _shared?.uuid),
       );
     } on OfflineRefusal catch (e) {
       _toast(e.message);

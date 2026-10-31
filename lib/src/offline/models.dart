@@ -1,4 +1,5 @@
 import 'money.dart';
+import 'web_rules.dart';
 
 /// Référentiel de la caisse hors ligne reçu du serveur (`GET /api/caisse/v1/referentiel`, contrat ADR-421).
 class Snapshot {
@@ -253,7 +254,7 @@ class SharedCart {
 
 /// Panier partagé repris : prix figés dans [lines], remise globale en montant (le web ne garde pas le pourcentage).
 class TakenCart {
-  const TakenCart({required this.ref, required this.lines, required this.globalDiscount, required this.delivery, this.note, this.customer});
+  const TakenCart({required this.ref, required this.lines, required this.globalDiscount, required this.delivery, this.note, this.customer, this.wholesale = false});
 
   final SharedCartRef ref;
   final List<CartLine> lines;
@@ -261,6 +262,9 @@ class TakenCart {
   final int delivery;
   final String? note;
   final Customer? customer;
+
+  /// Panier suspendu au tarif gros : mode figé, repris tel quel à la vente.
+  final bool wholesale;
 }
 
 /// Montant compté à la clôture pour un moyen autre que les espèces.
@@ -302,12 +306,14 @@ class Packaging {
       name = (m['nom'] ?? '') as String,
       coefficient = (m['coefficient'] ?? '1') as String,
       price = (m['prix'] as num?)?.toInt() ?? 0,
+      wholesalePrice = (m['prix_gros'] as num?)?.toInt(),
       isDefault = m['defaut'] == true;
 
   final int id;
   final String name;
   final String coefficient;
   final int price;
+  final int? wholesalePrice;
   final bool isDefault;
 }
 
@@ -397,6 +403,8 @@ class Product {
       createdAt = m['cree_le'] == null ? null : DateTime.tryParse(m['cree_le'] as String),
       alertThreshold = m['seuil_alerte'] == null ? null : parseMicros(m['seuil_alerte'] as String),
       price = (m['prix'] as num?)?.toInt() ?? 0,
+      wholesalePrice = (m['prix_gros'] as num?)?.toInt(),
+      wholesaleMinimum = m['gros_quantite_min'] == null ? null : parseMicros(m['gros_quantite_min'] as String),
       unlimitedStock = m['stock_illimite'] == true,
       stockMicros = parseMicros(((m['stock'] ?? '0') as String).replaceFirst('-', '')) ?? BigInt.zero,
       negativeStock = ((m['stock'] ?? '0') as String).startsWith('-'),
@@ -410,6 +418,10 @@ class Product {
   final String name;
   final String? reference;
   final String? category;
+
+  /// Prix de gros et seuil propre au produit (`boutique.regles.gros`).
+  final int? wholesalePrice;
+  final BigInt? wholesaleMinimum;
 
   /// Produit vendu par lots (capacité `lots.vente`) ; [lots] dans l'ordre d'allocation de [lotMode].
   final bool managedByLots;
@@ -471,8 +483,44 @@ class DiscountEntry {
 }
 
 /// Éléments de vente du contrat 2.1 hors lignes et paiements : remise globale, livraison, note.
+/// Tarif gros de la boutique (`boutique.regles.gros`, `WholesaleRules` du web).
+class WholesaleRules {
+  WholesaleRules(Map<String, dynamic> m)
+    : mode = m['mode'] as String,
+      minimum = m['quantite_min'] == null ? null : parseMicros(m['quantite_min'] as String),
+      right = (m['droit'] ?? 'remise') as String,
+      cumulates = m['remises'] == 'allow';
+
+  final String mode;
+  final BigInt? minimum;
+  final String right;
+
+  /// Remises, bons et points permis en plus du prix de gros.
+  final bool cumulates;
+
+  /// Le bouton « Tarif gros » bascule le panier entier.
+  bool get manual => mode != 'quantity';
+
+  /// Seuil du produit, sinon celui de la boutique, en unités de base (un carton de 12 compte pour 12).
+  bool reaches(BigInt? productMinimum, BigInt quantity) {
+    final threshold = productMinimum ?? minimum;
+    return mode != 'cart' && threshold != null && threshold > BigInt.zero && quantity >= threshold;
+  }
+}
+
+/// Mode tarifaire d'un panier, partagé par ses lignes : un changement vaut pour toutes.
+class CartTier {
+  CartTier({this.rules, this.cart = false});
+
+  /// Null si la boutique n'a pas de tarif gros.
+  WholesaleRules? rules;
+
+  /// Panier entier au tarif gros (bascule manuelle).
+  bool cart;
+}
+
 class SaleExtras {
-  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval, this.customer, this.sharedCart});
+  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval, this.customer, this.sharedCart, this.wholesale = false});
 
   final int globalDiscount;
   final DiscountEntry? globalEntry;
@@ -488,13 +536,16 @@ class SaleExtras {
   /// Panier partagé consommé par la vente.
   final String? sharedCart;
 
+  /// Panier entier au tarif gros.
+  final bool wholesale;
+
   bool get isEmpty =>
-      globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null && customer == null && sharedCart == null;
+      globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null && customer == null && sharedCart == null && !wholesale;
 }
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.
 class CartLine {
-  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry, this.lot})
+  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry, this.lot, this.tier})
     : quantity = quantity ?? BigInt.from(1000000);
 
   /// Saisie de la remise (montant ou pourcentage), figée dans la vente 2.1 ; [discount] en est le montant.
@@ -511,7 +562,29 @@ class CartLine {
   /// Prix déjà encaissé (réimpression d'une vente enregistrée) ; null = prix du catalogue.
   final int? fixedPrice;
 
-  int get unitPrice => fixedPrice ?? packaging?.price ?? lot?.price ?? product.price;
+  /// Mode tarifaire du panier ; null = détail.
+  CartTier? tier;
+
+  /// Tarif gros demandé pour cette ligne : panier entier, ou seuil de quantité atteint.
+  bool get _wholesaleDue {
+    final rules = tier?.rules;
+    return rules != null && (tier!.cart || rules.reaches(product.wholesaleMinimum, baseQuantity(quantity, packaging?.coefficient)));
+  }
+
+  int? get _wholesalePrice => packaging == null ? product.wholesalePrice : packaging!.wholesalePrice;
+
+  /// Prix de gros de la ligne. Le contrat ne couvre pas le tarif gros sur lot : ces produits restent au détail.
+  int? get _appliedWholesale => fixedPrice == null && !product.managedByLots && _wholesaleDue ? _wholesalePrice : null;
+
+  int get _retailPrice => packaging?.price ?? lot?.price ?? product.price;
+
+  /// La ligne est vendue à un autre prix que le détail, au titre du tarif gros.
+  bool get wholesale => _appliedWholesale != null && _appliedWholesale != _retailPrice;
+
+  /// Prix de gros dû mais non appliqué : produit à lots.
+  bool get wholesaleSkipped => fixedPrice == null && product.managedByLots && _wholesaleDue && _wholesalePrice != null;
+
+  int get unitPrice => fixedPrice ?? _appliedWholesale ?? _retailPrice;
   String get label => packaging == null ? product.name : '${product.name} (${packaging!.name})';
   int get base => lineBase(unitPrice, quantity);
   int get total => lineTotal(unitPrice, quantity, discount);

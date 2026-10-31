@@ -1006,6 +1006,87 @@ void main() {
         throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Le lot choisi est indisponible'))));
   });
 
+  test('tarif gros : panier entier sous droit, seuil par ligne, cumul refusé, produit à lots au détail', () async {
+    server.put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 50, 'source': 'boutique', 'verrouillee': false});
+    await paired();
+    const savon = '0a000000-0000-4000-8000-0000000000b1';
+    const huile = '0a000000-0000-4000-8000-0000000000b2';
+    const carton = '0c000000-0000-4000-8000-0000000000b1';
+    const lotHuile = '0e000000-0000-4000-8000-0000000000b2';
+    Map<String, dynamic> produit(String nom, {bool lots = false}) => {
+      'nom': nom, 'reference': null, 'categorie': null, 'prix': 1000, 'stock_illimite': true, 'actif': true, 'vente_locale': true, 'gere_par_lots': lots,
+      'categorie_uuid': null, 'marque': null, 'fournisseur': null, 'unite': null,
+      'prix_gros': 800, 'gros_quantite_min': '10.000000', 'seuil_alerte': null, 'cree_le': null, 'favori': false, 'promotions': <Map<String, dynamic>>[], 'image': null,
+    };
+    Map<String, dynamic> boutique(String mode, String remises) => {
+      'nom': 'Boutique', 'devise': 'FCFA', 'tva_taux': '0.000000', 'tva_incluse': true,
+      'regles': {
+        'remise_pourcentage_arrondi': 'down', 'arrondi_especes': null, 'trop_percu': 'cash_change', 'moins_a_un': 'refuse',
+        'livraison_droit': null, 'ouverture_session': 'automatic', 'survente': 'refuse',
+        'gros': {'actif': true, 'mode': mode, 'quantite_min': null, 'droit': 'remise', 'remises': remises, 'prix_lot': 'refuse'},
+        'fuseau': 'Africa/Abidjan', 'nouveau_jours': 7, 'lots_mode': 'fifo',
+      },
+      'ticket': {'raison_sociale': null, 'adresse': null, 'telephone': null, 'ncc': null, 'entete': null, 'pied': null, 'largeur_papier': 80},
+      'devise_secondaire': null,
+    };
+    server
+      ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1', 'lots.vente']
+      ..put('boutique', fakeShop, boutique('cart_and_quantity', 'refuse'), critical: true)
+      ..put('produit', fakeSavon, {...produit('Savon')}..remove('gere_par_lots'))
+      ..put('produit', fakeService, {...produit('Emballage'), 'stock_illimite': true}..remove('gere_par_lots'))
+      ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
+      ..put('operateur', 'operateur:7', {'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'remise', 'vente'], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false}, critical: true)
+      ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
+      ..put('operateur', 'operateur:8', {'operateur_id': '8', 'nom': 'Stagiaire', 'pin_empreinte': null, 'droits': <String>[], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false})
+      ..put('produit', savon, produit('Savon gros'))
+      ..put('conditionnement', carton, {'produit_uuid': savon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 11000, 'defaut': false, 'actif': true, 'prix_gros': 9000})
+      ..put('produit', huile, produit('Huile lot', lots: true))
+      ..put('lot', lotHuile, {'produit_uuid': huile, 'reference': 'H-1', 'entree': '2026-10-01T08:00:00Z', 'peremption': null, 'prix_vente': 1000, 'actif': true})
+      ..put('stock.projection', '$huile:$lotHuile', {'produit_uuid': huile, 'lot_uuid': lotHuile, 'quantite': '50.000000'});
+
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid, pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true, contract21: true);
+    await e.load('https://boutique.exemple.ci');
+    expect((await e.sync()).reachable, isTrue);
+    final operator = e.snapshot!.operators.first;
+    Product named(String name) => e.snapshot!.products.firstWhere((p) => p.name == name);
+
+    final tier = CartTier(rules: e.wholesaleRules);
+    CartLine line(int units, {Packaging? packaging}) => CartLine(product: named('Savon gros'), packaging: packaging, quantity: BigInt.from(units * 1000000), tier: tier);
+
+    // Seuil du produit : 9 au détail, 10 au gros ; un carton de 12 compte pour 12.
+    expect([line(9).unitPrice, line(9).wholesale, line(10).unitPrice, line(10).wholesale], [1000, false, 800, true]);
+    expect(line(1, packaging: named('Savon gros').packagings.single).unitPrice, 9000);
+
+    final byQuantity = await e.recordSale([line(10)], [cash(e, 8000)], operator);
+    final quantityRow = await e.v2.operation(byQuantity.uuid);
+    final quantityContent = quantityRow!['operation']['contenu'] as Map;
+    expect([quantityContent['tarif'], ((quantityContent['lignes'] as List).single as Map)['tarif'], ((quantityContent['lignes'] as List).single as Map)['prix_unitaire']], ['gros_quantite', 'gros', 800]);
+
+    // Bascule manuelle : tous les articles à prix de gros, ticket mentionné.
+    tier.cart = true;
+    expect(line(1).unitPrice, 800);
+    final byCart = await e.recordSale([line(1)], [cash(e, 800)], operator, extras: const SaleExtras(wholesale: true));
+    expect((await e.v2.operation(byCart.uuid))!['operation']['contenu']['tarif'], 'gros');
+    expect(byCart.content['tarif'], 'gros');
+
+    // Cumul refusé par la boutique, comme au web.
+    await expectLater(e.recordSale([line(1)..discount = 100], [cash(e, 700)], operator, extras: const SaleExtras(wholesale: true)),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('ne se cumule pas'))));
+
+    // Produit à lots : hors contrat, reste au détail, écart signalé, vente acceptée.
+    final oil = CartLine(product: named('Huile lot'), quantity: BigInt.from(10000000), tier: tier);
+    expect([oil.unitPrice, oil.wholesale, oil.wholesaleSkipped], [1000, false, true]);
+    tier.cart = false;
+    final oilSale = await e.recordSale([oil], [cash(e, 10000)], operator);
+    expect((await e.v2.operation(oilSale.uuid))!['operation']['contenu']['tarif'], 'detail');
+
+    // Mode « quantité » : plus de bascule manuelle, seuil de la boutique si le produit n'en a pas.
+    final byThreshold = WholesaleRules({'mode': 'quantity', 'quantite_min': '5.000000', 'droit': null, 'remises': 'allow'});
+    expect([byThreshold.manual, byThreshold.right, byThreshold.cumulates, byThreshold.reaches(null, BigInt.from(5000000)), byThreshold.reaches(BigInt.from(6000000), BigInt.from(5000000))],
+        [false, 'remise', true, true, false]);
+    expect(WholesaleRules({'mode': 'cart', 'quantite_min': '5.000000', 'droit': null, 'remises': 'refuse'}).reaches(null, BigInt.from(9000000)), isFalse);
+  });
+
   test('contrat 2.1 (lot 1b) : remise %, remise globale, livraison, note, arrondi espèces — intégrée au franc près', () async {
     // En 2.0 : remise globale, livraison et note indisponibles, avec le motif.
     final legacy = await paired();

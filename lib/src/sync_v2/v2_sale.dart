@@ -5,7 +5,7 @@ import 'decimal6.dart';
 
 /// Ligne d'un panier v2, telle que choisie à l'écran (catalogue de la projection v2).
 class V2CartLine {
-  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry, this.fixedPrice, this.lotUuid});
+  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry, this.fixedPrice, this.lotUuid, this.wholesale = false});
 
   final String productUuid;
   final String? packagingUuid;
@@ -20,6 +20,9 @@ class V2CartLine {
 
   /// Lot vendu, obligatoire pour un produit à lots (une ligne par lot).
   final String? lotUuid;
+
+  /// [fixedPrice] est le prix de gros (`ligne.tarif`).
+  final bool wholesale;
 }
 
 /// Paiement d'une vente (au plus 10) ; [received] = somme remise par le client (espèces seulement), [reference] =
@@ -110,6 +113,7 @@ class V2SaleBuilder {
         'total': base - item.discount,
         'revision_prix': revisions[item.packagingUuid ?? item.productUuid] ?? '0',
         if (revision21) 'remise_saisie': item.discountEntry?.toJson(),
+        if (revision21) 'tarif': item.wholesale ? 'gros' : 'detail',
         if (item.lotUuid != null) 'lot_uuid': item.lotUuid,
       });
       if (product['stock_illimite'] != true || item.lotUuid != null) {
@@ -169,6 +173,7 @@ class V2SaleBuilder {
       if (revision21) 'remise_globale_saisie': extras.globalDiscount == 0 ? null : extras.globalEntry?.toJson(),
       if (revision21) 'note': extras.note == null || extras.note!.isEmpty ? null : extras.note,
       if (revision21) 'client_nom': extras.customer?.name,
+      if (revision21) 'tarif': extras.wholesale ? 'gros' : (cart.any((l) => l.wholesale) ? 'gros_quantite' : 'detail'),
       if (extras.sharedCart != null) 'panier_uuid': extras.sharedCart,
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[if (approval != null) approval.toJson()],

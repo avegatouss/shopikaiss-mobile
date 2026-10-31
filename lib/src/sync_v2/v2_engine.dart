@@ -408,6 +408,24 @@ class V2Engine extends CaisseEngine {
     return operation;
   });
 
+  @override
+  WholesaleRules? get wholesaleRules {
+    final rules = (_shopRules?['gros'] as Map?)?.cast<String, dynamic>();
+    return saleExtrasSupported && rules?['actif'] == true ? WholesaleRules(rules!) : null;
+  }
+
+  /// Contrôles de la caisse web sur le tarif gros (`SaleService`, `HeldCartService`).
+  void _checkWholesale(Operator operator, List<CartLine> lines, SaleExtras extras) {
+    final rules = wholesaleRules;
+    if (extras.wholesale) {
+      if (rules == null || (!rules.manual && extras.sharedCart == null)) throw const OfflineRefusal('La bascule « Tarif gros » du panier n’est pas activée dans cette boutique.');
+      if (!hasRight(operator, rules.right)) throw OfflineRefusal('${operator.name} n’a pas le droit d’appliquer le tarif gros.');
+    }
+    if ((extras.wholesale || lines.any((l) => l.wholesale)) && rules?.cumulates != true && (extras.globalDiscount > 0 || lines.any((l) => l.discount > 0))) {
+      throw const OfflineRefusal('Le tarif gros ne se cumule pas avec une remise dans cette boutique : retirez les remises ou revenez au tarif de détail.');
+    }
+  }
+
   /// Règles commerciales de la boutique (forme 2.1, `boutique.regles`), ou null.
   Map<String, dynamic>? _shopRules;
 
@@ -589,6 +607,7 @@ class V2Engine extends CaisseEngine {
     if ((lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) && !hasRight(operator, 'remise')) {
       throw OfflineRefusal('${operator.name} n’a pas le droit d’accorder une remise : retirez-la avant de partager ce panier.');
     }
+    _checkWholesale(operator, lines, extras);
     final name = (label ?? '').trim().isEmpty ? 'Panier ${now.toIso8601String().substring(0, 16).replaceFirst('T', ' ')}' : label!.trim();
     if (name.length > 150) throw const OfflineRefusal('Nom du panier trop long (150 caractères au plus).');
     final content = {
@@ -605,7 +624,7 @@ class V2Engine extends CaisseEngine {
       'remise_globale': extras.globalDiscount,
       'livraison': extras.delivery,
       'note': extras.note,
-      'tarif': 'detail',
+      'tarif': extras.wholesale ? 'gros' : 'detail',
     };
     // Sans reprise, le serveur ne retire pas l'ancien panier de lui-même : suppression explicite, avant, dans l'ordre.
     if (previous != null && !previous.claimed) {
@@ -665,6 +684,7 @@ class V2Engine extends CaisseEngine {
       delivery: content['livraison'] as int,
       note: content['note'] as String?,
       customer: content['client_uuid'] == null ? null : Customer(uuid: content['client_uuid'] as String, name: content['client_nom'] as String? ?? 'Client'),
+      wholesale: content['tarif'] == 'gros',
     );
   }
 
@@ -994,6 +1014,7 @@ class V2Engine extends CaisseEngine {
         // Moyens admis : ceux du catalogue local (politique paiements.moyens_locaux et capacités du serveur), vérifiés
         // par checkSale ; une seule ligne d'espèces (la monnaie se rend sur elle).
         if (payments.where((p) => p.method.isCash).length > 1) throw const OfflineRefusal('Une seule ligne d’espèces par vente.');
+        _checkWholesale(operator, lines, extras);
         final allocation = allocateLots(s, lines);
         final cart = [
           for (final l in lines) ..._cartLines(l, allocation[l]),
@@ -1135,6 +1156,7 @@ class V2Engine extends CaisseEngine {
             ],
             'total': (content['totaux'] as Map)['a_payer'],
             if (content['client_nom'] != null) 'client_nom': content['client_nom'],
+            if (content['tarif'] != null) 'tarif': content['tarif'],
           }
         : {...content, if (await v2.read('${V2Keys.zPrefix}${op['uuid']}') case final z?) 'z': jsonDecode(z)};
     final finalState = state == V2OperationState.integrated || state == V2OperationState.resolved;
@@ -1274,13 +1296,15 @@ class V2Engine extends CaisseEngine {
               'cree_le': e.value['cree_le'],
               'seuil_alerte': e.value['seuil_alerte'],
               'prix': e.value['prix'],
+              'prix_gros': e.value['prix_gros'],
+              'gros_quantite_min': e.value['gros_quantite_min'],
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
               if (e.value['gere_par_lots'] == true) ..._lotView(e.key, e.value, lotsOf[e.key] ?? const [], stock, estimated),
               'conditionnements': [
                 for (final k in packagingsOf[e.key] ?? const <MapEntry<String, Map<String, dynamic>>>[])
                   if (k.value['actif'] == true)
-                    {'id': ids[k.key], 'nom': k.value['nom'], 'coefficient': k.value['coefficient'], 'prix': k.value['prix'], 'defaut': k.value['defaut']},
+                    {'id': ids[k.key], 'nom': k.value['nom'], 'coefficient': k.value['coefficient'], 'prix': k.value['prix'], 'prix_gros': k.value['prix_gros'], 'defaut': k.value['defaut']},
               ],
               'codes': [
                 for (final c in barcodesOf[e.key] ?? const <Map<String, dynamic>>[]) {'code': c['code'], 'conditionnement_id': c['conditionnement_uuid'] == null ? null : ids[c['conditionnement_uuid']]},
@@ -1314,8 +1338,9 @@ class V2Engine extends CaisseEngine {
           quantityMicros: l.quantity.toInt(),
           discount: l.discount,
           discountEntry: l.discountEntry,
-          fixedPrice: segments == null ? l.fixedPrice : l.unitPrice,
+          fixedPrice: segments != null || l.wholesale ? l.unitPrice : l.fixedPrice,
           lotUuid: segments?.single.lot.uuid,
+          wholesale: l.wholesale,
         ),
       ];
     }
