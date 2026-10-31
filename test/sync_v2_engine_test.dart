@@ -148,7 +148,11 @@ void main() {
 
     await e.sync();
     expect((await e.saleStatus(opening.uuid))!.serverStatus, 'integree');
-    // Intégrée : la session locale cède la place à celle du serveur (fermée ici : aucune publiée).
+    // Intégrée, pas encore rendue par le journal : la vente suivante reste possible.
+    expect(e.sessionOpen, isTrue);
+    // Toujours rien du journal après le délai : le serveur fait foi (fermée ici : aucune publiée).
+    await e.v2.db.update('v2_operations', {'maj_le': '2020-01-01T00:00:00Z'}, where: 'uuid = ?', whereArgs: [opening.uuid]);
+    await e.sync();
     expect(e.sessionOpen, isFalse);
   });
 

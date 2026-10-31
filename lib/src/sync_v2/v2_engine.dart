@@ -1309,7 +1309,10 @@ class V2Engine extends CaisseEngine {
     if (local == null) return null;
     final opening = await v2.operation(local);
     final state = opening?['etat'] as String?;
-    if (opening == null || state == V2OperationState.integrated || state == V2OperationState.resolved || state == V2OperationState.rejected) {
+    // Intégrée, pas encore revenue par le journal : reste ouverte ici, sinon la vente suivante serait refusée.
+    final integrated = state == V2OperationState.integrated ? DateTime.tryParse('${opening!['maj_le']}') : null;
+    final awaited = integrated != null && server?['session_uuid'] != local && now.difference(integrated) < _publicationDelay;
+    if (!awaited && (opening == null || state == V2OperationState.integrated || state == V2OperationState.resolved || state == V2OperationState.rejected)) {
       await v2.write(V2Keys.localSession, null);
       return null;
     }
