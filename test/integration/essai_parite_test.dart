@@ -18,7 +18,7 @@ import 'package:uuid/uuid.dart';
 ///     flutter test test/integration/essai_parite_test.dart
 ///
 /// Phases : `parcours` (client créé, vente citée, panier partagé publié, repris et supprimé, retour si la boutique les
-/// ouvre) ; `retour` (SK_VENTE) ; `fusion` (SK_TELEPHONE, déjà saisi côté web) ; `paniers` (reprend et supprime les paniers Essai B) ; `cloture` (comptage à l'aveugle de SK_ESPECES francs, ferme la session du terminal).
+/// ouvre) ; `vente_client` (SK_CLIENT, SK_NOM) ; `retour` (SK_VENTE) ; `fusion` (SK_TELEPHONE, déjà saisi côté web) ; `paniers` (reprend et supprime les paniers Essai B) ; `cloture` (comptage à l'aveugle de SK_ESPECES francs, ferme la session du terminal).
 void main() {
   final env = Platform.environment;
   final origin = env['SK_ORIGINE'] ?? 'https://demo.khoga.ci';
@@ -159,6 +159,19 @@ void main() {
       await Future<void>.delayed(const Duration(seconds: 7));
       await sync('journal');
       note('clients trouvés : ${[for (final c in await engine.searchCustomers(phone)) '${c.uuid} ${c.name} attente=${c.pending}'].join(', ')}');
+    }
+
+    if (phase == 'vente_client') {
+      await run('addProduct', {'product_id': product.id});
+      await step('client sur la vente', 'setCustomer', {'uuid': env['SK_CLIENT'], 'name': env['SK_NOM']});
+      final payable = (await run('preparePayment'))['payable'] as int;
+      await run('setPayment', {'method': 'especes', 'received': payable + 1000});
+      final saleId = const Uuid().v4();
+      final sale = await step('vente citant le client', 'commitSale', {}, saleId);
+      note('vente ${sale?['number']} total ${sale?['total']}');
+      await sync('après vente');
+      final state = await engine.saleStatus(saleId);
+      note('sort : ${state?.serverStatus} · ${state?.serverNumber} · ${state?.message ?? ''}');
     }
 
     if (phase == 'paniers') {
