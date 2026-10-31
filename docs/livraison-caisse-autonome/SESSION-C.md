@@ -323,3 +323,7 @@ Moteur B a6e3dce integre (7c5af2c inclus) : panier partage conserve avant retour
 EngineHost ferme maintenant son propre client HTTP apres drainage des commandes/synchronisation, puis SQLite et le verrou. Les transports injectes restent possedes par leur appelant. Tous les appels close attendent la meme Future. Nettoyage aussi en echec de demarrage.
 86 tests Windows + moteur v2 PASS ; analyse ciblee sans remarque. Test avec vraie connexion TCP keep-alive : fermeture et reouverture de la base PASS. Script tool/windows/check_host_shutdown.py : ancien exe ne quitte pas apres EOF sous 5s (reproduit sur base synthetique seulement). Revalidation du nouvel exe apres compilation, resultat dans JOURNAL. Aucun processus utilisateur termine, aucune modification de donnees demo.
 
+
+## 31 octobre — maintien client et session avant retour du journal
+Fusion du moteur B a846ebd (f000212 inclus) : client cree maintenu dans la selection et session ouverte localement maintenue pendant l'attente de publication serveur. Les corrections Windows precedentes, notamment la fermeture HTTP du moteur, sont conservees. 86 tests Windows/v2 PASS, analyse ciblee sans remarque. Aucun nouvel essai sur la demo pour ce lot. Compilation et installation tracees dans JOURNAL.
+
