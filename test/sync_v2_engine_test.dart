@@ -735,7 +735,9 @@ void main() {
     expect(await e.sharedCartState(again.uuid), 'local');
 
     await e.sync();
-    expect(await e.sharedCartState(again.uuid), 'disparu', reason: 'intégré et absent du journal : vendu ou supprimé ailleurs');
+    expect(await e.sharedCartState(again.uuid), 'local', reason: 'intégré, pas encore revenu par le journal : la copie locale reste');
+    await e.v2.db.update('v2_operations', {'maj_le': '2020-01-01T00:00:00Z'}, where: 'uuid = ?', whereArgs: [again.uuid]);
+    expect(await e.sharedCartState(again.uuid), 'disparu', reason: 'toujours absent après le délai : vendu ou supprimé ailleurs');
 
     // Lot 5 : retours fermés par défaut ; ouverts par la capacité, la politique et les droits.
     expect(e.returnsOpen(closer), isFalse);

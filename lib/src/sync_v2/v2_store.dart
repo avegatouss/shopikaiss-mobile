@@ -268,6 +268,10 @@ class V2Store {
     return {for (final r in rows) r['cle'] as String: Map<String, dynamic>.from(jsonDecode(r['donnees'] as String) as Map)};
   }
 
+  /// Suppression reçue par le journal pour cette entité.
+  Future<bool> entityDeleted(String type, String key) async =>
+      (await db.query('v2_entites', columns: ['revision'], where: 'type = ? AND cle = ? AND donnees IS NULL', whereArgs: [type, key], limit: 1)).isNotEmpty;
+
   /// TVA de la boutique de l'appairage (entité `boutique`, contrat 2.0.1). Null si le serveur ne la publie pas encore
   /// (serveur 2.0.0) : l'appelant ne doit alors vendre que dans une boutique sans TVA connue, jamais deviner un taux.
   Future<V2Vat?> shopVat() async {
