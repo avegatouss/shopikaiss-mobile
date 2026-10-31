@@ -185,6 +185,8 @@ class V2Engine extends CaisseEngine {
     snapshotAt = DateTime.tryParse(await v2.read(V2Keys.snapshotAt) ?? '');
     final state = await v2.read(V2Keys.serverState);
     _state = state == null ? null : Map<String, dynamic>.from(jsonDecode(state) as Map);
+    // Forme des données relue ici : un redémarrage hors connexion garde les fonctions du contrat 2.1.
+    v2.contract21 = contract21 && (await v2.read(V2Keys.contractRevision) ?? '').startsWith('2.1');
     await _rebuild();
     await _count();
     notifyListeners();

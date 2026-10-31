@@ -908,6 +908,7 @@ void main() {
         pinVerifier: FakeV2Server.pinVerifier, contract21: true, imageDirectory: cache.path, clock: () => moment);
     await reloaded.load('https://boutique.exemple.ci');
     expect(reloaded.imageWindow, e.imageWindow);
+    expect(reloaded.saleExtrasSupported, isTrue, reason: 'redémarrage hors connexion : contrat 2.1 conservé');
 
     // Dans la plage : le panier repris arrête le lot avant la requête.
     moment = moment.add(const Duration(hours: 1));
