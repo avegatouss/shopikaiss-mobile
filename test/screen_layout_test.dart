@@ -411,6 +411,17 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('icône % refusée par la boutique : le motif reste affiché dans une fenêtre', (tester) async {
+      final session = await _session(inches: 8.0);
+      await _pump(tester, const Size(800, 1280), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Remise de ligne'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AlertDialog, 'Remise impossible'), findsOneWidget);
+      expect(find.text('Aucune remise autorisée hors ligne par la boutique.'), findsOneWidget);
+    });
+
     testWidgets('icône % de la ligne : ouvre la remise, pas la quantité', (tester) async {
       final session = await _session(inches: 8.0, approver: true);
       await _pump(tester, const Size(800, 1280), session);

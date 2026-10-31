@@ -309,9 +309,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   Future<void> _editGlobalDiscount() async {
     final operator = _operator;
-    if (operator == null) return _toast('Identifiez le caissier.');
-    if (!_engine.hasRight(operator, 'remise')) return _toast('${operator.name} n’a pas le droit d’accorder une remise.');
-    if ((_snapshot?.rules.maxGlobalDiscountPercent ?? 0) <= 0) return _toast('Remise globale non autorisée hors ligne dans cette boutique.');
+    if (operator == null) return _refuse('Identifiez le caissier.');
+    if (!_engine.hasRight(operator, 'remise')) return _refuse('${operator.name} n’a pas le droit d’accorder une remise.');
+    if ((_snapshot?.rules.maxGlobalDiscountPercent ?? 0) <= 0) return _refuse('Remise globale non autorisée hors ligne dans cette boutique.');
     final subtotal = _subtotal;
     final lines = _cart.fold<int>(0, (sum, l) => sum + l.discount);
     final result = await _askDiscount(
@@ -810,6 +810,19 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     } finally {
       _probing = false;
     }
+  }
+
+  /// Refus d'une action demandée : fenêtre à fermer, le message ne disparaît pas sans avoir été lu.
+  Future<void> _refuse(String message) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remise impossible'),
+        content: Text(message),
+        actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
+      ),
+    );
   }
 
   void _toast(String message) {
@@ -1675,7 +1688,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Remise de la ligne pour la quantité [quantity] : directe depuis l'icône %, ou depuis la fenêtre de la ligne.
   Future<void> _editDiscount(CartLine line, BigInt quantity) async {
     final refusal = _discountRefusal;
-    if (refusal != null) return _toast(refusal);
+    if (refusal != null) return _refuse(refusal);
     final base = lineBase(line.unitPrice, quantity);
     final others = _cart.where((l) => l != line).fold<int>(0, (sum, l) => sum + l.discount);
     final result = await _askDiscount(
