@@ -68,6 +68,7 @@ class WindowsRegisterController extends ChangeNotifier {
   String? _checkoutId;
   List<Map<String, dynamic>> paymentMethods = const [];
   int? paymentChange;
+  int? paymentPayable;
 
   List<Map<String, dynamic>> get products => _rows('products');
   List<Map<String, dynamic>> get lines => _rows('lines');
@@ -143,6 +144,7 @@ class WindowsRegisterController extends ChangeNotifier {
     if (command == HostCommand.preparePayment) {
       paymentMethods = const [];
       paymentChange = null;
+      paymentPayable = null;
     }
     notifyListeners();
     try {
@@ -157,13 +159,28 @@ class WindowsRegisterController extends ChangeNotifier {
             : null;
       }
       if (command == HostCommand.preparePayment) {
+        paymentPayable = result['payable'] as int?;
         paymentMethods = (result['methods'] as List? ?? const [])
             .whereType<Map<String, dynamic>>()
             .where((m) => m['code'] is String && m['name'] is String)
             .toList();
       }
       _checkoutId = null;
-      await refresh();
+      if ((command == HostCommand.setPayment ||
+              command == HostCommand.setPayments) &&
+          !_disposed &&
+          _transportAvailable &&
+          result['schema'] == 1 &&
+          result['revision'] is int &&
+          (result['revision'] as int) >= (view['revision'] as int? ?? -1)) {
+        // The local engine already returns the authoritative calculated view.
+        // Avoid two extra IPC calls and a second catalogue calculation per edit.
+        ++_refreshGeneration;
+        view = result;
+        ready = result['ready'] == true;
+      } else if (command != HostCommand.preparePayment) {
+        await refresh();
+      }
       return result;
     } on HostFailure catch (error) {
       message = error.message;

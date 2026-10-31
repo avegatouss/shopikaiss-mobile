@@ -279,3 +279,9 @@ Nouveau client : nom requis, telephone facultatif, commande createCustomer avec 
 
 Boutons pleins, contours, textes, eleves et icones : arrondi commun de 16 px dans le theme de caisse. Pagination catalogue existante : Afficher plus ajoute 60 produits, filtres conserves ; pas de pages numerotees.
 Validation de ce lot : 59 tests Windows reussis (dont executable moteur reel), analyse Windows sans remarque. Aucun essai client sur la demo pendant cette passe.
+
+## Paiement : messages, solde propose et appels locaux
+
+Les messages moteur sont presentes dans un bandeau colore du titre des fenetres paiement simple et multiple. Multipaiement : premier montant propose depuis preparePayment.payable, puis chaque nouvelle ligne reprend le solde non affecte ; affichage du reste a repartir, ajout desactive quand il est nul. Ce calcul est une proposition de saisie seulement : le moteur reste autorite pour les montants, l'arrondi, la monnaie et l'encaissement.
+
+preparePayment ne declenche plus une relecture status/view inutile. setPayment/setPayments reutilisent la vue moteur retournee si schema/revision valides, au lieu de deux appels IPC supplementaires et d'un second calcul de catalogue. Erreur ou reponse sans vue : chemin de rafraichissement conserve. Temporisation de saisie 250 ms conservee, validation explicite de l'encaissement. Synchronisation du moteur deja executee en dehors de la file des commandes locales ; aucune promesse de temps maximal sans mesure sur poste reel.

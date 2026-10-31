@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
 import 'discount_approval.dart';
+import 'payment_message.dart';
 
 class MultiplePayments extends StatefulWidget {
   const MultiplePayments({super.key, required this.controller});
@@ -26,6 +27,24 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
   Timer? timer;
   int revision = 0;
   bool accepted = false;
+  int? get remaining {
+    final total = c.paymentPayable;
+    if (total == null) return null;
+    var allocated = 0;
+    for (final row in rows) {
+      final amount = int.tryParse(row.amount.trim());
+      if (amount == null || amount < 0) return null;
+      allocated += amount;
+    }
+    return total - allocated;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    rows.first.amount = c.paymentPayable?.toString() ?? '';
+  }
+
   bool get editable => c.ready && c.uncertainOperation == null;
   void changed() {
     ++revision;
@@ -75,18 +94,30 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
     animation: c,
     builder: (context, _) => AlertDialog(
       scrollable: true,
-      title: const Text('Paiements et références'),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Répartir le paiement'),
+          Text(
+            'À payer : ${c.view['total_label'] ?? '—'}',
+            style: const TextStyle(fontSize: 22),
+          ),
+          if (remaining != null)
+            Text(
+              'Reste à répartir : $remaining F CFA',
+              style: const TextStyle(fontSize: 16),
+            ),
+          PaymentMessage(message: c.message),
+        ],
+      ),
       content: SizedBox(
         width: 560,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'À payer : ${c.view['total_label'] ?? '—'}',
-              style: const TextStyle(fontSize: 24),
-            ),
             const Text(
-              'Un seul paiement : montant vide = total exact. Plusieurs paiements : indiquez chaque montant. Validation automatique, sans encaissement automatique.',
+              'Saisissez la part du premier moyen, puis ajoutez un moyen pour le solde. Les montants sont vérifiés automatiquement avant confirmation.',
             ),
             for (final row in rows)
               Card(
@@ -183,9 +214,14 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
                 ),
               ),
             TextButton.icon(
-              onPressed: editable && rows.length < 10
+              onPressed:
+                  editable &&
+                      rows.length < 10 &&
+                      (remaining == null || remaining! > 0)
                   ? () {
-                      rows.add(_PaymentRow());
+                      rows.add(
+                        _PaymentRow()..amount = remaining?.toString() ?? '',
+                      );
                       changed();
                     }
                   : null,
@@ -213,7 +249,6 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
                   'Arrondi espèces : ${(c.view['payment'] as Map)['rounding_label']}',
                 ),
             ],
-            if (c.message != null) Text(c.message!),
             if (c.uncertainOperation != null)
               TextButton(
                 onPressed: c.busy ? null : c.reconcile,

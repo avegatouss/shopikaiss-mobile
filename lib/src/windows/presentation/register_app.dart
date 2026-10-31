@@ -21,6 +21,7 @@ import 'calculator.dart';
 import 'discount_approval.dart';
 import 'web_destinations.dart';
 import 'customer_picker.dart';
+import 'payment_message.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -1453,7 +1454,14 @@ class _PaymentState extends State<_Payment> {
     animation: c,
     builder: (context, _) => AlertDialog(
       scrollable: true,
-      title: const Text('Paiement'),
+      title: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Paiement'),
+          PaymentMessage(message: c.message),
+        ],
+      ),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -1543,11 +1551,6 @@ class _PaymentState extends State<_Payment> {
               c.view['payment_label'] as String? ??
                   'Choisissez un moyen autorisé dans le moteur local.',
             ),
-            if (c.message != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 16),
-                child: Text(c.message!),
-              ),
             if (c.uncertainOperation != null)
               TextButton(
                 onPressed: c.busy ? null : c.reconcile,
