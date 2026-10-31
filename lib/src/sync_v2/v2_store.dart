@@ -268,6 +268,12 @@ class V2Store {
     return {for (final r in rows) r['cle'] as String: Map<String, dynamic>.from(jsonDecode(r['donnees'] as String) as Map)};
   }
 
+  /// Paniers dont ce terminal a demandé la suppression : ne plus les proposer avant que le journal ne le confirme.
+  Future<Set<String>> deletedCarts() async {
+    final rows = await db.query('v2_operations', columns: ['operation'], where: 'type = ? AND etat != ?', whereArgs: ['panier_supprimer', V2OperationState.rejected]);
+    return {for (final r in rows) ((jsonDecode(r['operation'] as String) as Map)['contenu'] as Map)['panier_uuid'] as String};
+  }
+
   /// Suppression reçue par le journal pour cette entité.
   Future<bool> entityDeleted(String type, String key) async =>
       (await db.query('v2_entites', columns: ['revision'], where: 'type = ? AND cle = ? AND donnees IS NULL', whereArgs: [type, key], limit: 1)).isNotEmpty;

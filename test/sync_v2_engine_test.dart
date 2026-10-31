@@ -705,6 +705,13 @@ void main() {
     expect(e.blockReason, isNull);
     expect(server.snapshotReasons.skip(before4), ['reparation']);
     expect((await e.sharedCarts()).map((c) => c.uuid), [webCart]);
+    // Suppression demandée ici : retiré de la liste aussitôt, même si le journal ne l'a pas encore confirmée.
+    const gone = '0e000000-0000-4000-8000-000000000002';
+    server.publish([{'type': 'panier', 'critique': false, 'cle': gone, 'revision': '9', 'action': 'upsert', 'donnees': panier([fakeTerminal])}]);
+    await e.sync();
+    expect((await e.sharedCarts()).map((c) => c.uuid), contains(gone));
+    await e.deleteSharedCart(e.snapshot!.operators.first, gone);
+    expect((await e.sharedCarts()).map((c) => c.uuid), isNot(contains(gone)));
 
     // Reprise : prix figé du panier, conservé dans la vente, panier consommé.
     server.takenElsewhere.add(webCart);

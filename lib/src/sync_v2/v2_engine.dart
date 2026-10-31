@@ -549,8 +549,9 @@ class V2Engine extends CaisseEngine {
     if (!sharedCartsSupported) return const [];
     final me = _device['terminal_uuid'];
     final carts = <SharedCart>[];
+    final deleted = await v2.deletedCarts();
     for (final e in (await v2.entities('panier')).entries) {
-      if (!(e.value['terminaux'] as List).contains(me)) continue;
+      if (!(e.value['terminaux'] as List).contains(me) || deleted.contains(e.key)) continue;
       final taken = e.value['repris_par'] as Map?;
       carts.add(SharedCart(
         uuid: e.key,
