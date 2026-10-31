@@ -265,7 +265,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 controller: value,
                 autofocus: true,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(labelText: percent ? 'Pourcentage' : 'Montant (F)', errorText: error),
+                decoration: InputDecoration(labelText: percent ? 'Pourcentage' : 'Montant (F)', errorText: error, errorMaxLines: 3),
               ),
             ],
           ),
