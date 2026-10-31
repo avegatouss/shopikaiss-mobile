@@ -727,7 +727,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       }
       final report = await _engine.sync();
       // Images : hors vente seulement, pour ne jamais ralentir un encaissement.
-      if (_cart.isEmpty) unawaited(_engine.downloadImages().then((added) => added > 0 ? _changed() : null));
+      if (_cart.isEmpty) unawaited(_engine.downloadImages(interrupted: () => _cart.isNotEmpty).then((added) => added > 0 ? _changed() : null));
       setState(
         () => _lastSyncMessage = report.sent > 0
             ? '${report.sent} opération(s) envoyée(s) : ${report.integrated} intégrée(s)${report.pending > 0 ? ', ${report.pending} à arbitrer par la boutique' : ''}${report.refused > 0 ? ', ${report.refused} refusée(s)' : ''}.'

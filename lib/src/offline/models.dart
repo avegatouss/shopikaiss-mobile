@@ -22,6 +22,7 @@ class Snapshot {
       for (final code in product.codes) {
         _byCode[code.code] = (product, code.packagingId);
       }
+      _byId[product.id] = product;
     }
   }
 
@@ -44,11 +45,14 @@ class Snapshot {
   final List<Operator> operators;
   final List<Product> products;
   final Map<String, (Product, int?)> _byCode = {};
+  final Map<int, Product> _byId = {};
 
   bool get sessionOpen => session != null;
 
   /// Produit (et conditionnement) d'un code-barres scanné.
   (Product, int?)? byCode(String code) => _byCode[code.trim()];
+
+  Product? byId(int id) => _byId[id];
 
   /// Recherche par nom, référence ou code (insensible aux accents et à la casse) sur tout le catalogue, restreinte à
   /// [category], [brand] et [supplier] si donnés ; [limit] null = tous les résultats.

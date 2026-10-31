@@ -854,6 +854,54 @@ void main() {
     expect(await e.downloadImages(), 0);
   });
 
+  test('images : plage horaire configurée, lot arrêté dès que la vente commence', () async {
+    final cache = Directory.systemTemp.createTempSync('images_');
+    var moment = DateTime.now();
+    addTearDown(() => cache.deleteSync(recursive: true));
+    const uuid = '0d000000-0000-4000-8000-000000000001';
+    final bytes = utf8.encode('image jpeg');
+    server.images[uuid] = bytes;
+    serve21(server);
+    server.put('produit', fakeSavon, {
+      ...(server.entities['produit|$fakeSavon']!['donnees'] as Map).cast<String, dynamic>(),
+      'image': {'uuid': uuid, 'empreinte': sha256.convert(bytes).toString(), 'octets': bytes.length, 'largeur': 10, 'hauteur': 10},
+    });
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, contract21: true, imageDirectory: cache.path, clock: () => moment);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'x', appVersion: 'essai'), isNull);
+    await e.sync();
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    final hour = moment.hour;
+    String at(int hours) => '${((hour + hours) % 24).toString().padLeft(2, '0')}:00';
+
+    await expectLater(adapter.execute('setImageSettings', {'start': '25:00', 'end': '06:00'}, null),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'reglage_refuse')));
+    final settings = await adapter.execute('setImageSettings', {'start': at(1), 'end': at(2)}, null);
+    expect(settings, {'start': at(1), 'end': at(2), 'images_cached': 0, 'images_total': 1});
+
+    // Hors plage : aucune requête, réglage relu après relance du moteur.
+    final calls = server.requests.length;
+    expect(await e.downloadImages(), 0);
+    expect(server.requests.length, calls);
+    final reloaded = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, contract21: true, imageDirectory: cache.path, clock: () => moment);
+    await reloaded.load('https://boutique.exemple.ci');
+    expect(reloaded.imageWindow, e.imageWindow);
+
+    // Dans la plage : le panier repris arrête le lot avant la requête.
+    moment = moment.add(const Duration(hours: 1));
+    expect(await e.downloadImages(interrupted: () => true), 0);
+    expect(server.requests.length, calls);
+    expect(await e.downloadImages(interrupted: () => false), 1);
+
+    // Plage retirée : à toute heure, comme avant.
+    expect((await adapter.execute('setImageSettings', {}, null))['images_cached'], 1);
+    expect(e.imageWindow, isNull);
+    await adapter.close();
+  });
+
   test('contrat 2.1 (lot 1b) : remise %, remise globale, livraison, note, arrondi espèces — intégrée au franc près', () async {
     // En 2.0 : remise globale, livraison et note indisponibles, avec le motif.
     final legacy = await paired();

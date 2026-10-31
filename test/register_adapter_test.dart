@@ -54,6 +54,24 @@ void main() {
     await run('setPayment', {'method': 'especes', 'received': 5000});
   }
 
+  test('stock après le panier : conditionnements cumulés, alerte sur la première ligne du produit, sans blocage', () async {
+    await run('scan', {'code': '6190000000011'}); // savon : 10 en stock
+    var view = await run('scan', {'code': '6190000000011'});
+    final soap = (view['products'] as List).firstWhere((p) => p['id'] == 10);
+    expect(soap['stock_label'], '10');
+    expect(soap['stock_after_label'], '8');
+    var lines = (view['lines'] as List).cast<Map>();
+    expect(lines.single['stock_after_label'], '8');
+    expect(lines.single['stock_alert'], isNull);
+
+    // Un carton de 12 : demande 14 pour 10.
+    view = await run('scan', {'code': '6190000000028'});
+    lines = (view['lines'] as List).cast<Map>();
+    expect(lines.first['stock_alert'], {'level': 'short', 'message': 'Stock insuffisant : 10 pour une demande de 14.'});
+    expect(lines.last['stock_alert'], isNull);
+    expect(lines.last['stock_after_label'], '-4');
+  });
+
   test('vue schéma 1 : catalogue, panier, total ; encaissement impossible sans caissier identifié', () async {
     final view = await run('scan', {'code': '6190000000011'});
     expect(view['schema'], 1);
