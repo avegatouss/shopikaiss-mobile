@@ -564,7 +564,8 @@ class V2Engine extends CaisseEngine {
     return carts..sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
   }
 
-  static const _sharedCartPublication = Duration(minutes: 10);
+  /// Attente d'une écriture intégrée par le journal : le serveur publie par balayage, au cycle suivant.
+  static const _publicationDelay = Duration(minutes: 10);
 
   @override
   Future<String> sharedCartState(String uuid) async {
@@ -575,7 +576,7 @@ class V2Engine extends CaisseEngine {
     // Intégré, pas encore revenu par le journal : observé sur la démo juste après l'envoi. Passé ce délai, sans suppression
     // reçue (instantané intermédiaire), il a été vendu ou supprimé ailleurs.
     final integrated = DateTime.tryParse('${row!['maj_le']}');
-    return integrated != null && now.difference(integrated) < _sharedCartPublication ? 'local' : 'disparu';
+    return integrated != null && now.difference(integrated) < _publicationDelay ? 'local' : 'disparu';
   }
 
   @override
@@ -783,14 +784,20 @@ class V2Engine extends CaisseEngine {
         if (e.value['actif'] == true && e.value['type'] != 'passage') Customer(uuid: e.key, name: e.value['nom'] as String, phone: e.value['telephone'] as String?),
     ];
     final published = {for (final c in customers) c.uuid};
+    final phones = {for (final c in customers) normalizePhone(c.phone)};
     final own = <String>{};
     for (final row in await v2.operationRows()) {
       final operation = row['operation'] as Map;
       if (operation['type'] != 'creation_client' || row['etat'] == V2OperationState.rejected) continue;
       final content = operation['contenu'] as Map;
       own.add(content['client_uuid'] as String);
-      // Intégrée : la fiche arrive par le journal, sous cet uuid ou sous celui de la fiche fusionnée.
-      if (row['etat'] == V2OperationState.integrated || row['etat'] == V2OperationState.resolved || published.contains(content['client_uuid'])) continue;
+      if (published.contains(content['client_uuid'])) continue;
+      // Intégrée : la fiche arrive par le journal, sous cet uuid ou sous celui de la fiche fusionnée (même téléphone).
+      if (row['etat'] == V2OperationState.integrated || row['etat'] == V2OperationState.resolved) {
+        final integrated = DateTime.tryParse('${row['maj_le']}');
+        final phone = normalizePhone(content['telephone'] as String?);
+        if (integrated == null || now.difference(integrated) >= _publicationDelay || (phone != null && phones.contains(phone))) continue;
+      }
       customers.add(Customer(uuid: content['client_uuid'] as String, name: content['nom'] as String, phone: content['telephone'] as String?, pending: true));
     }
     customers.sort((a, b) => fold(a.name).compareTo(fold(b.name)));

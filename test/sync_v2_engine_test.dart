@@ -627,7 +627,13 @@ void main() {
     await e.sync();
     final order = [for (final r in server.received.values) (r['operation'] as Map)['type']];
     expect(order.indexOf('creation_client') < order.lastIndexOf('vente'), isTrue, reason: 'la création précède la vente qui la cite');
-    expect(await e.searchCustomers('bintou'), isEmpty, reason: 'intégrée : la fiche vient du journal, sous l’uuid fusionné s’il y a lieu');
+    expect((await e.searchCustomers('bintou')).single.uuid, created.uuid, reason: 'intégrée, pas encore revenue par le journal : reste choisissable');
+    server.publish([
+      {'type': 'client', 'critique': false, 'cle': 'c1000000-0000-4000-8000-0000000000f2', 'revision': '9', 'action': 'upsert',
+        'donnees': {'nom': 'Bintou Traoré', 'telephone': '+2250505050505', 'type': 'particulier', 'tarif': 'detail', 'actif': true}},
+    ]);
+    await e.sync();
+    expect((await e.searchCustomers('bintou')).single.uuid, 'c1000000-0000-4000-8000-0000000000f2', reason: 'fiche fusionnée : même téléphone, aucun doublon');
     final afterMerge = await e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], creator, extras: SaleExtras(customer: created));
     expect(afterMerge.isSale, isTrue, reason: 'l’uuid du terminal reste accepté');
 
