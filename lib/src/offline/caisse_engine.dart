@@ -74,8 +74,11 @@ Map<CartLine, List<LotSegment>> allocateLots(Snapshot s, List<CartLine> lines) {
       rest -= part;
     }
     if (rest > BigInt.zero) throw const OfflineRefusal('Quantité insuffisante dans les lots vendables ; aucune vente sans lot d’origine.');
-    if (line.packaging == null && segments.any((x) => x.lot.price != line.unitPrice)) {
+    if (line.packaging == null && segments.any((x) => x.lot.price != line.retailPrice)) {
       throw const OfflineRefusal('Plusieurs prix de lots : choisissez un lot ou utilisez un conditionnement.');
+    }
+    if (line.wholesaleRefused) {
+      throw const OfflineRefusal('Tarif gros refusé pour un produit vendu au prix de ses lots (règle de la boutique) : vendez-le au détail ou par un conditionnement.');
     }
     result[line] = segments;
   }

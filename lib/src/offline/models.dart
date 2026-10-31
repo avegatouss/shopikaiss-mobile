@@ -403,6 +403,7 @@ class Product {
       createdAt = m['cree_le'] == null ? null : DateTime.tryParse(m['cree_le'] as String),
       alertThreshold = m['seuil_alerte'] == null ? null : parseMicros(m['seuil_alerte'] as String),
       price = (m['prix'] as num?)?.toInt() ?? 0,
+      catalogPrice = (m['prix_catalogue'] as num?)?.toInt() ?? (m['prix'] as num?)?.toInt() ?? 0,
       wholesalePrice = (m['prix_gros'] as num?)?.toInt(),
       wholesaleMinimum = m['gros_quantite_min'] == null ? null : parseMicros(m['gros_quantite_min'] as String),
       unlimitedStock = m['stock_illimite'] == true,
@@ -418,6 +419,9 @@ class Product {
   final String name;
   final String? reference;
   final String? category;
+
+  /// Prix de la fiche produit ; [price] d'un produit à lots suit son premier lot.
+  final int catalogPrice;
 
   /// Prix de gros et seuil propre au produit (`boutique.regles.gros`).
   final int? wholesalePrice;
@@ -489,11 +493,15 @@ class WholesaleRules {
     : mode = m['mode'] as String,
       minimum = m['quantite_min'] == null ? null : parseMicros(m['quantite_min'] as String),
       right = (m['droit'] ?? 'remise') as String,
+      lotPriced = (m['prix_lot'] ?? 'refuse') as String,
       cumulates = m['remises'] == 'allow';
 
   final String mode;
   final BigInt? minimum;
   final String right;
+
+  /// Produit vendu au prix de ses lots : `refuse`, `lot_price` ou `lowest`.
+  final String lotPriced;
 
   /// Remises, bons et points permis en plus du prix de gros.
   final bool cumulates;
@@ -573,18 +581,26 @@ class CartLine {
 
   int? get _wholesalePrice => packaging == null ? product.wholesalePrice : packaging!.wholesalePrice;
 
-  /// Prix de gros de la ligne. Le contrat ne couvre pas le tarif gros sur lot : ces produits restent au détail.
-  int? get _appliedWholesale => fixedPrice == null && !product.managedByLots && _wholesaleDue ? _wholesalePrice : null;
+  /// Prix du lot différent de la fiche produit, sans conditionnement (`LotSaleSplitter::wholesaleUnitPrice`).
+  bool get _lotPriced => packaging == null && retailPrice != product.catalogPrice;
 
-  int get _retailPrice => packaging?.price ?? lot?.price ?? product.price;
+  /// Prix de gros de la ligne, règle `prix_lot` comprise.
+  int? get _appliedWholesale {
+    final price = _wholesalePrice;
+    if (fixedPrice != null || price == null || !_wholesaleDue) return null;
+    if (!_lotPriced) return price;
+    return tier!.rules!.lotPriced == 'lowest' && price < retailPrice ? price : null;
+  }
+
+  int get retailPrice => packaging?.price ?? lot?.price ?? product.price;
 
   /// La ligne est vendue à un autre prix que le détail, au titre du tarif gros.
-  bool get wholesale => _appliedWholesale != null && _appliedWholesale != _retailPrice;
+  bool get wholesale => _appliedWholesale != null && _appliedWholesale != retailPrice;
 
-  /// Prix de gros dû mais non appliqué : produit à lots.
-  bool get wholesaleSkipped => fixedPrice == null && product.managedByLots && _wholesaleDue && _wholesalePrice != null;
+  /// Tarif gros dû sur un produit vendu au prix de ses lots, refusé par la boutique.
+  bool get wholesaleRefused => fixedPrice == null && _wholesalePrice != null && _wholesaleDue && _lotPriced && tier!.rules!.lotPriced == 'refuse';
 
-  int get unitPrice => fixedPrice ?? _appliedWholesale ?? _retailPrice;
+  int get unitPrice => fixedPrice ?? _appliedWholesale ?? retailPrice;
   String get label => packaging == null ? product.name : '${product.name} (${packaging!.name})';
   int get base => lineBase(unitPrice, quantity);
   int get total => lineTotal(unitPrice, quantity, discount);

@@ -479,7 +479,7 @@ class LocalRegisterAdapter {
             'lot_uuid': line.lotUuid,
             'lot_label': cart?.lot?.label,
             'wholesale': cart?.wholesale ?? false,
-            'wholesale_skipped': cart?.wholesaleSkipped ?? false,
+            'wholesale_refused': cart?.wholesaleRefused ?? false,
             'lots': [
               for (final l in cart?.product.lots ?? const <ProductLot>[])
                 if (l.remaining > BigInt.zero)

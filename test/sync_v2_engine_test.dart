@@ -1006,7 +1006,7 @@ void main() {
         throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Le lot choisi est indisponible'))));
   });
 
-  test('tarif gros : panier entier sous droit, seuil par ligne, cumul refusé, produit à lots au détail', () async {
+  test('tarif gros : panier entier sous droit, seuil par ligne, cumul refusé, règle prix_lot', () async {
     server.put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 50, 'source': 'boutique', 'verrouillee': false});
     await paired();
     const savon = '0a000000-0000-4000-8000-0000000000b1';
@@ -1073,12 +1073,28 @@ void main() {
     await expectLater(e.recordSale([line(1)..discount = 100], [cash(e, 700)], operator, extras: const SaleExtras(wholesale: true)),
         throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('ne se cumule pas'))));
 
-    // Produit à lots : hors contrat, reste au détail, écart signalé, vente acceptée.
+    // Produit à lots au prix de la fiche : prix de gros, ligne au tarif gros, lot conservé.
     final oil = CartLine(product: named('Huile lot'), quantity: BigInt.from(10000000), tier: tier);
-    expect([oil.unitPrice, oil.wholesale, oil.wholesaleSkipped], [1000, false, true]);
+    expect([oil.unitPrice, oil.wholesale, oil.wholesaleRefused], [800, true, false]);
+    final oilSale = await e.recordSale([oil], [cash(e, 8000)], operator, extras: const SaleExtras(wholesale: true));
+    final oilLine = ((await e.v2.operation(oilSale.uuid))!['operation']['contenu']['lignes'] as List).single as Map;
+    expect([oilLine['tarif'], oilLine['prix_unitaire'], oilLine['lot_uuid']], ['gros', 800, lotHuile]);
+
+    // Prix du lot différent de la fiche : règle prix_lot de la boutique.
+    (int, bool, bool) lotPriced(String rule, int lotPrice, {int? wholesale = 800}) {
+      final line = CartLine(
+        product: Product({'id': 1, 'prix': lotPrice, 'prix_catalogue': 1000, 'prix_gros': wholesale, 'gere_par_lots': true}),
+        tier: CartTier(rules: WholesaleRules({'mode': 'cart', 'quantite_min': null, 'droit': null, 'remises': 'refuse', 'prix_lot': rule}), cart: true),
+      );
+      return (line.unitPrice, line.wholesale, line.wholesaleRefused);
+    }
+
+    expect(lotPriced('refuse', 1200), (1200, false, true));
+    expect(lotPriced('lot_price', 1200), (1200, false, false));
+    expect(lotPriced('lowest', 1200), (800, true, false));
+    expect(lotPriced('lowest', 700), (700, false, false));
+    expect(lotPriced('refuse', 1200, wholesale: null), (1200, false, false));
     tier.cart = false;
-    final oilSale = await e.recordSale([oil], [cash(e, 10000)], operator);
-    expect((await e.v2.operation(oilSale.uuid))!['operation']['contenu']['tarif'], 'detail');
 
     // Mode « quantité » : plus de bascule manuelle, seuil de la boutique si le produit n'en a pas.
     final byThreshold = WholesaleRules({'mode': 'quantity', 'quantite_min': '5.000000', 'droit': null, 'remises': 'allow'});

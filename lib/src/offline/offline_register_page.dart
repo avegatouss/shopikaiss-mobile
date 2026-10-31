@@ -1603,7 +1603,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 style: TextStyle(fontSize: 11, color: expired ? Colors.red : null),
               ),
             if (line.wholesale && !_tier.cart) const Text('Prix de gros (seuil atteint)', style: TextStyle(fontSize: 11)),
-            if (line.wholesaleSkipped) const Text('Prix de gros non appliqué : produit à lots', style: TextStyle(fontSize: 11, color: Colors.brown)),
+            if (line.wholesaleRefused) const Text('Tarif gros refusé pour ce lot : vendez au détail ou par un conditionnement', style: TextStyle(fontSize: 11, color: Colors.red)),
             if (tracked) Text('Après vente : ${_stockText(_stockAfterCart(line.product))}', style: const TextStyle(fontSize: 11)),
             if (alert != null) Text(alert.message, style: TextStyle(fontSize: 11, color: alert.level == 'short' ? Colors.red : Colors.brown)),
             Row(children: [step, const Spacer(), Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: amounts))]),

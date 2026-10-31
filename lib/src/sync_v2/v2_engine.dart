@@ -1365,6 +1365,7 @@ class V2Engine extends CaisseEngine {
         discountEntry: discount == 0 ? null : DiscountEntry('montant', '$discount'),
         fixedPrice: l.unitPrice,
         lotUuid: x.lot.uuid,
+        wholesale: l.wholesale,
       ));
     }
     if (bases != l.base) throw refusal;
@@ -1403,7 +1404,7 @@ class V2Engine extends CaisseEngine {
       if (left > 0) firstPrice ??= price(e.value);
       views.add({'uuid': e.key, 'reference': e.value['reference'], 'entree': e.value['entree'], 'peremption': e.value['peremption'], 'prix': price(e.value), 'reste': Decimal6.format(left < 0 ? 0 : left)});
     }
-    return {'gere_par_lots': true, 'lots_mode': mode, 'lots': views, 'stock': Decimal6.format(total < 0 ? 0 : total), 'prix': firstPrice ?? data['prix']};
+    return {'gere_par_lots': true, 'lots_mode': mode, 'lots': views, 'stock': Decimal6.format(total < 0 ? 0 : total), 'prix': firstPrice ?? data['prix'], 'prix_catalogue': data['prix']};
   }
 
   /// Session du terminal : celle du serveur si elle est ouverte ; sinon l'ouverture locale tant que le serveur ne l'a
