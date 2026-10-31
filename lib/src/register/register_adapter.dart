@@ -34,6 +34,18 @@ class AdapterFailure implements Exception {
 /// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
 /// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, reprint, synchronize.
 ///
+/// Retours (contrat 2.1, fermés par défaut) : returnableSale {sale_id}, previewReturn {sale_id, lines: [{line_id, quantity}]},
+/// commitReturn {sale_id, lines, reason} avec un identifiant d'opération facultatif. Quantités en unité de base.
+///
+/// Paniers partagés (contrat 2.1) : suspendDraft {label} publie le panier si le caissier est identifié ; drafts donne aussi
+/// `shared` [{shared_id, label, lines_count, taken_elsewhere}] ; resumeShared {shared_id} (réseau requis), deleteShared {shared_id}.
+///
+/// Clôture (contrat 2.1) : closeSession {cash, comment, counts: [{method, amount, justification}]}, panier vide, identifiant
+/// d'opération facultatif. L'attendu n'est jamais exposé.
+///
+/// Clients (contrat 2.1) : searchCustomers {query}, createCustomer {name, phone}, setCustomer {uuid, name} ; uuid absent =
+/// client de passage. La vue donne `customer`.
+///
 /// Remise au-delà du seuil du caissier : la vue donne `discount_approval` {required, approvers} ; `commitSale` reçoit
 /// alors `approval` {approver_id, code, reason}. Le code n'est jamais conservé.
 ///
@@ -111,6 +123,14 @@ class LocalRegisterAdapter {
         _operator = null;
         _emit('caissier');
         return _status();
+      case 'returnableSale':
+        return _returnable(_text(args, 'sale_id', max: 36));
+      case 'previewReturn':
+        return _previewReturn(args);
+      case 'commitReturn':
+        return _commitReturn(args, operationId);
+      case 'closeSession':
+        return _closeSession(args, operationId);
       case 'openSession':
         return _openSession(args);
       case 'view':
@@ -138,7 +158,9 @@ class LocalRegisterAdapter {
       case 'removeLine':
         final id = _text(args, 'line_id', max: 64);
         if (!_draft.lines.any((l) => l.id == id)) throw const AdapterFailure('ligne_inconnue', 'Ligne introuvable dans le panier.');
-        return _mutate(() => _draft.lines.removeWhere((l) => l.id == id));
+        final view = await _mutate(() => _draft.lines.removeWhere((l) => l.id == id));
+        if (_draft.lines.isEmpty) await _releaseHeld();
+        return view;
       case 'setLineDiscount':
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
       case 'setGlobalDiscount':
@@ -148,12 +170,17 @@ class LocalRegisterAdapter {
       case 'setNote':
         return _setNote(args['text'] == null ? null : _text(args, 'text', max: 2000));
       case 'clear':
+        await _releaseHeld();
         await engine.deleteDraft(_draft.uuid);
         _draft = _Draft(_newUuid());
         _emit('panier');
         return _view();
       case 'suspendDraft':
-        return _suspend();
+        return _suspend(label: args['label'] as String?);
+      case 'resumeShared':
+        return _resumeShared(_text(args, 'shared_id', max: 36));
+      case 'deleteShared':
+        return _deleteShared(_text(args, 'shared_id', max: 36));
       case 'drafts':
         return _drafts();
       case 'resumeDraft':
@@ -171,6 +198,12 @@ class LocalRegisterAdapter {
         final list = args['payments'];
         if (list is! List || list.any((p) => p is! Map)) throw const AdapterFailure('argument_invalide', 'Argument « payments » invalide.');
         return _setPayments([for (final p in list) Map<String, dynamic>.from(p as Map)]);
+      case 'searchCustomers':
+        return {'customers': [for (final c in await engine.searchCustomers(_text(args, 'query', max: 100))) _customerJson(c)]};
+      case 'createCustomer':
+        return _createCustomer(args, operationId);
+      case 'setCustomer':
+        return _setCustomer(args);
       case 'commitSale':
         return _commit(_requireOperationId(operationId), args);
       case 'saleStatus':
@@ -232,6 +265,11 @@ class LocalRegisterAdapter {
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
+      'close_session': cap(_operator == null ? 'Identifiez le caissier.' : (engine.canCloseSession(_operator!) ? null : 'Clôture non autorisée sur ce terminal.')),
+      'returns': cap(_operator != null && engine.returnsOpen(_operator!) ? null : 'Retours hors ligne non autorisés sur ce terminal.'),
+      'shared_carts': cap(engine.sharedCartsSupported ? null : 'Paniers partagés non disponibles sur ce terminal.'),
+      'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
+      'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
       'global_discount': {...cap(_extrasRefusal() ?? _globalDiscountRefusal()), 'max_percent': rules?.maxGlobalDiscountPercent ?? 0},
       'delivery': cap(_extrasRefusal() ?? _deliveryRefusal()),
@@ -305,6 +343,7 @@ class LocalRegisterAdapter {
     final carts = resolved.map((r) => r.$2).whereType<CartLine>().toList();
     final overLimit = _operator != null && !engine.withinDiscountLimits(_operator!, carts, _draft.globalDiscount);
     return {
+      'customer': _draft.customer == null ? null : _customerJson(_draft.customer!),
       'discount_approval': {
         'required': overLimit,
         'approvers': [
@@ -516,6 +555,72 @@ class LocalRegisterAdapter {
     return _status();
   }
 
+  Map<String, int> _returnQuantities(Map<String, dynamic> args) {
+    final quantities = <String, int>{};
+    for (final raw in (args['lines'] as List? ?? const []).cast<Map>()) {
+      final line = raw.cast<String, dynamic>();
+      final quantity = parseMicros(_text(line, 'quantity', max: 32));
+      if (quantity == null) throw const AdapterFailure('retour_refuse', 'Quantité invalide.');
+      quantities[_text(line, 'line_id', max: 36)] = quantity.toInt();
+    }
+    return quantities;
+  }
+
+  Future<Map<String, dynamic>> _returnable(String saleId) async {
+    try {
+      return {
+        'lines': [
+          for (final l in await engine.returnableLines(saleId)) {'line_id': l.lineUuid, 'label': l.label, 'remaining': formatMicros(BigInt.from(l.remaining))},
+        ],
+      };
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('retour_refuse', e.message);
+    }
+  }
+
+  Future<Map<String, dynamic>> _previewReturn(Map<String, dynamic> args) async {
+    try {
+      final amount = await engine.returnAmount(_text(args, 'sale_id', max: 36), _returnQuantities(args));
+      return {'amount': amount, 'amount_label': formatFcfa(amount)};
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('retour_refuse', e.message);
+    }
+  }
+
+  Future<Map<String, dynamic>> _commitReturn(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant un retour.');
+    try {
+      final operation = await engine.recordReturn(operator, _text(args, 'sale_id', max: 36), _returnQuantities(args), _text(args, 'reason', max: 500), operationUuid: operationId);
+      _emit('retour');
+      return {'operation_id': operation.uuid, 'amount': operation.content['montant'], 'amount_label': formatFcfa(operation.content['montant'] as int)};
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('retour_refuse', e.message);
+    }
+  }
+
+  /// Clôture de la session par le caissier identifié, comptée à l'aveugle ; le Z arrive du serveur.
+  Future<Map<String, dynamic>> _closeSession(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant de clôturer.');
+    if (_draft.lines.isNotEmpty) throw const AdapterFailure('panier_en_cours', 'Terminez ou videz le panier avant de clôturer.');
+    final counts = [
+      for (final raw in (args['counts'] as List? ?? const []).cast<Map>())
+        SessionCount(
+          method: _text(raw.cast<String, dynamic>(), 'method', max: 32),
+          amount: _int(raw.cast<String, dynamic>(), 'amount'),
+          justification: raw['justification'] as String?,
+        ),
+    ];
+    try {
+      await engine.closeSession(operator, cash: _int(args, 'cash'), comment: args['comment'] as String?, others: counts, operationUuid: operationId);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('cloture_refusee', e.message);
+    }
+    _emit('session');
+    return _status();
+  }
+
   /// Ouverture de session locale par le caissier identifié ([float] : fond de caisse compté, en francs).
   Future<Map<String, dynamic>> _openSession(Map<String, dynamic> args) async {
     final operator = _operator;
@@ -700,9 +805,25 @@ class LocalRegisterAdapter {
   // ------------------------------------------------------------------ Paniers en attente
 
   /// Met le panier courant en attente (conservé) et ouvre un panier vide.
-  Future<Map<String, dynamic>> _suspend() async {
+  Future<Map<String, dynamic>> _suspend({String? label}) async {
     if (_draft.lines.isEmpty) throw const AdapterFailure('panier_vide', 'Le panier est vide : rien à mettre en attente.');
     final before = _draft.copy();
+    final snapshot = engine.snapshot;
+    final lines = snapshot == null ? const <CartLine?>[] : [for (final l in _draft.lines) l.materialize(snapshot)];
+    // Sans caissier ou avec un article disparu : conservé sur ce terminal seulement.
+    if (engine.sharedCartsSupported && _operator != null && lines.isNotEmpty && lines.every((l) => l != null)) {
+      try {
+        _draft.sharedCart = await engine.suspendShared(
+          _operator!,
+          lines.cast<CartLine>(),
+          SaleExtras(globalDiscount: _draft.globalDiscount, delivery: _draft.delivery, note: _draft.note, customer: _draft.customer),
+          previous: _draft.sharedCart,
+          label: label,
+        );
+      } on OfflineRefusal catch (e) {
+        throw AdapterFailure('panier_refuse', e.message);
+      }
+    }
     _draft
       ..suspended = true
       ..payments.clear();
@@ -717,9 +838,17 @@ class LocalRegisterAdapter {
     final snapshot = engine.snapshot;
     final currency = snapshot?.store.currency == 'FCFA' || snapshot == null ? 'F' : snapshot.store.currency;
     final items = <Map<String, dynamic>>[];
+    final linked = <String>{};
     for (final stored in await engine.openDrafts()) {
       if (stored.content['suspendu'] != true) continue;
       final draft = _Draft.fromStored(stored);
+      if (draft.sharedCart != null) {
+        if (await engine.sharedCartState(draft.sharedCart!.uuid) == 'disparu') {
+          await engine.deleteDraft(draft.uuid);
+          continue;
+        }
+        linked.add(draft.sharedCart!.uuid);
+      }
       final lines = snapshot == null ? const <CartLine?>[] : [for (final l in draft.lines) l.materialize(snapshot)];
       final valid = lines.whereType<CartLine>().toList();
       items.add({
@@ -731,7 +860,60 @@ class LocalRegisterAdapter {
         'complete': snapshot != null && valid.length == draft.lines.length,
       });
     }
-    return {'items': items};
+    return {
+      'items': items,
+      'shared': [
+        for (final c in await engine.sharedCarts())
+          if (!linked.contains(c.uuid)) {'shared_id': c.uuid, 'label': c.label, 'lines_count': c.linesCount, 'taken_elsewhere': c.takenElsewhere},
+      ],
+    };
+  }
+
+  Future<void> _releaseHeld() async {
+    final held = _draft.sharedCart;
+    if (held != null && held.claimed && _operator != null) await engine.releaseSharedCart(_operator!, held.uuid);
+  }
+
+  /// Reprise d'un panier publié : prix figés par le serveur, le panier courant est mis en attente à sa place.
+  Future<Map<String, dynamic>> _resumeShared(String uuid) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant de reprendre un panier.');
+    final TakenCart taken;
+    try {
+      taken = await engine.takeSharedCart(operator, uuid);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('panier_refuse', e.message);
+    }
+    if (_draft.lines.isNotEmpty) {
+      await _suspend();
+    } else {
+      await engine.deleteDraft(_draft.uuid);
+    }
+    _draft = _Draft(_newUuid())
+      ..sharedCart = taken.ref
+      ..globalDiscount = taken.globalDiscount
+      ..globalEntry = taken.globalDiscount == 0 ? null : DiscountEntry('montant', '${taken.globalDiscount}')
+      ..delivery = taken.delivery
+      ..note = taken.note
+      ..customer = taken.customer;
+    _draft.lines.addAll([
+      for (final l in taken.lines)
+        _DraftLine(id: _newUuid(), productId: l.product.id, packagingId: l.packaging?.id, quantity: l.quantity, discount: l.discount, price: l.fixedPrice),
+    ]);
+    await _save(_Draft(_newUuid()));
+    _emit('panier');
+    return _view();
+  }
+
+  Future<Map<String, dynamic>> _deleteShared(String uuid) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant de supprimer un panier.');
+    if ((await engine.sharedCarts()).any((c) => c.uuid == uuid && c.takenElsewhere)) {
+      throw const AdapterFailure('panier_refuse', 'Ce panier est repris sur une autre caisse.');
+    }
+    await engine.deleteSharedCart(operator, uuid);
+    _emit('panier');
+    return _view();
   }
 
   /// Reprend un panier en attente ; le panier courant, s'il n'est pas vide, est mis en attente à sa place. Les
@@ -739,12 +921,25 @@ class LocalRegisterAdapter {
   Future<Map<String, dynamic>> _resume(String draftId) async {
     final stored = (await engine.openDrafts()).where((d) => d.uuid == draftId && d.content['suspendu'] == true).firstOrNull;
     if (stored == null) throw const AdapterFailure('panier_inconnu', 'Panier en attente introuvable (repris, encaissé ou supprimé).');
+    // Un panier déjà publié ne se reprend qu'avec l'accord du serveur ; publié ou non, il reste lié à ce panier.
+    var ref = SharedCartRef.fromJson(stored.content['panier']);
+    if (ref != null && await engine.sharedCartState(ref.uuid) == 'publie') {
+      final operator = _operator;
+      if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant de reprendre un panier.');
+      try {
+        ref = (await engine.takeSharedCart(operator, ref.uuid)).ref;
+      } on OfflineRefusal catch (e) {
+        throw AdapterFailure('panier_refuse', e.message);
+      }
+    }
     if (_draft.lines.isNotEmpty) {
       await _suspend();
     } else {
       await engine.deleteDraft(_draft.uuid);
     }
-    _draft = _Draft.fromStored(stored)..suspended = false;
+    _draft = _Draft.fromStored(stored)
+      ..suspended = false
+      ..sharedCart = ref;
     _draft.payments.clear();
     await _save(_Draft(_newUuid()));
     _emit('panier');
@@ -755,6 +950,9 @@ class LocalRegisterAdapter {
     if (draftId != _draft.uuid && !(await engine.openDrafts()).any((d) => d.uuid == draftId && d.content['suspendu'] == true)) {
       throw const AdapterFailure('panier_inconnu', 'Panier en attente introuvable (repris, encaissé ou supprimé).');
     }
+    final stored = (await engine.openDrafts()).where((d) => d.uuid == draftId).firstOrNull;
+    final ref = SharedCartRef.fromJson(stored?.content['panier']);
+    if (ref != null && _operator != null) await engine.deleteSharedCart(_operator!, ref.uuid);
     await engine.deleteDraft(draftId);
     if (draftId == _draft.uuid) _draft = _Draft(_newUuid());
     _emit('panier');
@@ -869,7 +1067,7 @@ class LocalRegisterAdapter {
         operator,
         draftUuid: _draft.uuid,
         operationUuid: operationId,
-        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval),
+        extras: SaleExtras(globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval, customer: _draft.customer, sharedCart: _draft.sharedCart?.uuid),
       );
     } on OfflineRefusal catch (e) {
       // Refus d'une règle, levé avant toute écriture : la vente n'existe pas, le panier reste.
@@ -878,6 +1076,27 @@ class LocalRegisterAdapter {
     _draft = _Draft(_newUuid());
     _emit('vente');
     return _committed(sale);
+  }
+
+  Map<String, dynamic> _customerJson(Customer c) => {'uuid': c.uuid, 'name': c.name, 'phone': c.phone, 'pending': c.pending};
+
+  Future<Map<String, dynamic>> _createCustomer(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.');
+    try {
+      final phone = args['phone'] == null ? null : _text(args, 'phone', max: 40);
+      return _customerJson(await engine.createCustomer(operator, name: _text(args, 'name', max: 160), phone: phone, operationUuid: operationId));
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('client_refuse', e.message);
+    }
+  }
+
+  Future<Map<String, dynamic>> _setCustomer(Map<String, dynamic> args) async {
+    final uuid = args['uuid'] == null ? null : _text(args, 'uuid', max: 36);
+    final customer = uuid == null ? null : Customer(uuid: uuid, name: _text(args, 'name', max: 160), phone: args['phone'] as String?);
+    return _mutate(() {
+      _draft.customer = customer;
+    });
   }
 
   /// Autorisation d'un responsable si les remises dépassent le seuil du caissier, sinon null.
@@ -1051,6 +1270,7 @@ class _Draft {
           quantity: parseMicros('${m['quantite']}') ?? BigInt.zero,
           discount: (m['remise'] as num?)?.toInt() ?? 0,
           entry: m['remise_saisie'] is Map ? DiscountEntry.fromJson(m['remise_saisie'] as Map) : null,
+          price: (m['prix_fige'] as num?)?.toInt(),
         ),
       );
     }
@@ -1059,6 +1279,8 @@ class _Draft {
     globalEntry = global is Map ? DiscountEntry.fromJson(global) : null;
     delivery = (stored.content['livraison'] as num?)?.toInt() ?? 0;
     note = stored.content['note'] as String?;
+    customer = customerFromDraft(stored.content['client']);
+    sharedCart = SharedCartRef.fromJson(stored.content['panier']);
     // `paiement` : panier conservé avant les paiements multiples.
     final raw = stored.content['paiements'] ?? [if (stored.content['paiement'] != null) stored.content['paiement']];
     for (final p in (raw as List).cast<Map>()) {
@@ -1087,19 +1309,23 @@ class _Draft {
   DiscountEntry? globalEntry;
   int delivery = 0;
   String? note;
+  Customer? customer;
+  SharedCartRef? sharedCart;
 
   _Draft copy() => _Draft(uuid)
     ..revision = revision
     ..lines.addAll([
       for (final l in lines)
-        _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, quantity: l.quantity, discount: l.discount, entry: l.entry),
+        _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, quantity: l.quantity, discount: l.discount, entry: l.entry, price: l.price),
     ])
     ..payments.addAll(payments)
     ..suspended = suspended
     ..globalDiscount = globalDiscount
     ..globalEntry = globalEntry
     ..delivery = delivery
-    ..note = note;
+    ..note = note
+    ..customer = customer
+    ..sharedCart = sharedCart;
 
   Map<String, dynamic> toJson() => {
     'lignes': [
@@ -1111,12 +1337,15 @@ class _Draft {
           'quantite': formatMicros(l.quantity),
           'remise': l.discount,
           if (l.entry != null) 'remise_saisie': l.entry!.toJson(),
+          if (l.price != null) 'prix_fige': l.price,
         },
     ],
     if (globalDiscount != 0) 'remise_globale': globalDiscount,
     if (globalEntry != null) 'remise_globale_saisie': globalEntry!.toJson(),
     if (delivery != 0) 'livraison': delivery,
     if (note != null) 'note': note,
+    if (customer != null) 'client': {'uuid': customer!.uuid, 'nom': customer!.name},
+    if (sharedCart != null) 'panier': sharedCart!.toJson(),
     'paiements': [
       for (final p in payments) {'moyen': p.methodCode, 'montant': p.amount, 'recu': p.received, 'reference': p.reference},
     ],
@@ -1125,7 +1354,10 @@ class _Draft {
 }
 
 class _DraftLine {
-  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0, this.entry});
+  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0, this.entry, this.price});
+
+  /// Prix figé d'un panier partagé ; null = prix du catalogue.
+  final int? price;
 
   /// Saisie de la remise (montant ou pourcentage) ; un pourcentage est recalculé à chaque changement du panier.
   DiscountEntry? entry;
@@ -1144,7 +1376,7 @@ class _DraftLine {
     if (product == null) return null;
     final packaging = packagingId == null ? null : product.packaging(packagingId);
     if (packagingId != null && packaging == null) return null;
-    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry);
+    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry, fixedPrice: price);
   }
 }
 

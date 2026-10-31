@@ -56,6 +56,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   DiscountEntry? _globalEntry;
   int _delivery = 0;
   String? _note;
+  Customer? _customer;
+  SharedCartRef? _shared;
 
   /// Paniers mis en attente sur ce terminal.
   int _suspendedCount = 0;
@@ -94,10 +96,30 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (mounted) setState(() {});
   }
 
-  Future<List<StoredDraft>> _suspended() async => [for (final d in await _engine.openDrafts()) if (d.content['suspendu'] == true) d];
+  /// Paniers en attente de ce terminal ; ceux vendus ou supprimés ailleurs sont retirés.
+  Future<List<StoredDraft>> _suspended() async {
+    final drafts = <StoredDraft>[];
+    for (final d in await _engine.openDrafts()) {
+      if (d.content['suspendu'] != true) continue;
+      final ref = SharedCartRef.fromJson(d.content['panier']);
+      if (ref != null && await _engine.sharedCartState(ref.uuid) == 'disparu') {
+        await _engine.deleteDraft(d.uuid);
+      } else {
+        drafts.add(d);
+      }
+    }
+    return drafts;
+  }
+
+  /// Paniers publiés par le web ou d'autres terminaux, hors ceux déjà listés sur ce terminal.
+  Future<List<SharedCart>> _published(List<StoredDraft> drafts) async {
+    final linked = {for (final d in drafts) SharedCartRef.fromJson(d.content['panier'])?.uuid};
+    return [for (final c in await _engine.sharedCarts()) if (!linked.contains(c.uuid)) c];
+  }
 
   Future<void> _refreshSuspended() async {
-    final count = (await _suspended()).length;
+    final drafts = await _suspended();
+    final count = drafts.length + (await _published(drafts)).length;
     if (mounted) setState(() => _suspendedCount = count);
   }
 
@@ -106,6 +128,15 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _globalEntry = null;
     _delivery = 0;
     _note = null;
+    _customer = null;
+    _shared = null;
+  }
+
+  /// Panier repris vidé à la main : rendu aux autres caisses.
+  void _releaseIfEmpty() {
+    if (_cart.isNotEmpty || _shared == null) return;
+    if (_shared!.claimed && _operator != null) unawaited(_engine.releaseSharedCart(_operator!, _shared!.uuid));
+    _shared = null;
   }
 
   /// Sous-total du panier (après remises de ligne) : base de la remise globale.
@@ -308,6 +339,176 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (text != null) setState(() => _delivery = int.tryParse(text) ?? 0);
   }
 
+  /// Clôture à l'aveugle : aucun attendu affiché. Le terminal exige un commentaire s'il constate un écart, car le contenu
+  /// d'une opération ne se corrige plus.
+  Future<void> _closeSession() async {
+    final operator = _operator!;
+    final methods = _snapshot!.methods.where((m) => !m.isCash).toList();
+    final cash = TextEditingController();
+    final comment = TextEditingController();
+    final amounts = {for (final m in methods) m.code: TextEditingController()};
+    final notes = {for (final m in methods) m.code: TextEditingController()};
+    String? error;
+    final closed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Clôturer la session'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: cash,
+                  autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(labelText: 'Espèces comptées (F)'),
+                ),
+                for (final m in methods) ...[
+                  TextField(
+                    controller: amounts[m.code],
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: InputDecoration(labelText: '${m.name} compté (facultatif)'),
+                  ),
+                  TextField(controller: notes[m.code], maxLength: 500, decoration: InputDecoration(labelText: 'Justification ${m.name}')),
+                ],
+                TextField(
+                  controller: comment,
+                  maxLength: 500,
+                  decoration: InputDecoration(labelText: 'Commentaire (obligatoire s’il y a un écart)', errorText: error, errorMaxLines: 3),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                final counted = int.tryParse(cash.text);
+                if (counted == null) return setLocal(() => error = 'Indiquez les espèces comptées.');
+                final others = [
+                  for (final m in methods)
+                    if (int.tryParse(amounts[m.code]!.text) case final amount?)
+                      SessionCount(method: m.code, amount: amount, justification: notes[m.code]!.text.trim().isEmpty ? null : notes[m.code]!.text.trim()),
+                ];
+                try {
+                  await _engine.closeSession(operator, cash: counted, comment: comment.text, others: others);
+                  if (context.mounted) Navigator.pop(context, true);
+                } on OfflineRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Clôturer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (closed == true) {
+      _changed();
+      _toast('Session clôturée. Le Z arrivera à la prochaine synchronisation.');
+    }
+  }
+
+  /// Choix du client de la vente : recherche par nom ou téléphone, création si le caissier en a le droit.
+  Future<void> _pickCustomer() async {
+    var results = await _engine.searchCustomers('');
+    if (!mounted) return;
+    final creatable = _operator != null && _engine.canCreateCustomer(_operator!);
+    final result = await showDialog<(Customer?,)>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Client de la vente'),
+          content: SizedBox(
+            width: 360,
+            height: 320,
+            child: Column(
+              children: [
+                TextField(
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: 'Nom ou téléphone'),
+                  onChanged: (text) async {
+                    final found = await _engine.searchCustomers(text);
+                    setLocal(() => results = found);
+                  },
+                ),
+                Expanded(
+                  child: results.isEmpty
+                      ? const Center(child: Text('Aucun client.'))
+                      : ListView(
+                          children: [
+                            for (final c in results)
+                              ListTile(
+                                dense: true,
+                                title: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                                subtitle: Text('${c.phone ?? 'Sans téléphone'}${c.pending ? ' · en attente d’envoi' : ''}'),
+                                onTap: () => Navigator.pop(context, (c,)),
+                              ),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, (null,)), child: const Text('Client de passage')),
+            if (creatable)
+              TextButton(
+                onPressed: () async {
+                  final created = await _askNewCustomer();
+                  if (created != null && context.mounted) Navigator.pop(context, (created,));
+                },
+                child: const Text('Nouveau client'),
+              ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+          ],
+        ),
+      ),
+    );
+    if (result != null) setState(() => _customer = result.$1);
+  }
+
+  Future<Customer?> _askNewCustomer() {
+    final name = TextEditingController();
+    final phone = TextEditingController();
+    String? error;
+    return showDialog<Customer>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Nouveau client'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(controller: name, autofocus: true, maxLength: 160, decoration: const InputDecoration(labelText: 'Nom')),
+                TextField(controller: phone, keyboardType: TextInputType.phone, maxLength: 40, decoration: InputDecoration(labelText: 'Téléphone', errorText: error)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                try {
+                  final customer = await _engine.createCustomer(_operator!, name: name.text, phone: phone.text);
+                  if (context.mounted) Navigator.pop(context, customer);
+                } on OfflineRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Créer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _editNote() async {
     final text = await _askText('Note du ticket', _note ?? '', maxLength: 2000);
     if (text != null) setState(() => _note = text.trim().isEmpty ? null : text.trim());
@@ -351,12 +552,27 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (_globalEntry != null) 'remise_globale_saisie': _globalEntry!.toJson(),
     if (_delivery != 0) 'livraison': _delivery,
     if (_note != null) 'note': _note,
+    if (_shared != null) 'panier': _shared!.toJson(),
+    if (_customer != null) 'client': {'uuid': _customer!.uuid, 'nom': _customer!.name},
     'paiements': const [],
     'suspendu': true,
   };
 
   Future<void> _suspendCart() async {
     if (_cart.isEmpty) return;
+    if (_engine.sharedCartsSupported && _operator != null) {
+      try {
+        final totals = _totals(_snapshot!);
+        _shared = await _engine.suspendShared(
+          _operator!,
+          List.of(_cart),
+          SaleExtras(globalDiscount: totals.globalDiscount, delivery: _delivery, note: _note, customer: _customer),
+          previous: _shared,
+        );
+      } on OfflineRefusal catch (e) {
+        return _toast(e.message);
+      }
+    }
     if (!await _engine.saveDraft(_draftUuid, 1, _draftContent())) return _toast('Ce panier a déjà été enregistré.');
     setState(() {
       _clearCart();
@@ -369,13 +585,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Reprise d'un panier en attente, au catalogue et aux prix courants ; un article disparu est signalé et retiré.
   Future<void> _openSuspended(Snapshot snapshot) async {
     final drafts = await _suspended();
+    final published = await _published(drafts);
     if (!mounted) return;
-    final chosen = await showDialog<(StoredDraft, bool)>(
+    final chosen = await showDialog<(Object, bool)>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('Paniers en attente'),
         children: [
-          if (drafts.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun panier en attente.')),
+          if (drafts.isEmpty && published.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun panier en attente.')),
           for (final d in drafts)
             ListTile(
               title: Text('${(d.content['lignes'] as List).length} article(s)'),
@@ -383,14 +600,37 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               onTap: () => Navigator.pop(context, (d, true)),
               trailing: IconButton(tooltip: 'Supprimer', icon: const Icon(Icons.delete_outline), onPressed: () => Navigator.pop(context, (d, false))),
             ),
+          for (final c in published)
+            ListTile(
+              enabled: !c.takenElsewhere,
+              title: Text(c.label),
+              subtitle: Text('${c.linesCount} article(s)${c.takenElsewhere ? ' · repris sur une autre caisse' : ' · partagé'}'),
+              onTap: () => Navigator.pop(context, (c, true)),
+              trailing: c.takenElsewhere
+                  ? null
+                  : IconButton(tooltip: 'Supprimer', icon: const Icon(Icons.delete_outline), onPressed: () => Navigator.pop(context, (c, false))),
+            ),
         ],
       ),
     );
     if (chosen == null || !mounted) return;
-    final (draft, resume) = chosen;
+    final (target, resume) = chosen;
+    if (target is SharedCart) return _openPublished(target, resume);
+    final draft = target as StoredDraft;
+    var ref = SharedCartRef.fromJson(draft.content['panier']);
     if (!resume) {
+      if (ref != null && _operator != null) await _engine.deleteSharedCart(_operator!, ref.uuid);
       await _engine.deleteDraft(draft.uuid);
       return _refreshSuspended();
+    }
+    // Un panier déjà publié ne se reprend qu'avec l'accord du serveur.
+    if (ref != null && await _engine.sharedCartState(ref.uuid) == 'publie') {
+      if (_operator == null) return _toast('Identifiez le caissier.');
+      try {
+        ref = (await _engine.takeSharedCart(_operator!, ref.uuid)).ref;
+      } on OfflineRefusal catch (e) {
+        return _toast(e.message);
+      }
     }
     if (_cart.isNotEmpty) await _suspendCart();
     final lines = <CartLine>[];
@@ -410,6 +650,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         quantity: parseMicros(raw['quantite'] as String),
         discount: raw['remise'] as int,
         discountEntry: entry == null ? null : DiscountEntry.fromJson(entry),
+        fixedPrice: raw['prix_fige'] as int?,
       ));
     }
     await _engine.deleteDraft(draft.uuid);
@@ -420,9 +661,38 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       _globalEntry = global == null ? null : DiscountEntry.fromJson(global);
       _delivery = draft.content['livraison'] as int? ?? 0;
       _note = draft.content['note'] as String?;
+      _customer = customerFromDraft(draft.content['client']);
+      _shared = ref;
     });
     await _refreshSuspended();
     if (missing > 0) _toast('$missing article(s) retiré(s) du catalogue : non repris.');
+  }
+
+  /// Panier publié par le web ou un autre terminal : reprise exclusive, prix figés par le serveur.
+  Future<void> _openPublished(SharedCart cart, bool resume) async {
+    final operator = _operator;
+    if (operator == null) return _toast('Identifiez le caissier.');
+    if (!resume) {
+      await _engine.deleteSharedCart(operator, cart.uuid);
+      return _refreshSuspended();
+    }
+    final TakenCart taken;
+    try {
+      taken = await _engine.takeSharedCart(operator, cart.uuid);
+    } on OfflineRefusal catch (e) {
+      return _toast(e.message);
+    }
+    if (_cart.isNotEmpty) await _suspendCart();
+    setState(() {
+      _clearCart();
+      _cart.addAll(taken.lines);
+      _globalEntry = taken.globalDiscount == 0 ? null : DiscountEntry('montant', '${taken.globalDiscount}');
+      _delivery = taken.delivery;
+      _note = taken.note;
+      _customer = taken.customer;
+      _shared = taken.ref;
+    });
+    await _refreshSuspended();
   }
 
   /// Actions du panier : remise globale, livraison et note exigent le contrat 2.1.
@@ -431,6 +701,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     return Wrap(
       spacing: 4,
       children: [
+        if (extras && _engine.customersSupported) ActionChip(label: Text(_customer?.name ?? 'Client'), onPressed: _pickCustomer),
         if (extras) ActionChip(label: const Text('Remise globale'), onPressed: _editGlobalDiscount),
         if (extras) ActionChip(label: const Text('Livraison'), onPressed: _editDelivery),
         if (extras) ActionChip(label: Text(_note == null ? 'Note' : 'Note ✓'), onPressed: _editNote),
@@ -637,11 +908,15 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   _openJournal();
                 } else if (choice == 'caissier') {
                   setState(() => _operator = null);
+                } else if (choice == 'cloture') {
+                  _closeSession();
                 }
               },
               itemBuilder: (context) => [
                 if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
                 const PopupMenuItem(value: 'journal', child: Text('Opérations hors ligne')),
+                if (_operator != null && _engine.canCloseSession(_operator!))
+                  PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
                 if (_operator != null)
                   PopupMenuItem(
                     value: 'caissier',
@@ -1005,6 +1280,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                               onPressed: () => setState(() {
                                 line.quantity -= BigInt.from(1000000);
                                 if (line.quantity <= BigInt.zero) _cart.remove(line);
+                                _releaseIfEmpty();
                                 if (line.discountEntry case final entry? when !entry.isPercent && line.discount > line.base) {
                                   line.discountEntry = null;
                                   line.discount = 0;
@@ -1116,7 +1392,16 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => {setState(() => _cart.remove(line)), Navigator.pop(context)}, child: const Text('Retirer')),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _cart.remove(line);
+                  _releaseIfEmpty();
+                });
+                Navigator.pop(context);
+              },
+              child: const Text('Retirer'),
+            ),
             FilledButton(
               onPressed: () {
                 final q = parseMicros(quantity.text);
@@ -1163,7 +1448,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         payments,
         _operator!,
         draftUuid: _draftUuid,
-        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval),
+        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer, sharedCart: _shared?.uuid),
       );
     } on OfflineRefusal catch (e) {
       _toast(e.message);
@@ -1213,10 +1498,97 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _searchFocus.requestFocus();
   }
 
+  /// Retour en espèces d'une vente de ce terminal : quantités par ligne, montant calculé, motif obligatoire.
+  Future<void> _startReturn(OfflineOperation sale) async {
+    final operator = _operator!;
+    final List<ReturnableLine> lines;
+    try {
+      lines = await _engine.returnableLines(sale.uuid);
+    } on OfflineRefusal catch (e) {
+      return _toast(e.message);
+    }
+    if (!mounted) return;
+    if (lines.isEmpty) return _toast('Tout a déjà été retourné sur cette vente.');
+    final fields = {for (final l in lines) l.lineUuid: TextEditingController()};
+    final reason = TextEditingController();
+    int? amount;
+    String? error;
+    Map<String, int>? quantities() {
+      final result = <String, int>{};
+      for (final e in fields.entries) {
+        if (e.value.text.trim().isEmpty) continue;
+        final q = parseMicros(e.value.text.trim());
+        if (q == null) return null;
+        result[e.key] = q.toInt();
+      }
+      return result;
+    }
+
+    final done = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: Text('Retour : vente ${sale.number}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final l in lines)
+                  TextField(
+                    controller: fields[l.lineUuid],
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(labelText: l.label, helperText: 'Quantité, ${formatMicros(BigInt.from(l.remaining))} au plus'),
+                    onChanged: (_) async {
+                      final wanted = quantities();
+                      try {
+                        final value = wanted == null || wanted.isEmpty ? null : await _engine.returnAmount(sale.uuid, wanted);
+                        setLocal(() => (amount, error) = (value, wanted == null ? 'Quantité invalide.' : null));
+                      } on OfflineRefusal catch (e) {
+                        setLocal(() => (amount, error) = (null, e.message));
+                      }
+                    },
+                  ),
+                TextField(controller: reason, maxLength: 500, decoration: InputDecoration(labelText: 'Motif du retour', errorText: error, errorMaxLines: 3)),
+                Text('À rendre en espèces : ${amount == null ? '—' : formatFcfa(amount!)}', style: const TextStyle(fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                final wanted = quantities();
+                if (wanted == null) return setLocal(() => error = 'Quantité invalide.');
+                try {
+                  await _engine.recordReturn(operator, sale.uuid, wanted, reason.text);
+                  if (context.mounted) Navigator.pop(context, true);
+                } on OfflineRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Rembourser'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (done == true) {
+      if (widget.session.hasPrinter) await widget.session.channel.openDrawer();
+      _changed();
+      _toast('Retour enregistré. Rendez le montant en espèces.');
+    }
+  }
+
   void _openJournal() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => PendingOperationsPage(engine: _engine, onReprint: _reprint),
+        builder: (_) => PendingOperationsPage(
+          engine: _engine,
+          onReprint: _reprint,
+          onReturn: _operator != null && _engine.returnsOpen(_operator!) ? _startReturn : null,
+        ),
       ),
     );
   }

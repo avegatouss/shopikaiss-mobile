@@ -1,0 +1,46 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "paniers.json",
+    "title": "Reprise et libération des paniers partagés (réseau requis).",
+    "$defs": {
+        "demande": {
+            "type": "object",
+            "required": [
+                "operateur_id"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                }
+            }
+        },
+        "reprise": {
+            "type": "object",
+            "required": [
+                "panier_uuid",
+                "libelle",
+                "expire_le",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "panier_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "libelle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 150
+                },
+                "expire_le": {
+                    "$ref": "commun.json#/$defs/horodatage",
+                    "description": "Reprise à renouveler par le même appel avant cette heure."
+                },
+                "contenu": {
+                    "$ref": "donnees-2.1.json#/$defs/contenu_panier"
+                }
+            }
+        }
+    }
+}

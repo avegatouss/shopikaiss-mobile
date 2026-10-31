@@ -60,6 +60,7 @@ List<String> offlineTicketLines({
   out.add(pair('Date', '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}'));
   out.add(pair('Caisse', snapshot.terminal.name));
   out.add(pair('Caissier', operatorName));
+  if (operation.content['client_nom'] case final String customer when customer.isNotEmpty) out.add(pair('Client', customer));
   out.add('-' * cols);
   for (final line in lines) {
     wrap(line.label, centered: false);

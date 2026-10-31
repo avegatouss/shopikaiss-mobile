@@ -75,6 +75,25 @@ class _ApprovalEngine extends OfflineEngine {
   bool get saleExtrasSupported => true;
 
   @override
+  bool get customersSupported => true;
+
+  int? closedCash;
+
+  @override
+  bool canCloseSession(Operator operator) => true;
+
+  @override
+  Future<OfflineOperation> closeSession(Operator operator, {required int cash, String? comment, List<SessionCount> others = const [], String? operationUuid}) async {
+    if (cash == 1) throw const OfflineRefusal('Écart constaté : indiquez un commentaire.');
+    closedCash = cash;
+    return OfflineOperation(uuid: 'u', sequence: 1, type: 'cloture_session', number: null, date: DateTime(2026), operatorId: operator.id, content: const {});
+  }
+
+  @override
+  Future<List<Customer>> searchCustomers(String query, {int limit = 30}) async =>
+      [const Customer(uuid: 'c1000000-0000-4000-8000-000000000001', name: 'Bintou Traoré', phone: '+2250505050505')];
+
+  @override
   bool hasRight(Operator operator, String right) => true;
 
   @override
@@ -339,6 +358,42 @@ void main() {
       await tester.pumpAndSettle();
       final approval = (session.offline as _ApprovalEngine).recorded!.approval!;
       expect([approval.approverId, approval.reason], [8, 'Client fidèle']);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('clôture à l’aveugle sur petit téléphone : refus affiché, aucun attendu, aucun débordement', (tester) async {
+      final session = await _session(inches: 4.0, approver: true);
+      await _pump(tester, const Size(320, 568), session);
+      await tester.tap(find.byType(PopupMenuButton<String>));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Clôturer la session'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.widgetWithText(TextField, 'Espèces comptées (F)'), '1');
+      await tester.tap(find.text('Clôturer'));
+      await tester.pumpAndSettle();
+      expect(find.text('Écart constaté : indiquez un commentaire.'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Espèces comptées (F)'), '5000');
+      await tester.tap(find.text('Clôturer'));
+      await tester.pumpAndSettle();
+      expect((session.offline as _ApprovalEngine).closedCash, 5000);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('client de la vente : choisi dans la liste, transmis à l’encaissement', (tester) async {
+      final session = await _session(inches: 8.0, approver: true);
+      await _pump(tester, const Size(800, 1280), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      await tester.tap(find.text('Client'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bintou Traoré'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(ActionChip, 'Bintou Traoré'), findsOneWidget);
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      expect((session.offline as _ApprovalEngine).recorded!.customer!.name, 'Bintou Traoré');
       expect(tester.takeException(), isNull);
     });
 

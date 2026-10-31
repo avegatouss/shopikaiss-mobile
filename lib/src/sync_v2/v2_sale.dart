@@ -5,7 +5,7 @@ import 'decimal6.dart';
 
 /// Ligne d'un panier v2, telle que choisie à l'écran (catalogue de la projection v2).
 class V2CartLine {
-  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry});
+  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry, this.fixedPrice});
 
   final String productUuid;
   final String? packagingUuid;
@@ -14,6 +14,9 @@ class V2CartLine {
 
   /// Saisie de la remise (forme 2.1 `remise_saisie`).
   final DiscountEntry? discountEntry;
+
+  /// Prix figé d'un panier partagé ; null = prix du catalogue.
+  final int? fixedPrice;
 }
 
 /// Paiement d'une vente (au plus 10) ; [received] = somme remise par le client (espèces seulement), [reference] =
@@ -84,7 +87,7 @@ class V2SaleBuilder {
       if (item.packagingUuid != null && (pack == null || pack['actif'] != true || pack['produit_uuid'] != item.productUuid)) {
         throw const V2SaleInvalid('Conditionnement absent ou inactif.');
       }
-      final price = (pack?['prix'] ?? product['prix']) as int;
+      final price = item.fixedPrice ?? (pack?['prix'] ?? product['prix']) as int;
       final coefficient = pack == null ? Decimal6.scale : Decimal6.parse(pack['coefficient'] as String);
       final base = Decimal6.amount(price, item.quantityMicros);
       if (item.discount < 0 || item.discount > base) throw const V2SaleInvalid('Remise supérieure au montant de la ligne.');
@@ -140,7 +143,7 @@ class V2SaleBuilder {
       'numero_local': numberLocal,
       'brouillon_uuid': draftUuid,
       'session_uuid': sessionUuid,
-      'client_uuid': null,
+      'client_uuid': extras.customer?.uuid,
       'tva': {'taux': vat.rate, 'incluse': vat.included},
       'lignes': lines,
       'remise_globale': extras.globalDiscount,
@@ -160,6 +163,8 @@ class V2SaleBuilder {
       ],
       if (revision21) 'remise_globale_saisie': extras.globalDiscount == 0 ? null : extras.globalEntry?.toJson(),
       if (revision21) 'note': extras.note == null || extras.note!.isEmpty ? null : extras.note,
+      if (revision21) 'client_nom': extras.customer?.name,
+      if (extras.sharedCart != null) 'panier_uuid': extras.sharedCart,
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[if (approval != null) approval.toJson()],
     };

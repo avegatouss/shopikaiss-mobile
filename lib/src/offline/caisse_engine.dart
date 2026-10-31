@@ -178,6 +178,67 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// Retours hors ligne ouverts à [operator] : fermés par défaut (capacité `retour.especes`, `retours.mode`, droits).
+  bool returnsOpen(Operator operator) => false;
+
+  /// Lignes encore retournables d'une vente émise par ce terminal ; refus si le terminal ne peut pas chiffrer son retour.
+  Future<List<ReturnableLine>> returnableLines(String saleUuid) => throw const OfflineRefusal('Retours non disponibles sur ce terminal.');
+
+  /// Montant à rendre pour ces quantités ([quantities] : `ligne_uuid` → millionièmes de l'unité de base).
+  Future<int> returnAmount(String saleUuid, Map<String, int> quantities) => throw const OfflineRefusal('Retours non disponibles sur ce terminal.');
+
+  /// Enregistre le retour en espèces. Tout écart avec le serveur part en arbitrage, sans remboursement écrit.
+  Future<OfflineOperation> recordReturn(Operator operator, String saleUuid, Map<String, int> quantities, String reason, {String? operationUuid}) =>
+      throw const OfflineRefusal('Retours non disponibles sur ce terminal.');
+
+  /// Paniers partagés avec le web et les autres terminaux (contrat 2.1, capacité `panier.partage`).
+  bool get sharedCartsSupported => false;
+
+  /// Paniers publiés visibles depuis ce terminal, le plus récent d'abord.
+  Future<List<SharedCart>> sharedCarts() async => const [];
+
+  /// Publie le panier : toujours un nouvel uuid, un panier publié est immuable. Rend sa référence.
+  Future<SharedCartRef> suspendShared(Operator operator, List<CartLine> lines, SaleExtras extras, {SharedCartRef? previous, String? label}) =>
+      throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+
+  /// Reprise exclusive, réseau requis ; renouvelée à chaque synchronisation tant que le panier est tenu.
+  Future<TakenCart> takeSharedCart(Operator operator, String uuid) => throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+
+  /// Rend le panier repris aux autres caisses ; sans réseau, la reprise expire d'elle-même.
+  Future<void> releaseSharedCart(Operator operator, String uuid) async {}
+
+  /// Retire le panier pour tous.
+  Future<void> deleteSharedCart(Operator operator, String uuid, {String reason = 'Supprimé sur le terminal'}) async {}
+
+  /// `publie`, `local` (pas encore publié, reprenable hors ligne) ou `disparu` (vendu ou supprimé ailleurs).
+  Future<String> sharedCartState(String uuid) async => 'local';
+
+  /// [operator] peut-il clôturer la session ouverte (capacité `session.cloture`, droit `caisse_cloturer`) ?
+  bool canCloseSession(Operator operator) => false;
+
+  /// Écarts au regard de ce que le terminal sait de la session ; aucun si l'attendu est inconnu (session ouverte en ligne).
+  Future<ClosingGaps> closingGaps(int cash, List<SessionCount> others) async => const ClosingGaps();
+
+  /// Clôture la session, comptée à l'aveugle : le théorique et l'écart reviennent du serveur dans le Z.
+  Future<OfflineOperation> closeSession(Operator operator, {required int cash, String? comment, List<SessionCount> others = const [], String? operationUuid}) =>
+      throw const OfflineRefusal('Clôture non disponible sur ce terminal.');
+
+  /// Dernière clôture émise par ce terminal, ou null ; son contenu porte `z` une fois intégrée.
+  Future<OfflineOperation?> lastClosure() async => null;
+
+  /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
+  bool get customersSupported => false;
+
+  /// [operator] peut-il créer un client (capacité `client.creation`, droit `clients_creer`) ?
+  bool canCreateCustomer(Operator operator) => false;
+
+  /// Clients dont le nom ou le téléphone contient [query], par ordre alphabétique.
+  Future<List<Customer>> searchCustomers(String query, {int limit = 30}) async => const [];
+
+  /// Crée un client sur le terminal, ou rend celui qui a déjà ce téléphone.
+  Future<Customer> createCustomer(Operator operator, {required String name, String? phone, String? operationUuid}) =>
+      throw const OfflineRefusal('Création de client non disponible sur ce terminal.');
+
   /// Plafonds de saisie : ceux du rôle ; s'il existe un responsable pour autoriser, seul celui de la boutique reste
   /// (le code ne lève que le seuil du rôle). L'autorisation est demandée à l'encaissement, panier définitif.
   int enterableLineDiscount(Operator operator, int base) =>

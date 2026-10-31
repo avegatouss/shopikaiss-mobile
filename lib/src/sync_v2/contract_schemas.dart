@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 1c) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 5, retour_residuel) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -896,6 +896,15 @@ const contractV2Schemas = <String, String>{
                                     "minimum": 1
                                 }
                             ]
+                        },
+                        "retour_residuel": {
+                            "description": "Règle du reste d'arrondi d'un retour partiel (référentiel §3.13). Facultative : reçue avec la capacité retour.especes.",
+                            "enum": [
+                                "refuse",
+                                "last_line",
+                                "largest_share",
+                                "largest_fraction"
+                            ]
                         }
                     }
                 },
@@ -1112,6 +1121,48 @@ const contractV2Schemas = <String, String>{
                             "$ref": "commun.json#/$defs/raison"
                         }
                     ]
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Sur une creation_client intégrée (capacité client.creation) ou une cloture_session intégrée (capacité session.cloture).",
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "z": {
+                            "type": "object",
+                            "description": "Z de la clôture intégrée.",
+                            "required": [
+                                "cloture_uuid",
+                                "compte",
+                                "theorique",
+                                "ecart",
+                                "mode"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "cloture_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "compte": {
+                                    "$ref": "commun.json#/$defs/montant"
+                                },
+                                "theorique": {
+                                    "type": "integer"
+                                },
+                                "ecart": {
+                                    "type": "integer"
+                                },
+                                "mode": {
+                                    "enum": [
+                                        "V1",
+                                        "COMPLETE"
+                                    ]
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -1135,6 +1186,237 @@ const contractV2Schemas = <String, String>{
                 },
                 "actif": {
                     "type": "boolean"
+                }
+            }
+        },
+        "client": {
+            "description": "Client actif de la boutique (capacité client.lecture). Aucun solde : crédit, points et avoirs restent en ligne.",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "type",
+                "tarif",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "pattern": "^\\+[1-9][0-9]{7,14}$",
+                    "description": "E.164 ; null si absent ou illisible."
+                },
+                "type": {
+                    "enum": [
+                        "particulier",
+                        "professionnel",
+                        "passage"
+                    ]
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros"
+                    ]
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "contenu_panier": {
+            "type": "object",
+            "required": [
+                "lignes",
+                "client_uuid",
+                "client_nom",
+                "remise_globale",
+                "livraison",
+                "note",
+                "tarif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "produit_uuid",
+                            "conditionnement_uuid",
+                            "libelle",
+                            "quantite",
+                            "coefficient",
+                            "prix_unitaire",
+                            "remise"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "produit_uuid": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            },
+                            "conditionnement_uuid": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "commun.json#/$defs/uuid"
+                                    }
+                                ]
+                            },
+                            "libelle": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 400
+                            },
+                            "quantite": {
+                                "type": "string"
+                            },
+                            "coefficient": {
+                                "type": "string"
+                            },
+                            "prix_unitaire": {
+                                "$ref": "commun.json#/$defs/montant",
+                                "description": "Prix figé à la suspension."
+                            },
+                            "remise": {
+                                "$ref": "commun.json#/$defs/montant"
+                            }
+                        }
+                    }
+                },
+                "client_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "client_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 255
+                },
+                "remise_globale": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "livraison": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 2000
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros"
+                    ]
+                }
+            }
+        },
+        "panier": {
+            "description": "Panier partagé en attente ou repris, de moins de 30 jours (capacité panier.partage). Vendu ou supprimé : suppression au journal.",
+            "type": "object",
+            "required": [
+                "etat",
+                "libelle",
+                "auteur_operateur_id",
+                "terminal_origine_uuid",
+                "terminaux",
+                "repris_par",
+                "contenu",
+                "cree_le",
+                "modifie_le"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "etat": {
+                    "enum": [
+                        "en_attente",
+                        "repris"
+                    ]
+                },
+                "libelle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 150
+                },
+                "auteur_operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "terminal_origine_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "terminaux": {
+                    "description": "Terminaux de son point de vente : les seuls à pouvoir le lister et le reprendre.",
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "repris_par": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "terminal_uuid",
+                                "operateur_id",
+                                "le"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "terminal_uuid": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/uuid"
+                                        }
+                                    ]
+                                },
+                                "operateur_id": {
+                                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                                },
+                                "le": {
+                                    "$ref": "commun.json#/$defs/horodatage"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_panier"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "modifie_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
                 }
             }
         }
@@ -1312,6 +1594,7 @@ const contractV2Schemas = <String, String>{
             "requete_invalide",
             "corps_trop_grand",
             "trop_de_requetes",
+            "panier_deja_repris",
             "indisponible"
           ]
         },
@@ -1491,6 +1774,21 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/ouverture_session"
+        },
+        {
+            "$ref": "#/$defs/creation_client"
+        },
+        {
+            "$ref": "#/$defs/cloture_session"
+        },
+        {
+            "$ref": "#/$defs/panier_suspendre"
+        },
+        {
+            "$ref": "#/$defs/panier_supprimer"
+        },
+        {
+            "$ref": "#/$defs/retour"
         }
     ],
     "$defs": {
@@ -1762,6 +2060,17 @@ const contractV2Schemas = <String, String>{
                         "null"
                     ],
                     "maxLength": 200
+                },
+                "panier_uuid": {
+                    "description": "Panier consommé par la vente. Inconnu du serveur (jamais publié) : accepté sans arbitrage.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
                 }
             }
         },
@@ -2040,89 +2349,779 @@ const contractV2Schemas = <String, String>{
                     }
                 }
             }
+        },
+        "creation_client": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "creation_client"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "client_uuid",
+                        "nom",
+                        "telephone",
+                        "type"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "UUID v4 choisi par le terminal."
+                        },
+                        "nom": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                        },
+                        "telephone": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 40,
+                            "description": "Tel que saisi ; normalisé par le serveur."
+                        },
+                        "type": {
+                            "enum": [
+                                "particulier",
+                                "professionnel"
+                            ]
+                        }
+                    }
+                }
+            },
+            "description": "Client créé sur le terminal (REVISION-2.1 §3.2, capacité client.creation). À émettre AVANT toute vente qui cite ce client_uuid."
+        },
+        "cloture_session": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "cloture_session"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "session_uuid",
+                        "compte",
+                        "comptage",
+                        "commentaire"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "session_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Session serveur, ou UUID de l'ouverture_session locale."
+                        },
+                        "compte": {
+                            "$ref": "commun.json#/$defs/montant",
+                            "description": "Espèces comptées."
+                        },
+                        "comptage": {
+                            "description": "Moyens autres que les espèces, facultatif.",
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "type": "array",
+                                    "maxItems": 30,
+                                    "items": {
+                                        "type": "object",
+                                        "required": [
+                                            "moyen",
+                                            "montant",
+                                            "justification"
+                                        ],
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "moyen": {
+                                                "$ref": "commun.json#/$defs/code"
+                                            },
+                                            "montant": {
+                                                "$ref": "commun.json#/$defs/montant"
+                                            },
+                                            "justification": {
+                                                "type": [
+                                                    "string",
+                                                    "null"
+                                                ],
+                                                "maxLength": 500
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        },
+                        "commentaire": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 500,
+                            "description": "Obligatoire si le compté diffère de l'attendu : sinon a_arbitrer."
+                        }
+                    }
+                }
+            },
+            "description": "Clôture de la session du terminal, comptée à l'aveugle (REVISION-2.1 §3.3, capacité session.cloture). L'opérateur doit détenir caisse_cloturer."
+        },
+        "panier_suspendre": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "panier_suspendre"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "panier_uuid",
+                        "libelle",
+                        "remplace_uuid",
+                        "contenu"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "panier_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "libelle": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 150
+                        },
+                        "remplace_uuid": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            ]
+                        },
+                        "contenu": {
+                            "type": "object",
+                            "required": [
+                                "lignes",
+                                "client_uuid",
+                                "remise_globale",
+                                "livraison",
+                                "note",
+                                "tarif"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "lignes": {
+                                    "type": "array",
+                                    "minItems": 1,
+                                    "maxItems": 100,
+                                    "items": {
+                                        "type": "object",
+                                        "required": [
+                                            "produit_uuid",
+                                            "conditionnement_uuid",
+                                            "quantite",
+                                            "remise"
+                                        ],
+                                        "additionalProperties": false,
+                                        "properties": {
+                                            "produit_uuid": {
+                                                "$ref": "commun.json#/$defs/uuid"
+                                            },
+                                            "conditionnement_uuid": {
+                                                "oneOf": [
+                                                    {
+                                                        "type": "null"
+                                                    },
+                                                    {
+                                                        "$ref": "commun.json#/$defs/uuid"
+                                                    }
+                                                ]
+                                            },
+                                            "quantite": {
+                                                "type": "string"
+                                            },
+                                            "remise": {
+                                                "$ref": "commun.json#/$defs/montant"
+                                            }
+                                        }
+                                    }
+                                },
+                                "client_uuid": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/uuid"
+                                        }
+                                    ]
+                                },
+                                "remise_globale": {
+                                    "$ref": "commun.json#/$defs/montant"
+                                },
+                                "livraison": {
+                                    "$ref": "commun.json#/$defs/montant"
+                                },
+                                "note": {
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ],
+                                    "maxLength": 2000
+                                },
+                                "tarif": {
+                                    "enum": [
+                                        "detail",
+                                        "gros"
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "description": "Panier mis en attente, admis hors ligne (capacité panier.partage). Un panier publié est immuable : suspendre de nouveau un panier repris émet un NOUVEAU panier_uuid avec remplace_uuid."
+        },
+        "panier_supprimer": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "panier_supprimer"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "panier_uuid",
+                        "motif"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "panier_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "motif": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                        }
+                    }
+                }
+            },
+            "description": "Suppression d'un panier en attente ou repris par ce terminal (capacité panier.partage)."
+        },
+        "retour": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "retour"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "vente_ref",
+                        "lignes",
+                        "montant",
+                        "remboursement",
+                        "motif",
+                        "mouvements"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "vente_ref": {
+                            "type": "object",
+                            "required": [
+                                "operation_uuid"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "operation_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            }
+                        },
+                        "lignes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "ligne_uuid",
+                                    "quantite"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "ligne_uuid": {
+                                        "$ref": "commun.json#/$defs/uuid",
+                                        "description": "ligne_uuid de la vente."
+                                    },
+                                    "quantite": {
+                                        "type": "string",
+                                        "description": "En unité de base (quantite_base de la vente)."
+                                    }
+                                }
+                            }
+                        },
+                        "montant": {
+                            "$ref": "commun.json#/$defs/montant",
+                            "description": "Par parts archivées (référentiel §3.13) ; différent du calcul serveur : a_arbitrer."
+                        },
+                        "remboursement": {
+                            "const": "especes"
+                        },
+                        "motif": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 500
+                        },
+                        "mouvements": {
+                            "type": "array",
+                            "maxItems": 400,
+                            "items": {
+                                "$ref": "#/$defs/mouvement"
+                            },
+                            "description": "Variations positives."
+                        }
+                    }
+                }
+            },
+            "description": "Retour hors ligne limité (REVISION-2.1 §3.4, capacité retour.especes, politique retours.mode = especes) : espèces, vente émise par ce terminal."
         }
     }
 }
 ''',
   'operations.json': r'''{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "operations.json",
-  "title": "POST /operations et POST /operations/etats : lots bornés, résultat individuel, aucun acquittement implicite du lot.",
-  "$defs": {
-    "demande": {
-      "description": "Le lot n'est validé que dans sa forme ; chaque élément est ensuite validé seul contre operation.json.",
-      "type": "object",
-      "required": ["operations"],
-      "additionalProperties": false,
-      "properties": {
-        "operations": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "type": "object" } }
-      }
-    },
-    "reponse": {
-      "type": "object",
-      "required": ["recu_le", "resultats"],
-      "additionalProperties": false,
-      "properties": {
-        "recu_le": { "$ref": "commun.json#/$defs/horodatage" },
-        "resultats": { "type": "array", "minItems": 1, "maxItems": 50, "items": { "$ref": "#/$defs/resultat" } }
-      }
-    },
-    "demande_etats": {
-      "type": "object",
-      "required": ["uuids"],
-      "additionalProperties": false,
-      "properties": {
-        "uuids": { "type": "array", "minItems": 1, "maxItems": 200, "uniqueItems": true, "items": { "$ref": "commun.json#/$defs/uuid" } }
-      }
-    },
-    "reponse_etats": {
-      "type": "object",
-      "required": ["etats"],
-      "additionalProperties": false,
-      "properties": {
-        "etats": { "type": "array", "minItems": 1, "maxItems": 200, "items": { "$ref": "#/$defs/resultat" } }
-      }
-    },
-    "resultat": {
-      "description": "État persistant d'une opération. /operations ne rend jamais « inconnue » ; /operations/etats la rend pour un UUID absent ou d'un autre terminal.",
-      "type": "object",
-      "required": ["uuid", "etat", "version_etat", "raison", "vente", "mouvements", "couverture"],
-      "additionalProperties": false,
-      "properties": {
-        "uuid": { "$ref": "commun.json#/$defs/uuid" },
-        "etat": { "enum": ["recue", "integree", "a_arbitrer", "resolue", "rejet_protocole", "inconnue"] },
-        "version_etat": { "$ref": "commun.json#/$defs/version" },
-        "raison": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/raison" }] },
-        "vente": {
-          "oneOf": [
-            { "type": "null" },
-            {
-              "type": "object",
-              "required": ["uuid", "numero"],
-              "additionalProperties": false,
-              "properties": {
-                "uuid": { "$ref": "commun.json#/$defs/uuid" },
-                "numero": { "type": "string", "minLength": 1, "maxLength": 40 }
-              }
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "operations.json",
+    "title": "POST /operations et POST /operations/etats : lots bornés, résultat individuel, aucun acquittement implicite du lot.",
+    "$defs": {
+        "demande": {
+            "description": "Le lot n'est validé que dans sa forme ; chaque élément est ensuite validé seul contre operation.json.",
+            "type": "object",
+            "required": [
+                "operations"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "operations": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                        "type": "object"
+                    }
+                }
             }
-          ]
         },
-        "mouvements": {
-          "description": "Mouvements serveur créés pour l'opération (UUID des mouvements locaux repris quand ils correspondent).",
-          "type": "array", "maxItems": 400, "items": { "$ref": "commun.json#/$defs/uuid" }
+        "reponse": {
+            "type": "object",
+            "required": [
+                "recu_le",
+                "resultats"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "recu_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "resultats": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                        "$ref": "#/$defs/resultat"
+                    }
+                }
+            }
         },
-        "couverture": {
-          "description": "Curseur à partir duquel le changement de stock couvrant l'opération est visible ; null tant qu'il n'est pas publié. Ne retirer la consommation locale qu'après avoir appliqué ce changement.",
-          "type": "object",
-          "required": ["curseur"],
-          "additionalProperties": false,
-          "properties": {
-            "curseur": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/curseur" }] }
-          }
+        "demande_etats": {
+            "type": "object",
+            "required": [
+                "uuids"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuids": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                }
+            }
+        },
+        "reponse_etats": {
+            "type": "object",
+            "required": [
+                "etats"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "etats": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/resultat"
+                    }
+                }
+            }
+        },
+        "resultat": {
+            "description": "État persistant d'une opération. /operations ne rend jamais « inconnue » ; /operations/etats la rend pour un UUID absent ou d'un autre terminal.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "etat",
+                "version_etat",
+                "raison",
+                "vente",
+                "mouvements",
+                "couverture"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "etat": {
+                    "enum": [
+                        "recue",
+                        "integree",
+                        "a_arbitrer",
+                        "resolue",
+                        "rejet_protocole",
+                        "inconnue"
+                    ]
+                },
+                "version_etat": {
+                    "$ref": "commun.json#/$defs/version"
+                },
+                "raison": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/raison"
+                        }
+                    ]
+                },
+                "vente": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "uuid",
+                                "numero"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "numero": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                }
+                            }
+                        }
+                    ]
+                },
+                "details": {
+                    "description": "Sur une creation_client intégrée : uuid à utiliser, l'ancien reste accepté sans limite. Sur une cloture_session intégrée : le Z.",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "z": {
+                            "type": "object",
+                            "description": "Z de la clôture intégrée.",
+                            "required": [
+                                "cloture_uuid",
+                                "compte",
+                                "theorique",
+                                "ecart",
+                                "mode"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "cloture_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "compte": {
+                                    "$ref": "commun.json#/$defs/montant"
+                                },
+                                "theorique": {
+                                    "type": "integer"
+                                },
+                                "ecart": {
+                                    "type": "integer"
+                                },
+                                "mode": {
+                                    "enum": [
+                                        "V1",
+                                        "COMPLETE"
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                },
+                "mouvements": {
+                    "description": "Mouvements serveur créés pour l'opération (UUID des mouvements locaux repris quand ils correspondent).",
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "couverture": {
+                    "description": "Curseur à partir duquel le changement de stock couvrant l'opération est visible ; null tant qu'il n'est pas publié. Ne retirer la consommation locale qu'après avoir appliqué ce changement.",
+                    "type": "object",
+                    "required": [
+                        "curseur"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "curseur": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/curseur"
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
         }
-      }
     }
-  }
+}
+''',
+  'paniers.json': r'''{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "paniers.json",
+    "title": "Reprise et libération des paniers partagés (réseau requis).",
+    "$defs": {
+        "demande": {
+            "type": "object",
+            "required": [
+                "operateur_id"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                }
+            }
+        },
+        "reprise": {
+            "type": "object",
+            "required": [
+                "panier_uuid",
+                "libelle",
+                "expire_le",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "panier_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "libelle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 150
+                },
+                "expire_le": {
+                    "$ref": "commun.json#/$defs/horodatage",
+                    "description": "Reprise à renouveler par le même appel avant cette heure."
+                },
+                "contenu": {
+                    "$ref": "donnees-2.1.json#/$defs/contenu_panier"
+                }
+            }
+        }
+    }
 }
 ''',
 };

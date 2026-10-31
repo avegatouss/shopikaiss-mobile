@@ -73,6 +73,12 @@ class V2Keys {
 
   /// Révision des formes de données de la projection (`2.0` ou `2.1`) : un changement impose un nouvel instantané.
   static const contractRevision = 'v2.revision_contrat';
+
+  /// Dernière `cloture_session` émise par ce terminal.
+  static const closingOperation = 'v2.cloture_operation';
+
+  /// Préfixe du Z rendu par le serveur pour une clôture (`details.z`).
+  static const zPrefix = 'v2.z.';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
@@ -82,7 +88,7 @@ const knownV2Types = {
 };
 
 /// Types ajoutés par la révision 2.1 (donnees-2.1.json), connus seulement quand la forme 2.1 est active.
-const knownV2Types21 = {'categorie'};
+const knownV2Types21 = {'categorie', 'client', 'panier'};
 
 /// Résultat de l'application d'une page du journal.
 class V2ApplyResult {
@@ -380,7 +386,8 @@ class V2Store {
           'cree_le': now,
           'maj_le': now,
         });
-        if (operation['type'] == 'vente') {
+        // Vente : sorties de stock ; retour : entrées, couvertes de la même façon.
+        if (operation['type'] == 'vente' || operation['type'] == 'retour') {
           for (final m in ((operation['contenu'] as Map)['mouvements'] as List).cast<Map>()) {
             final lot = m['lot_uuid'] as String?;
             await txn.insert('v2_mouvements', {
@@ -442,6 +449,8 @@ class V2Store {
     if (!V2OperationState.unsent.contains(known) && BigInt.parse(version) < BigInt.parse(row['version_etat'] as String)) return;
     final sale = r['vente'] as Map?;
     final cursor = (r['couverture'] as Map?)?['curseur'] as String?;
+    final z = (r['details'] as Map?)?['z'];
+    if (z != null) await write('${V2Keys.zPrefix}$uuid', jsonEncode(z), txn);
     await txn.update(
       'v2_operations',
       {

@@ -94,6 +94,19 @@ class CaisseV2Client {
   /// Formes 2.1 des données (REVISION-2.1 §7.1) : rendues seulement si le client l'annonce ET que le serveur la rend.
   static const contract21Capability = 'contrat.2_1';
 
+  /// Clients publiés et création hors ligne (2.1, lot 2).
+  static const customerReadCapability = 'client.lecture';
+  static const customerCreateCapability = 'client.creation';
+
+  /// Clôture de session hors ligne (2.1, lot 3).
+  static const sessionCloseCapability = 'session.cloture';
+
+  /// Paniers partagés (2.1, lot 4).
+  static const sharedCartCapability = 'panier.partage';
+
+  /// Retours limités en espèces (2.1, lot 5).
+  static const returnCapability = 'retour.especes';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;
@@ -212,6 +225,15 @@ class CaisseV2Client {
       }
     }
     return response.body;
+  }
+
+  /// Reprise exclusive d'un panier partagé, ou renouvellement par son détenteur.
+  Future<Map<String, dynamic>> takeCart(String uuid, String operatorId) async => Map<String, dynamic>.from(
+    await _call('POST', '/paniers/$uuid/reprise', body: {'operateur_id': operatorId}, schema: 'paniers.json#/\$defs/reprise') as Map,
+  );
+
+  Future<void> releaseCart(String uuid, String operatorId) async {
+    await _call('POST', '/paniers/$uuid/liberation', body: {'operateur_id': operatorId});
   }
 
   V2Failure _failure(V2Response response) {

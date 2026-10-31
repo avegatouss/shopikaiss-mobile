@@ -205,6 +205,82 @@ class Operator {
   final String? approvalCodeHash;
 }
 
+/// Client de la boutique (contrat 2.1, aucun solde) ; [pending] = créé sur ce terminal, pas encore reçu du serveur.
+class Customer {
+  const Customer({required this.uuid, required this.name, this.phone, this.pending = false});
+
+  final String uuid;
+  final String name;
+  final String? phone;
+  final bool pending;
+}
+
+/// Ligne d'une vente du terminal encore retournable ; quantités en unité de base, en millionièmes.
+class ReturnableLine {
+  const ReturnableLine({required this.lineUuid, required this.label, required this.remaining});
+
+  final String lineUuid;
+  final String label;
+  final int remaining;
+}
+
+/// Panier partagé lié au panier courant ; [claimed] = reprise exclusive obtenue du serveur.
+class SharedCartRef {
+  const SharedCartRef(this.uuid, {this.claimed = false});
+
+  final String uuid;
+  final bool claimed;
+
+  Map<String, dynamic> toJson() => {'uuid': uuid, 'repris': claimed};
+
+  static SharedCartRef? fromJson(Object? raw) => raw is Map ? SharedCartRef(raw['uuid'] as String, claimed: raw['repris'] == true) : null;
+}
+
+/// Panier partagé publié par le serveur, visible depuis ce terminal.
+class SharedCart {
+  const SharedCart({required this.uuid, required this.label, required this.linesCount, required this.takenElsewhere, required this.modifiedAt});
+
+  final String uuid;
+  final String label;
+  final int linesCount;
+  final bool takenElsewhere;
+  final String modifiedAt;
+}
+
+/// Panier partagé repris : prix figés dans [lines], remise globale en montant (le web ne garde pas le pourcentage).
+class TakenCart {
+  const TakenCart({required this.ref, required this.lines, required this.globalDiscount, required this.delivery, this.note, this.customer});
+
+  final SharedCartRef ref;
+  final List<CartLine> lines;
+  final int globalDiscount;
+  final int delivery;
+  final String? note;
+  final Customer? customer;
+}
+
+/// Montant compté à la clôture pour un moyen autre que les espèces.
+class SessionCount {
+  const SessionCount({required this.method, required this.amount, this.justification});
+
+  final String method;
+  final int amount;
+  final String? justification;
+
+  Map<String, dynamic> toJson() => {'moyen': method, 'montant': amount, 'justification': justification};
+}
+
+/// Écarts constatés par le terminal à la clôture, sans montant : le comptage reste à l'aveugle.
+class ClosingGaps {
+  const ClosingGaps({this.cash = false, this.methods = const {}});
+
+  final bool cash;
+  final Set<String> methods;
+}
+
+/// Client d'un panier conservé (clé `client`), ou null.
+Customer? customerFromDraft(Object? raw) => raw is Map ? Customer(uuid: raw['uuid'] as String, name: raw['nom'] as String) : null;
+
 /// Autorisation d'une remise par un responsable, code vérifié sur le terminal. Jamais le code ni son empreinte.
 class SaleApproval {
   const SaleApproval({required this.approverId, required this.reason, required this.verifiedAt});
@@ -351,7 +427,7 @@ class DiscountEntry {
 
 /// Éléments de vente du contrat 2.1 hors lignes et paiements : remise globale, livraison, note.
 class SaleExtras {
-  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval});
+  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval, this.customer, this.sharedCart});
 
   final int globalDiscount;
   final DiscountEntry? globalEntry;
@@ -361,7 +437,14 @@ class SaleExtras {
   /// Autorisation d'un responsable : remise au-delà du seuil du caissier, jamais du plafond de la boutique.
   final SaleApproval? approval;
 
-  bool get isEmpty => globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null;
+  /// Client de la vente ; null = client de passage.
+  final Customer? customer;
+
+  /// Panier partagé consommé par la vente.
+  final String? sharedCart;
+
+  bool get isEmpty =>
+      globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null && customer == null && sharedCart == null;
 }
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.

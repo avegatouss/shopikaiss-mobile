@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
+import 'package:shopikaiss_terminal/src/offline/web_rules.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
@@ -580,6 +581,233 @@ void main() {
     final committed = await adapter.execute('commitSale', {'approval': {'approver_id': 9, 'code': '12345678', 'reason': 'Client fidèle'}}, operation);
     expect(committed['state'], 'committed');
     expect((await authorizations(operation) as List).single, containsPair('approbateur_id', '9'));
+
+    // Lot 2 : clients. Première obtention de client.lecture : nouvel instantané, une fois.
+    const publishedCustomer = 'c1000000-0000-4000-8000-000000000001';
+    server
+      ..capabilities = [...server.capabilities, 'client.lecture', 'client.creation']
+      ..put('client', publishedCustomer, {'nom': 'Éléonore Koné', 'telephone': '+2250707070707', 'type': 'particulier', 'tarif': 'detail', 'actif': true})
+      ..put('client', 'c1000000-0000-4000-8000-000000000002', {'nom': 'Client de passage', 'telephone': null, 'type': 'passage', 'tarif': 'detail', 'actif': true});
+    expect(e.customersSupported, isFalse);
+    final snapshotsBefore = server.snapshotReasons.length;
+    await e.sync();
+    expect(e.blockReason, isNull);
+    await e.sync();
+    expect(server.snapshotReasons.skip(snapshotsBefore), ['reparation'], reason: 'un seul instantané pour les clients');
+    expect(e.customersSupported, isTrue);
+    expect([for (final c in await e.searchCustomers('')) c.name], ['Éléonore Koné'], reason: 'le client de passage n’est pas proposé');
+    expect((await e.searchCustomers('eleonore')).single.uuid, publishedCustomer);
+    expect((await e.searchCustomers('07 07')).single.uuid, publishedCustomer);
+
+    final cashier = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    await expectLater(e.createCustomer(cashier, name: 'Nouveau'), refused('n’a pas le droit de créer un client'));
+    server.publish([
+      {'type': 'operateur', 'critique': true, 'cle': 'operateur:7', 'revision': '3', 'action': 'upsert',
+       'donnees': operateur21('7', 'Awa', 'empreinte', ['clients_creer', 'ouverture_session', 'remise', 'vente'], '5.000000', 40)},
+    ]);
+    await e.sync();
+    final creator = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.canCreateCustomer(creator), isTrue);
+    await expectLater(e.createCustomer(creator, name: 'Sans nom', phone: 'abc'), refused('illisible'));
+    expect((await e.createCustomer(creator, name: 'Doublon', phone: '07 07 07 07 07')).uuid, publishedCustomer, reason: 'même téléphone : fiche existante');
+    final created = await e.createCustomer(creator, name: '  Bintou  ', phone: '05 05 05 05 05', operationUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
+    expect((created.name, created.pending), ('Bintou', true));
+    final replay = await e.createCustomer(creator, name: 'Bintou', operationUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
+    expect(replay.uuid, created.uuid);
+    expect((await e.searchCustomers('bintou')).single.pending, isTrue);
+
+    final customerSale = await e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], creator, extras: SaleExtras(customer: created));
+    final saleContent = (await e.v2.operation(customerSale.uuid))!['operation']['contenu'] as Map;
+    expect([saleContent['client_uuid'], saleContent['client_nom']], [created.uuid, 'Bintou']);
+    expect(customerSale.content['client_nom'], 'Bintou');
+    await expectLater(
+      e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], creator, extras: const SaleExtras(customer: Customer(uuid: 'c1000000-0000-4000-8000-0000000000ff', name: 'Inconnu'))),
+      refused('plus disponible'),
+    );
+    await e.sync();
+    final order = [for (final r in server.received.values) (r['operation'] as Map)['type']];
+    expect(order.indexOf('creation_client') < order.lastIndexOf('vente'), isTrue, reason: 'la création précède la vente qui la cite');
+    expect(await e.searchCustomers('bintou'), isEmpty, reason: 'intégrée : la fiche vient du journal, sous l’uuid fusionné s’il y a lieu');
+    final afterMerge = await e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], creator, extras: SaleExtras(customer: created));
+    expect(afterMerge.isSale, isTrue, reason: 'l’uuid du terminal reste accepté');
+
+    // Adaptateur : client du panier conservé et transmis à la vente.
+    final found = await adapter.execute('searchCustomers', {'query': 'koné'}, null);
+    expect(((found['customers'] as List).single as Map)['uuid'], publishedCustomer);
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    final withCustomer = await adapter.execute('setCustomer', {'uuid': publishedCustomer, 'name': 'Éléonore Koné'}, null);
+    expect((withCustomer['customer'] as Map)['name'], 'Éléonore Koné');
+    await adapter.execute('setPayment', {'method': 'especes', 'received': 500}, null);
+    await adapter.execute('commitSale', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000e3');
+    expect((await e.v2.operation('aaaaaaaa-bbbb-4ccc-8ddd-0000000000e3'))!['operation']['contenu']['client_uuid'], publishedCustomer);
+
+    // Lot 3 : clôture à l'aveugle, droit et capacité exigés, session fermée sans attendre le serveur, Z conservé.
+    final noRight = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.canCloseSession(noRight), isFalse);
+    await expectLater(e.closeSession(noRight, cash: 1000), refused('non disponible'));
+    server.capabilities = [...server.capabilities, 'session.cloture'];
+    server.publish([
+      {'type': 'operateur', 'critique': true, 'cle': 'operateur:7', 'revision': '4', 'action': 'upsert',
+       'donnees': operateur21('7', 'Awa', 'empreinte', ['caisse_cloturer', 'clients_creer', 'ouverture_session', 'remise', 'vente'], '5.000000', 40)},
+      {'type': 'politique', 'critique': false, 'cle': 'session.ouverture_locale', 'revision': '2', 'action': 'upsert',
+       'donnees': {'cle_politique': 'session.ouverture_locale', 'valeur': true, 'source': 'boutique', 'verrouillee': false}},
+    ]);
+    await e.sync();
+    final closer = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.canCloseSession(closer), isTrue);
+    await expectLater(adapter.execute('closeSession', {'cash': 0}, null), completes);
+    expect(e.sessionOpen, isFalse, reason: 'fermée sur le terminal avant toute réponse du serveur');
+    final closure = await e.lastClosure();
+    expect(closure!.content['session_uuid'], fakeSession);
+    expect(closure.content['commentaire'], isNull, reason: 'session ouverte en ligne : attendu inconnu, commentaire facultatif');
+    server.resultDetails = (op) => op['type'] == 'cloture_session'
+        ? {'z': {'cloture_uuid': 'c2000000-0000-4000-8000-000000000001', 'compte': 0, 'theorique': 0, 'ecart': 0, 'mode': 'V1'}}
+        : null;
+    await e.sync();
+    expect((await e.lastClosure())!.content['z'], containsPair('mode', 'V1'));
+    expect(e.sessionOpen, isFalse, reason: 'intégrée : pas de réouverture avant la publication de la session close');
+
+    // Session ouverte sur ce terminal : attendu connu, l'écart exige un commentaire, jamais de montant rendu.
+    await e.openSession(1000, closer);
+    final cashSale = await e.recordSale([savon(e)], [CartPayment(method: cashMethod, amount: 500, received: 500)], closer);
+    expect(cashSale.isSale, isTrue);
+    expect((await e.closingGaps(1500, const [])).cash, isFalse);
+    expect((await e.closingGaps(1400, const [])).cash, isTrue);
+    await expectLater(e.closeSession(closer, cash: 1400), refused('indiquez un commentaire'));
+    await expectLater(e.closeSession(closer, cash: 1500, others: const [SessionCount(method: 'wave', amount: 300)]), refused('justification'));
+    await e.closeSession(closer, cash: 1400, comment: 'Erreur de monnaie');
+    expect(e.sessionOpen, isFalse);
+    server.verdict = (op) => op['type'] == 'cloture_session' ? 'a_arbitrer' : 'integree';
+    await e.sync();
+    await expectLater(e.openSession(0, closer), refused('arbitrage'));
+    server.verdict = null;
+
+    // Lot 4 : paniers partagés. Première obtention : un instantané ; seul le panier de ce point de vente est listé.
+    const webCart = 'ca000000-0000-4000-8000-000000000001';
+    const otherShopCart = 'ca000000-0000-4000-8000-000000000002';
+    Map<String, dynamic> panier(List<String> terminaux, {int prix = 450}) => {
+      'etat': 'en_attente', 'libelle': 'Table 4', 'auteur_operateur_id': '7', 'terminal_origine_uuid': fakeTerminal, 'terminaux': terminaux, 'repris_par': null,
+      'contenu': {
+        'lignes': [
+          {'produit_uuid': fakeSavon, 'conditionnement_uuid': null, 'libelle': 'Savon', 'quantite': '2.000000', 'coefficient': '1.000000', 'prix_unitaire': prix, 'remise': 0},
+        ],
+        'client_uuid': null, 'client_nom': null, 'remise_globale': 0, 'livraison': 0, 'note': 'À livrer', 'tarif': 'detail',
+      },
+      'cree_le': '2026-10-29T07:00:00Z', 'modifie_le': '2026-10-29T07:00:00Z',
+    };
+    final before4 = server.snapshotReasons.length;
+    server
+      ..capabilities = [...server.capabilities, 'panier.partage']
+      ..put('panier', webCart, panier([fakeTerminal]))
+      ..put('panier', otherShopCart, panier(['0d000000-0000-4000-8000-0000000000ff']));
+    await e.sync();
+    await e.sync();
+    expect(e.blockReason, isNull);
+    expect(server.snapshotReasons.skip(before4), ['reparation']);
+    expect((await e.sharedCarts()).map((c) => c.uuid), [webCart]);
+
+    // Reprise : prix figé du panier, conservé dans la vente, panier consommé.
+    server.takenElsewhere.add(webCart);
+    await expectLater(e.takeSharedCart(closer, webCart), refused('déjà repris'));
+    server.takenElsewhere.clear();
+    final held = await e.takeSharedCart(closer, webCart);
+    expect([held.ref.claimed, held.lines.single.unitPrice, held.lines.single.quantity, held.note], [isTrue, 450, BigInt.from(2000000), 'À livrer']);
+    await e.sync();
+    expect(server.taken.length, 2, reason: 'reprise renouvelée à la synchronisation');
+
+    // Vente au prix figé : la clôture en arbitrage est d'abord résolue, la session du serveur reste ouverte.
+    final stuck = (await e.lastClosure())!.uuid;
+    server.received[stuck]!..['etat'] = 'resolue'..['version'] = 2;
+    await e.sync();
+    expect(e.sessionOpen, isTrue);
+    final frozen = await e.recordSale(held.lines, [CartPayment(method: cashMethod, amount: 900, received: 900)], closer, extras: const SaleExtras(sharedCart: webCart));
+    final frozenContent = (await e.v2.operation(frozen.uuid))!['operation']['contenu'] as Map;
+    expect([(frozenContent['lignes'] as List).single['prix_unitaire'], frozenContent['panier_uuid']], [450, webCart]);
+    // Suspendu de nouveau : nouvel uuid, remplace l'ancien repris ; non repris : suppression explicite d'abord.
+    final replaced = await e.suspendShared(closer, held.lines, const SaleExtras(), previous: held.ref);
+    expect(replaced.uuid, isNot(webCart));
+    final replacedContent = (await e.v2.operation(replaced.uuid))!['operation']['contenu'] as Map;
+    expect(replacedContent['remplace_uuid'], webCart);
+    final again = await e.suspendShared(closer, held.lines, const SaleExtras(), previous: replaced);
+    expect(((await e.v2.operation(again.uuid))!['operation']['contenu'] as Map)['remplace_uuid'], isNull);
+    final types = [for (final r in (await e.v2.operationRows()).take(2)) (r['operation'] as Map)['type']];
+    expect(types, ['panier_suspendre', 'panier_supprimer']);
+    expect(await e.sharedCartState(again.uuid), 'local');
+
+    await e.sync();
+    expect(await e.sharedCartState(again.uuid), 'disparu', reason: 'intégré et absent du journal : vendu ou supprimé ailleurs');
+
+    // Lot 5 : retours fermés par défaut ; ouverts par la capacité, la politique et les droits.
+    expect(e.returnsOpen(closer), isFalse);
+    await expectLater(e.recordReturn(closer, frozen.uuid, const {}, 'x'), refused('non autorisé'));
+    Map<String, dynamic> politique(String cle, Object valeur) => {
+      'type': 'politique', 'critique': false, 'cle': cle, 'revision': '3', 'action': 'upsert',
+      'donnees': {'cle_politique': cle, 'valeur': valeur, 'source': 'boutique', 'verrouillee': false},
+    };
+    server.capabilities = [...server.capabilities, 'retour.especes'];
+    server.publish([
+      politique('retours.mode', 'especes'),
+      politique('retours.max_montant', 500),
+      politique('retours.delai_jours', 1),
+      {'type': 'operateur', 'critique': true, 'cle': 'operateur:7', 'revision': '5', 'action': 'upsert',
+       'donnees': operateur21('7', 'Awa', 'empreinte', ['caisse_cloturer', 'clients_creer', 'ouverture_session', 'remise', 'retour_creer', 'retour_rembourser_especes', 'vente'], '5.000000', 40)},
+    ]);
+    await e.sync();
+    expect(e.blockReason, isNull);
+    final refunder = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.returnsOpen(refunder), isTrue);
+    final line = (await e.returnableLines(frozen.uuid)).single;
+    expect(line.remaining, 2000000);
+    expect(await e.returnAmount(frozen.uuid, {line.lineUuid: 1000000}), 450);
+    await expectLater(e.recordReturn(refunder, frozen.uuid, {line.lineUuid: 1000000}, '  '), refused('motif'));
+    await expectLater(e.recordReturn(refunder, frozen.uuid, {line.lineUuid: 2000000}, 'Abîmé'), refused('limité'));
+    await expectLater(e.returnAmount(frozen.uuid, {line.lineUuid: 3000000}), refused('dépasse'));
+    final stockBefore = (await e.soldSinceSnapshot()).values.fold<BigInt>(BigInt.zero, (a, b) => a + b);
+    final refund = await e.recordReturn(refunder, frozen.uuid, {line.lineUuid: 1000000}, 'Abîmé');
+    final refundContent = (await e.v2.operation(refund.uuid))!['operation']['contenu'] as Map;
+    expect(refundContent['montant'], 450);
+    expect((refundContent['mouvements'] as List).single['variation'], '1.000000');
+    expect((await e.soldSinceSnapshot()).values.fold<BigInt>(BigInt.zero, (a, b) => a + b), stockBefore - BigInt.from(1000000), reason: 'stock remis localement');
+    expect((await e.returnableLines(frozen.uuid)).single.remaining, 1000000);
+    final viaAdapter = await adapter.execute('previewReturn', {'sale_id': frozen.uuid, 'lines': [{'line_id': line.lineUuid, 'quantity': '1'}]}, null);
+    expect(viaAdapter['amount'], 450);
+
+    // Parts qui ne tombent pas juste (remise globale répartie sur deux lignes) : la règle de reste n'est pas publiée, le terminal ne rend rien.
+    server.publish([politique('remises.globale_max_pourcent', 50)]);
+    await e.sync();
+    final emballage = e.snapshot!.products.firstWhere((p) => p.name == 'Emballage');
+    final split = await e.recordSale(
+      [CartLine(product: emballage), CartLine(product: emballage)],
+      [CartPayment(method: cashMethod, amount: 199, received: 199)],
+      refunder,
+      extras: const SaleExtras(globalDiscount: 1),
+    );
+    await expectLater(e.returnableLines(split.uuid), refused('faites-le en ligne'));
+    // Règle publiée : le même retour se chiffre sur le terminal.
+    server.publish([
+      {'type': 'boutique', 'critique': true, 'cle': fakeShop, 'revision': '9', 'action': 'upsert', 'donnees': {
+        ...(server.entities['boutique|$fakeShop']!['donnees'] as Map<String, dynamic>),
+        'regles': {...(server.entities['boutique|$fakeShop']!['donnees'] as Map)['regles'] as Map, 'retour_residuel': 'largest_fraction'},
+      }},
+    ]);
+    await e.sync();
+    expect(e.blockReason, isNull, reason: 'clé acceptée par le schéma');
+    final splitLines = await e.returnableLines(split.uuid);
+    expect(await e.returnAmount(split.uuid, {splitLines.first.lineUuid: 1000000}), 100);
+    expect(await e.returnAmount(split.uuid, {splitLines.last.lineUuid: 1000000}), 99);
+    // Règles de reste, comme ReturnService : net 100 sur trois lignes égales, parts arrondies 33 × 3 ; net 200 : 67 × 3 = 201.
+    expect(archivedShares(100, [1, 1, 1], null), isNull, reason: 'règle non publiée');
+    expect(archivedShares(100, [1, 1, 1], 'refuse'), [33, 33, 33], reason: 'parts sous le net : le serveur les garde');
+    expect(archivedShares(100, [1, 1, 1], 'largest_fraction'), [34, 33, 33]);
+    expect(archivedShares(200, [1, 1, 1], 'refuse'), isNull);
+    expect(archivedShares(200, [1, 1, 1], 'last_line'), [66, 66, 68]);
+    expect(archivedShares(200, [1, 1, 1], 'largest_share'), [68, 66, 66]);
+    expect(archivedShares(200, [1, 1, 1], 'largest_fraction'), [67, 67, 66]);
+    expect(archivedShares(90, [1, 2], 'refuse'), [30, 60], reason: 'parts exactes : la règle ne joue pas');
+    // Arrondi demi vers le haut, cumul par ligne : 333 + 334 + 333.
+    expect(archivedShare(100, 33, 99), 33);
+    expect(archivedShare(1000, 1, 3), 333);
+    expect(returnedAmount(1000, 1000000, 1000000, 3000000), 334);
     await adapter.close();
   });
 

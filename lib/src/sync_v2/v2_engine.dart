@@ -14,6 +14,7 @@ import '../offline/models.dart';
 import '../offline/store.dart';
 import 'contract_schemas.dart';
 import 'schema_validator.dart';
+import 'decimal6.dart';
 import 'v2_client.dart';
 import 'v2_sale.dart';
 import 'v2_store.dart';
@@ -164,7 +165,14 @@ class V2Engine extends CaisseEngine {
       capabilities: [
         ...CaisseV2Client.defaultCapabilities,
         if (declaredPayments) CaisseV2Client.declaredPaymentCapability,
-        if (contract21) CaisseV2Client.contract21Capability,
+        if (contract21) ...[
+          CaisseV2Client.contract21Capability,
+          CaisseV2Client.customerReadCapability,
+          CaisseV2Client.customerCreateCapability,
+          CaisseV2Client.sessionCloseCapability,
+          CaisseV2Client.sharedCartCapability,
+          CaisseV2Client.returnCapability,
+        ],
       ],
     );
     _sync = V2Sync(_client!, v2);
@@ -253,6 +261,9 @@ class V2Engine extends CaisseEngine {
       await _drainLegacy();
       final report = await engine.run();
       final failure = report.failure;
+      if (failure == null && _heldCart != null) {
+        await _client!.takeCart(_heldCart!.$1, '${_heldCart!.$2}').then<void>((_) {}, onError: (Object _) => _heldCart = null);
+      }
       if (failure != null) {
         await _failed(failure);
       } else {
@@ -381,6 +392,10 @@ class V2Engine extends CaisseEngine {
     if (!s.rules.sessionOpening) throw const OfflineRefusal('L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.');
     if (sessionOpen) throw const OfflineRefusal('Une session est déjà ouverte sur ce terminal.');
     if (float < 0) throw const OfflineRefusal('Fond de caisse invalide.');
+    final closing = await v2.read(V2Keys.closingOperation);
+    if (closing != null && (await v2.operation(closing))?['etat'] == V2OperationState.arbitration) {
+      throw const OfflineRefusal('La clôture précédente attend un arbitrage de la boutique : faites-la traiter avant d’ouvrir une session.');
+    }
     _requireRight(operator, 'ouverture_session', 'ouvrir une session');
     final uuid = _newUuid();
     final operation = await _record(uuid, 'ouverture_session', operator, (_) => {'fond': float});
@@ -409,6 +424,415 @@ class V2Engine extends CaisseEngine {
 
   @override
   String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
+
+  /// Politiques des retours, publiées avec la capacité.
+  ({String mode, int max, int days}) _returnRules = (mode: 'en_ligne', max: 0, days: 0);
+
+  @override
+  bool returnsOpen(Operator operator) =>
+      saleExtrasSupported &&
+      _serverOffers(CaisseV2Client.returnCapability) &&
+      _returnRules.mode == 'especes' &&
+      !((_state?['fonctions_restreintes'] as List?)?.any((f) => (f as Map)['fonction'] == 'retour') ?? true) &&
+      hasRight(operator, 'retour_creer') &&
+      hasRight(operator, 'retour_rembourser_especes');
+
+  /// Vente du terminal, parts archivées par ligne, quantités déjà retournées et total déjà rendu. Si la boutique change de
+  /// règle entre deux retours d'une vente, le serveur garde la première : écart, donc arbitrage.
+  Future<({Map content, Map<String, int> shares, Map<String, int> before, int refunded})> _returnBasis(String saleUuid) async {
+    final row = await v2.operation(saleUuid);
+    final operation = row?['operation'] as Map?;
+    if (operation == null || operation['type'] != 'vente') throw const OfflineRefusal('Seules les ventes de ce terminal se retournent hors ligne.');
+    if (row!['etat'] == V2OperationState.rejected || row['etat'] == V2OperationState.arbitration) {
+      throw const OfflineRefusal('Cette vente attend un traitement de la boutique : retour impossible pour l’instant.');
+    }
+    final created = DateTime.parse(operation['cree_le'] as String).toLocal();
+    final today = DateTime(now.year, now.month, now.day);
+    final age = (today.difference(DateTime(created.year, created.month, created.day)).inHours / 24).round();
+    if (age > _returnRules.days) throw OfflineRefusal('Vente trop ancienne pour un retour hors ligne (${_returnRules.days} jour(s) au plus).');
+    final content = operation['contenu'] as Map;
+    final lines = (content['lignes'] as List).cast<Map>();
+    final parts = archivedShares(_saleNet(content), [for (final l in lines) l['total'] as int], _shopRules?['retour_residuel'] as String?);
+    if (parts == null) throw const OfflineRefusal('Le montant de ce retour dépend d’une règle d’arrondi de la boutique : faites-le en ligne.');
+    final shares = {for (final (i, l) in lines.indexed) l['ligne_uuid'] as String: parts[i]};
+    final before = <String, int>{};
+    var refunded = 0;
+    for (final other in await v2.operationRows()) {
+      final past = other['operation'] as Map;
+      if (past['type'] != 'retour' || other['etat'] == V2OperationState.rejected) continue;
+      final pastContent = past['contenu'] as Map;
+      if ((pastContent['vente_ref'] as Map)['operation_uuid'] != saleUuid) continue;
+      refunded += pastContent['montant'] as int;
+      for (final l in (pastContent['lignes'] as List).cast<Map>()) {
+        before.update(l['ligne_uuid'] as String, (v) => v + Decimal6.parse(l['quantite'] as String), ifAbsent: () => Decimal6.parse(l['quantite'] as String));
+      }
+    }
+    return (content: content, shares: shares, before: before, refunded: refunded);
+  }
+
+  /// Net archivé : à payer, livraison exclue.
+  static int _saleNet(Map content) => ((content['totaux'] as Map)['a_payer'] as int) - (content['livraison'] as int? ?? 0);
+
+  @override
+  Future<List<ReturnableLine>> returnableLines(String saleUuid) async {
+    final basis = await _returnBasis(saleUuid);
+    return [
+      for (final l in (basis.content['lignes'] as List).cast<Map>())
+        if (Decimal6.parse(l['quantite_base'] as String) - (basis.before[l['ligne_uuid']] ?? 0) case final remaining when remaining > 0)
+          ReturnableLine(lineUuid: l['ligne_uuid'] as String, label: l['libelle'] as String, remaining: remaining),
+    ];
+  }
+
+  int _amountOf(({Map content, Map<String, int> shares, Map<String, int> before, int refunded}) basis, Map<String, int> quantities) {
+    final lines = (basis.content['lignes'] as List).cast<Map>();
+    var amount = 0;
+    for (final e in quantities.entries) {
+      final line = lines.where((l) => l['ligne_uuid'] == e.key).firstOrNull ?? (throw const OfflineRefusal('Cette ligne n’appartient pas à la vente.'));
+      final sold = Decimal6.parse(line['quantite_base'] as String);
+      final before = basis.before[e.key] ?? 0;
+      if (e.value <= 0) throw const OfflineRefusal('Quantité invalide.');
+      if (before + e.value > sold) throw const OfflineRefusal('La quantité retournée dépasse la quantité vendue restante.');
+      amount += returnedAmount(basis.shares[e.key]!, before, e.value, sold);
+    }
+    return amount;
+  }
+
+  @override
+  Future<int> returnAmount(String saleUuid, Map<String, int> quantities) async => _amountOf(await _returnBasis(saleUuid), quantities);
+
+  @override
+  Future<OfflineOperation> recordReturn(Operator operator, String saleUuid, Map<String, int> quantities, String reason, {String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) return _view(existing);
+    }
+    if (!returnsOpen(operator)) throw const OfflineRefusal('Retour hors ligne non autorisé sur ce terminal.');
+    if (!sessionOpen) throw const OfflineRefusal('Aucune session de caisse ouverte sur ce terminal : ouvrez-la d’abord.');
+    final motive = reason.trim();
+    if (motive.isEmpty || motive.length > 500) throw const OfflineRefusal('Indiquez le motif du retour (500 caractères au plus).');
+    if (quantities.isEmpty) throw const OfflineRefusal('Choisissez au moins une quantité à retourner.');
+    final basis = await _returnBasis(saleUuid);
+    final amount = _amountOf(basis, quantities);
+    if (amount <= 0) throw const OfflineRefusal('Rien à rembourser pour ces quantités.');
+    if (amount > _returnRules.max) throw OfflineRefusal('Retour hors ligne limité à ${formatFcfa(_returnRules.max)} : faites-le en ligne.');
+    final content = basis.content;
+    if (basis.refunded + amount > ((content['totaux'] as Map)['a_payer'] as int)) throw const OfflineRefusal('Le montant cumulé restitué dépasse le montant reçu sur la vente.');
+    final lines = (content['lignes'] as List).cast<Map>();
+    final stocked = {for (final m in (content['mouvements'] as List).cast<Map>()) m['produit_uuid']};
+    final movements = [
+      for (final e in quantities.entries)
+        if (lines.firstWhere((l) => l['ligne_uuid'] == e.key)['produit_uuid'] case final product when stocked.contains(product))
+          {'mouvement_uuid': _newUuid(), 'produit_uuid': product, 'lot_uuid': null, 'variation': Decimal6.format(e.value)},
+    ];
+    final operation = await _record(operationUuid ?? _newUuid(), 'retour', operator, (_) => {
+      'vente_ref': {'operation_uuid': saleUuid},
+      'lignes': [for (final e in quantities.entries) {'ligne_uuid': e.key, 'quantite': Decimal6.format(e.value)}],
+      'montant': amount,
+      'remboursement': 'especes',
+      'motif': motive,
+      'mouvements': movements,
+    });
+    await _rebuild();
+    await _afterWrite();
+    return operation;
+  });
+
+  /// Panier repris en ce moment (uuid, opérateur) : sa reprise de 30 minutes est renouvelée à chaque synchronisation.
+  (String, int)? _heldCart;
+
+  @override
+  bool get sharedCartsSupported => saleExtrasSupported && _serverOffers(CaisseV2Client.sharedCartCapability);
+
+  @override
+  Future<List<SharedCart>> sharedCarts() async {
+    if (!sharedCartsSupported) return const [];
+    final me = _device['terminal_uuid'];
+    final carts = <SharedCart>[];
+    for (final e in (await v2.entities('panier')).entries) {
+      if (!(e.value['terminaux'] as List).contains(me)) continue;
+      final taken = e.value['repris_par'] as Map?;
+      carts.add(SharedCart(
+        uuid: e.key,
+        label: e.value['libelle'] as String,
+        linesCount: ((e.value['contenu'] as Map)['lignes'] as List).length,
+        takenElsewhere: taken != null && taken['terminal_uuid'] != me,
+        modifiedAt: e.value['modifie_le'] as String,
+      ));
+    }
+    return carts..sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
+  }
+
+  @override
+  Future<String> sharedCartState(String uuid) async {
+    if ((await v2.entities('panier')).containsKey(uuid)) return 'publie';
+    return (await v2.operation(uuid))?['etat'] == V2OperationState.integrated ? 'disparu' : 'local';
+  }
+
+  @override
+  Future<SharedCartRef> suspendShared(Operator operator, List<CartLine> lines, SaleExtras extras, {SharedCartRef? previous, String? label}) => serialized(() async {
+    if (!sharedCartsSupported) throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+    if (lines.isEmpty || lines.length > 100) throw const OfflineRefusal('Entre 1 et 100 lignes par panier.');
+    if ((lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) && !hasRight(operator, 'remise')) {
+      throw OfflineRefusal('${operator.name} n’a pas le droit d’accorder une remise : retirez-la avant de partager ce panier.');
+    }
+    final name = (label ?? '').trim().isEmpty ? 'Panier ${now.toIso8601String().substring(0, 16).replaceFirst('T', ' ')}' : label!.trim();
+    if (name.length > 150) throw const OfflineRefusal('Nom du panier trop long (150 caractères au plus).');
+    final content = {
+      'lignes': [
+        for (final l in lines)
+          {
+            'produit_uuid': _productUuids[l.product.id] ?? (throw OfflineRefusal('« ${l.product.name} » n’est plus au catalogue local.')),
+            'conditionnement_uuid': l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.'))),
+            'quantite': Decimal6.format(l.quantity.toInt()),
+            'remise': l.discount,
+          },
+      ],
+      'client_uuid': extras.customer?.uuid,
+      'remise_globale': extras.globalDiscount,
+      'livraison': extras.delivery,
+      'note': extras.note,
+      'tarif': 'detail',
+    };
+    // Sans reprise, le serveur ne retire pas l'ancien panier de lui-même : suppression explicite, avant, dans l'ordre.
+    if (previous != null && !previous.claimed) {
+      await _record(_newUuid(), 'panier_supprimer', operator, (_) => {'panier_uuid': previous.uuid, 'motif': 'Remplacé sur le terminal'});
+    }
+    final uuid = _newUuid();
+    await _record(uuid, 'panier_suspendre', operator, (_) => {
+      'panier_uuid': uuid,
+      'libelle': name,
+      'remplace_uuid': previous?.claimed == true ? previous!.uuid : null,
+      'contenu': content,
+    });
+    if (previous?.uuid == _heldCart?.$1) _heldCart = null;
+    await _afterWrite();
+    return SharedCartRef(uuid);
+  });
+
+  @override
+  Future<TakenCart> takeSharedCart(Operator operator, String uuid) async {
+    final client = _client;
+    if (client == null || !sharedCartsSupported) throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+    final Map<String, dynamic> taken;
+    try {
+      taken = await client.takeCart(uuid, '${operator.id}');
+    } on V2Failure catch (failure) {
+      throw OfflineRefusal(switch (failure) {
+        V2Failure(code: 'panier_deja_repris') => 'Ce panier est déjà repris sur une autre caisse.',
+        V2Failure(status: 404) => 'Ce panier a été vendu ou supprimé.',
+        V2Failure(kind: V2FailureKind.unavailable) => 'Reprise impossible sans réseau : ce panier est partagé.',
+        _ => failure.message,
+      });
+    }
+    final content = taken['contenu'] as Map;
+    final raw = (content['lignes'] as List).cast<Map>();
+    final ids = await v2.localIds([for (final l in raw) ...[l['produit_uuid'] as String, if (l['conditionnement_uuid'] != null) l['conditionnement_uuid'] as String]]);
+    final lines = <CartLine>[];
+    for (final l in raw) {
+      final product = snapshot?.products.where((p) => p.id == ids[l['produit_uuid']]).firstOrNull;
+      final packaging = l['conditionnement_uuid'] == null ? null : product?.packaging(ids[l['conditionnement_uuid']]);
+      if (product == null || (l['conditionnement_uuid'] != null && packaging == null)) {
+        await client.releaseCart(uuid, '${operator.id}').then<void>((_) {}, onError: (Object _) {});
+        throw OfflineRefusal('Ce panier contient « ${l['libelle']} », indisponible sur ce terminal : reprenez-le en ligne.');
+      }
+      lines.add(CartLine(
+        product: product,
+        packaging: packaging,
+        quantity: parseMicros(l['quantite'] as String),
+        discount: l['remise'] as int,
+        fixedPrice: l['prix_unitaire'] as int,
+      ));
+    }
+    _heldCart = (uuid, operator.id);
+    return TakenCart(
+      ref: SharedCartRef(uuid, claimed: true),
+      lines: lines,
+      globalDiscount: content['remise_globale'] as int,
+      delivery: content['livraison'] as int,
+      note: content['note'] as String?,
+      customer: content['client_uuid'] == null ? null : Customer(uuid: content['client_uuid'] as String, name: content['client_nom'] as String? ?? 'Client'),
+    );
+  }
+
+  @override
+  Future<void> releaseSharedCart(Operator operator, String uuid) async {
+    if (_heldCart?.$1 == uuid) _heldCart = null;
+    await _client?.releaseCart(uuid, '${operator.id}').then<void>((_) {}, onError: (Object _) {});
+  }
+
+  @override
+  Future<void> deleteSharedCart(Operator operator, String uuid, {String reason = 'Supprimé sur le terminal'}) => serialized(() async {
+    if (_heldCart?.$1 == uuid) _heldCart = null;
+    await _record(_newUuid(), 'panier_supprimer', operator, (_) => {'panier_uuid': uuid, 'motif': reason});
+    await _afterWrite();
+  });
+
+  @override
+  bool canCloseSession(Operator operator) =>
+      saleExtrasSupported && sessionOpen && _serverOffers(CaisseV2Client.sessionCloseCapability) && hasRight(operator, 'caisse_cloturer');
+
+  /// Attendu de la session d'après les opérations du terminal, par moyen de paiement ; null si son ouverture n'y figure pas.
+  Future<Map<String, int>?> _expectedCounts() async {
+    final expected = <String, int>{};
+    final cash = (await v2.entities('moyen_paiement')).values.where((m) => m['especes'] == true).map((m) => m['code'] as String).firstOrNull ?? 'especes';
+    for (final row in await v2.operationRows()) {
+      if (row['etat'] == V2OperationState.rejected) continue;
+      final operation = row['operation'] as Map;
+      final content = operation['contenu'] as Map;
+      switch (operation['type']) {
+        case 'vente':
+          for (final p in (content['paiements'] as List).cast<Map>()) {
+            final amount = (p['montant'] as int) + (p['ecart_arrondi'] as int? ?? 0);
+            expected.update(p['moyen'] as String, (v) => v + amount, ifAbsent: () => amount);
+          }
+        case 'retour':
+          expected.update(cash, (v) => v - (content['montant'] as int), ifAbsent: () => -(content['montant'] as int));
+        case 'ouverture_session':
+          expected.update(cash, (v) => v + (content['fond'] as int), ifAbsent: () => content['fond'] as int);
+          return expected;
+        case 'cloture_session':
+          return null;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<ClosingGaps> closingGaps(int cash, List<SessionCount> others) async {
+    final expected = await _expectedCounts();
+    if (expected == null) return const ClosingGaps();
+    final cashCodes = {for (final m in snapshot?.methods ?? const <PaymentMethodInfo>[]) if (m.isCash) m.code};
+    final cashExpected = expected.entries.where((e) => cashCodes.contains(e.key)).fold<int>(0, (sum, e) => sum + e.value);
+    return ClosingGaps(cash: cash != cashExpected, methods: {for (final c in others) if (c.amount != (expected[c.method] ?? 0)) c.method});
+  }
+
+  @override
+  Future<OfflineOperation> closeSession(Operator operator, {required int cash, String? comment, List<SessionCount> others = const [], String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) return _view(existing);
+    }
+    if (!sessionOpen || _sessionUuid == null) throw const OfflineRefusal('Aucune session de caisse ouverte sur ce terminal.');
+    if (!_serverOffers(CaisseV2Client.sessionCloseCapability) || !saleExtrasSupported) throw const OfflineRefusal('Clôture non disponible sur ce terminal : clôturez en ligne.');
+    _requireRight(operator, 'caisse_cloturer', 'clôturer la session');
+    if (cash < 0 || others.any((c) => c.amount < 0)) throw const OfflineRefusal('Montant compté invalide.');
+    final remark = comment?.trim() ?? '';
+    if (remark.length > 500) throw const OfflineRefusal('Commentaire trop long (500 caractères au plus).');
+    final known = {for (final m in snapshot!.methods) if (!m.isCash) m.code};
+    for (final c in others) {
+      if (!known.contains(c.method)) throw OfflineRefusal('Moyen « ${c.method} » non compté sur ce terminal.');
+      if ((c.justification?.length ?? 0) > 500) throw const OfflineRefusal('Justification trop longue (500 caractères au plus).');
+    }
+    final gaps = await closingGaps(cash, others);
+    if (gaps.cash && remark.isEmpty) throw const OfflineRefusal('Écart constaté : indiquez un commentaire.');
+    for (final c in others) {
+      if (gaps.methods.contains(c.method) && (c.justification ?? '').trim().isEmpty) throw OfflineRefusal('Écart constaté sur « ${c.method} » : indiquez une justification.');
+    }
+    final session = _sessionUuid!;
+    final uuid = operationUuid ?? _newUuid();
+    final operation = await _record(uuid, 'cloture_session', operator, (_) => {
+      'session_uuid': session,
+      'compte': cash,
+      'comptage': others.isEmpty ? null : [for (final c in others) c.toJson()],
+      'commentaire': remark.isEmpty ? null : remark,
+    });
+    await v2.write(V2Keys.closingOperation, uuid);
+    await v2.write(V2Keys.localSession, null);
+    await _rebuild();
+    await _afterWrite();
+    return operation;
+  });
+
+  @override
+  Future<OfflineOperation?> lastClosure() async {
+    final uuid = await v2.read(V2Keys.closingOperation);
+    final row = uuid == null ? null : await v2.operation(uuid);
+    return row == null ? null : _view(row);
+  }
+
+  bool _serverOffers(String capability) => (_state?['capacites_serveur'] as List?)?.contains(capability) ?? false;
+
+  @override
+  bool get customersSupported => saleExtrasSupported && _serverOffers(CaisseV2Client.customerReadCapability);
+
+  @override
+  bool canCreateCustomer(Operator operator) =>
+      customersSupported && _serverOffers(CaisseV2Client.customerCreateCapability) && hasRight(operator, 'clients_creer');
+
+  /// Clients publiés et créations en cours ; rechargés après chaque synchronisation.
+  List<Customer>? _customers;
+
+  /// Uuid créés sur ce terminal, encore valables après une fusion : le serveur les garde en alias, sans limite.
+  Set<String> _ownCustomers = const {};
+
+  Future<List<Customer>> _loadCustomers() async {
+    if (_customers != null) return _customers!;
+    final customers = [
+      for (final e in (await v2.entities('client')).entries)
+        if (e.value['actif'] == true && e.value['type'] != 'passage') Customer(uuid: e.key, name: e.value['nom'] as String, phone: e.value['telephone'] as String?),
+    ];
+    final published = {for (final c in customers) c.uuid};
+    final own = <String>{};
+    for (final row in await v2.operationRows()) {
+      final operation = row['operation'] as Map;
+      if (operation['type'] != 'creation_client' || row['etat'] == V2OperationState.rejected) continue;
+      final content = operation['contenu'] as Map;
+      own.add(content['client_uuid'] as String);
+      // Intégrée : la fiche arrive par le journal, sous cet uuid ou sous celui de la fiche fusionnée.
+      if (row['etat'] == V2OperationState.integrated || row['etat'] == V2OperationState.resolved || published.contains(content['client_uuid'])) continue;
+      customers.add(Customer(uuid: content['client_uuid'] as String, name: content['nom'] as String, phone: content['telephone'] as String?, pending: true));
+    }
+    customers.sort((a, b) => fold(a.name).compareTo(fold(b.name)));
+    _ownCustomers = own;
+    return _customers = customers;
+  }
+
+  @override
+  Future<List<Customer>> searchCustomers(String query, {int limit = 30}) async {
+    if (!customersSupported) return const [];
+    final text = fold(query.trim());
+    final digits = query.replaceAll(RegExp(r'\D'), '');
+    final hits = (await _loadCustomers()).where(
+      (c) => text.isEmpty || fold(c.name).contains(text) || (digits.isNotEmpty && (c.phone ?? '').replaceAll(RegExp(r'\D'), '').contains(digits)),
+    );
+    return hits.take(limit).toList();
+  }
+
+  @override
+  Future<Customer> createCustomer(Operator operator, {required String name, String? phone, String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) {
+        final content = (existing['operation'] as Map)['contenu'] as Map;
+        return Customer(uuid: content['client_uuid'] as String, name: content['nom'] as String, phone: content['telephone'] as String?, pending: true);
+      }
+    }
+    _requireSelling(allowWithoutSession: true);
+    if (!customersSupported || !_serverOffers(CaisseV2Client.customerCreateCapability)) throw const OfflineRefusal('Création de client non disponible sur ce terminal.');
+    _requireRight(operator, 'clients_creer', 'créer un client');
+    final nom = name.trim();
+    if (nom.isEmpty || nom.length > 160) throw const OfflineRefusal('Indiquez le nom du client (160 caractères au plus).');
+    final entered = phone?.trim() ?? '';
+    final normalized = normalizePhone(entered);
+    if (entered.isNotEmpty && (normalized == null || entered.length > 40)) throw const OfflineRefusal('Numéro de téléphone illisible.');
+    if (normalized != null) {
+      final same = (await _loadCustomers()).where((c) => normalizePhone(c.phone) == normalized).firstOrNull;
+      if (same != null) return same;
+    }
+    final uuid = _newUuid();
+    await _record(operationUuid ?? _newUuid(), 'creation_client', operator, (_) => {
+      'client_uuid': uuid,
+      'nom': nom,
+      'telephone': entered.isEmpty ? null : entered,
+      'type': 'particulier',
+    });
+    _customers = null;
+    await _afterWrite();
+    return Customer(uuid: uuid, name: nom, phone: entered.isEmpty ? null : entered, pending: true);
+  });
 
   static const _imagesPerPass = 30;
   DateTime? _imagesPausedUntil;
@@ -475,6 +899,11 @@ class V2Engine extends CaisseEngine {
         }
         final s = _requireSelling();
         if (!extras.isEmpty && !saleExtrasSupported) throw const OfflineRefusal('Remise globale, livraison et note : disponibles avec le contrat 2.1.');
+        if (extras.customer != null) {
+          final uuid = extras.customer!.uuid;
+          final known = customersSupported && ((await _loadCustomers()).any((c) => c.uuid == uuid) || _ownCustomers.contains(uuid));
+          if (!known) throw OfflineRefusal('Le client « ${extras.customer!.name} » n’est plus disponible : choisissez-en un autre.');
+        }
         checkSale(s, lines, payments, extras);
         _requireRight(operator, 'vente', 'vendre');
         if (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) _requireRight(operator, 'remise', 'accorder une remise');
@@ -519,6 +948,7 @@ class V2Engine extends CaisseEngine {
               quantityMicros: l.quantity.toInt(),
               discount: l.discount,
               discountEntry: l.discountEntry,
+              fixedPrice: l.fixedPrice,
             ),
         ];
         final revision21 = v2.contract21;
@@ -555,6 +985,7 @@ class V2Engine extends CaisseEngine {
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
         );
+        if (extras.sharedCart == _heldCart?.$1) _heldCart = null;
         await _afterWrite();
         return operation;
       });
@@ -654,8 +1085,9 @@ class V2Engine extends CaisseEngine {
               for (final p in (content['paiements'] as List).cast<Map>()) {'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu'], 'reference': p['reference']},
             ],
             'total': (content['totaux'] as Map)['a_payer'],
+            if (content['client_nom'] != null) 'client_nom': content['client_nom'],
           }
-        : content;
+        : {...content, if (await v2.read('${V2Keys.zPrefix}${op['uuid']}') case final z?) 'z': jsonDecode(z)};
     final finalState = state == V2OperationState.integrated || state == V2OperationState.resolved;
     return OfflineOperation(
       uuid: op['uuid'] as String,
@@ -683,6 +1115,7 @@ class V2Engine extends CaisseEngine {
 
   /// Catalogue présenté, reconstruit depuis la projection (après chaque synchronisation et au chargement).
   Future<void> _rebuild() async {
+    _customers = null;
     _blocked = await v2.read(V2Keys.blocked);
     final device = await v2.read(V2Keys.device);
     _device = device == null ? const {} : {...Map<String, dynamic>.from(jsonDecode(device) as Map), 'epoque': int.tryParse(await v2.read(V2Keys.epoch) ?? '')};
@@ -697,6 +1130,11 @@ class V2Engine extends CaisseEngine {
     final barcodes = await v2.entities('code_barre');
     final stock = await v2.entities('stock.projection');
     final policies = {for (final p in (await v2.entities('politique')).values) p['cle_politique'] as String: p['valeur']};
+    _returnRules = (
+      mode: policies['retours.mode'] as String? ?? 'en_ligne',
+      max: policies['retours.max_montant'] as int? ?? 0,
+      days: policies['retours.delai_jours'] as int? ?? 0,
+    );
     final ids = await v2.localIds([...products.keys, ...packagings.keys]);
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
@@ -803,7 +1241,9 @@ class V2Engine extends CaisseEngine {
   /// pas intégrée (une fois intégrée ou résolue, le serveur fait foi, y compris pour sa clôture).
   Future<Map<String, dynamic>?> _ownSession() async {
     final server = (await v2.entities('session'))['session:${_device['terminal_uuid']}'];
-    if (server?['ouverte'] == true) return {'session_uuid': server!['session_uuid'], 'operateur_id': server['operateur_id']};
+    if (server?['ouverte'] == true && !await _closedLocally(server!['session_uuid'] as String)) {
+      return {'session_uuid': server['session_uuid'], 'operateur_id': server['operateur_id']};
+    }
     final local = await v2.read(V2Keys.localSession);
     if (local == null) return null;
     final opening = await v2.operation(local);
@@ -813,6 +1253,15 @@ class V2Engine extends CaisseEngine {
       return null;
     }
     return {'session_uuid': local, 'locale': true};
+  }
+
+  /// Clôture émise par ce terminal que le serveur n'a pas encore reflétée : la session ne se rouvre pas d'elle-même.
+  Future<bool> _closedLocally(String serverSession) async {
+    final uuid = await v2.read(V2Keys.closingOperation);
+    final row = uuid == null ? null : await v2.operation(uuid);
+    final state = row?['etat'] as String?;
+    if (state == null || state == V2OperationState.rejected || state == V2OperationState.resolved) return false;
+    return state != V2OperationState.integrated || ((row!['operation'] as Map)['contenu'] as Map)['session_uuid'] == serverSession;
   }
 
   Future<int> _unsentCount() async {

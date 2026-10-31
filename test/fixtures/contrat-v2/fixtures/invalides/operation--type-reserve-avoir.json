@@ -1,6 +1,6 @@
 {
     "uuid": "a0000000-0000-4000-8000-000000000001",
-    "type": "retour",
+    "type": "avoir",
     "appareil": {
         "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
         "epoque": 1
@@ -13,7 +13,6 @@
         "calcul": "1",
         "curseur_catalogue": "c-000105"
     },
-    "empreinte": "729c9f67d33bcaf32a736277e6daa3bdce56b0563b495962a39b67db7e290ed6",
     "contenu": {
         "numero_local": "HL-001-000042",
         "brouillon_uuid": "b0000000-0000-4000-8000-000000000001",
@@ -65,5 +64,6 @@
             }
         ],
         "autorisations": []
-    }
+    },
+    "empreinte": "1b5bf14576361301a67c188ad91a87d30cad4c46fe8bf50139ce2739db8cd5a0"
 }

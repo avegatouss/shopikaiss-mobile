@@ -675,6 +675,15 @@
                                     "minimum": 1
                                 }
                             ]
+                        },
+                        "retour_residuel": {
+                            "description": "Règle du reste d'arrondi d'un retour partiel (référentiel §3.13). Facultative : reçue avec la capacité retour.especes.",
+                            "enum": [
+                                "refuse",
+                                "last_line",
+                                "largest_share",
+                                "largest_fraction"
+                            ]
                         }
                     }
                 },
@@ -891,6 +900,48 @@
                             "$ref": "commun.json#/$defs/raison"
                         }
                     ]
+                },
+                "details": {
+                    "type": "object",
+                    "description": "Sur une creation_client intégrée (capacité client.creation) ou une cloture_session intégrée (capacité session.cloture).",
+                    "additionalProperties": false,
+                    "properties": {
+                        "client_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "z": {
+                            "type": "object",
+                            "description": "Z de la clôture intégrée.",
+                            "required": [
+                                "cloture_uuid",
+                                "compte",
+                                "theorique",
+                                "ecart",
+                                "mode"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "cloture_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "compte": {
+                                    "$ref": "commun.json#/$defs/montant"
+                                },
+                                "theorique": {
+                                    "type": "integer"
+                                },
+                                "ecart": {
+                                    "type": "integer"
+                                },
+                                "mode": {
+                                    "enum": [
+                                        "V1",
+                                        "COMPLETE"
+                                    ]
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },
@@ -914,6 +965,237 @@
                 },
                 "actif": {
                     "type": "boolean"
+                }
+            }
+        },
+        "client": {
+            "description": "Client actif de la boutique (capacité client.lecture). Aucun solde : crédit, points et avoirs restent en ligne.",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "type",
+                "tarif",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "pattern": "^\\+[1-9][0-9]{7,14}$",
+                    "description": "E.164 ; null si absent ou illisible."
+                },
+                "type": {
+                    "enum": [
+                        "particulier",
+                        "professionnel",
+                        "passage"
+                    ]
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros"
+                    ]
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "contenu_panier": {
+            "type": "object",
+            "required": [
+                "lignes",
+                "client_uuid",
+                "client_nom",
+                "remise_globale",
+                "livraison",
+                "note",
+                "tarif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "produit_uuid",
+                            "conditionnement_uuid",
+                            "libelle",
+                            "quantite",
+                            "coefficient",
+                            "prix_unitaire",
+                            "remise"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "produit_uuid": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            },
+                            "conditionnement_uuid": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "commun.json#/$defs/uuid"
+                                    }
+                                ]
+                            },
+                            "libelle": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 400
+                            },
+                            "quantite": {
+                                "type": "string"
+                            },
+                            "coefficient": {
+                                "type": "string"
+                            },
+                            "prix_unitaire": {
+                                "$ref": "commun.json#/$defs/montant",
+                                "description": "Prix figé à la suspension."
+                            },
+                            "remise": {
+                                "$ref": "commun.json#/$defs/montant"
+                            }
+                        }
+                    }
+                },
+                "client_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "client_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 255
+                },
+                "remise_globale": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "livraison": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 2000
+                },
+                "tarif": {
+                    "enum": [
+                        "detail",
+                        "gros"
+                    ]
+                }
+            }
+        },
+        "panier": {
+            "description": "Panier partagé en attente ou repris, de moins de 30 jours (capacité panier.partage). Vendu ou supprimé : suppression au journal.",
+            "type": "object",
+            "required": [
+                "etat",
+                "libelle",
+                "auteur_operateur_id",
+                "terminal_origine_uuid",
+                "terminaux",
+                "repris_par",
+                "contenu",
+                "cree_le",
+                "modifie_le"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "etat": {
+                    "enum": [
+                        "en_attente",
+                        "repris"
+                    ]
+                },
+                "libelle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 150
+                },
+                "auteur_operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "terminal_origine_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "terminaux": {
+                    "description": "Terminaux de son point de vente : les seuls à pouvoir le lister et le reprendre.",
+                    "type": "array",
+                    "maxItems": 500,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "repris_par": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "terminal_uuid",
+                                "operateur_id",
+                                "le"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "terminal_uuid": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/uuid"
+                                        }
+                                    ]
+                                },
+                                "operateur_id": {
+                                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                                },
+                                "le": {
+                                    "$ref": "commun.json#/$defs/horodatage"
+                                }
+                            }
+                        }
+                    ]
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_panier"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "modifie_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
                 }
             }
         }

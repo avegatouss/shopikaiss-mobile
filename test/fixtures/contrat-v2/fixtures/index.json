@@ -93,7 +93,7 @@
             "erreur_attendue": "format invalide"
         },
         {
-            "fichier": "invalides/operation--type-reserve-retour.json",
+            "fichier": "invalides/operation--type-reserve-avoir.json",
             "schema": "operation.json",
             "valide": false,
             "erreur_attendue": "exactement une variante"
@@ -270,6 +270,37 @@
         {
             "fichier": "valides/operations-reponse-etats--inconnue.json",
             "schema": "operations.json#/$defs/reponse_etats",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--creation-client.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--client.json",
+            "schema": "donnees-2.1.json#/$defs/client",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--client-avec-solde.json",
+            "schema": "donnees-2.1.json#/$defs/client",
+            "valide": false,
+            "erreur_attendue": "solde"
+        },
+        {
+            "fichier": "valides/operation--cloture-session.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--panier-suspendre.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--retour.json",
+            "schema": "operation.json",
             "valide": true
         }
     ]

@@ -34,6 +34,9 @@ class FakeV2Server implements V2Transport {
   /// Réponse perdue APRÈS traitement (le serveur a COMMIT, le client ne le sait pas).
   bool loseNextOperationsResponse = false;
   String Function(Map<String, dynamic> op)? verdict;
+
+  /// `details` du résultat d'une opération intégrée.
+  Map<String, dynamic>? Function(Map<String, dynamic> op)? resultDetails;
   bool corruptPage = false;
   int? failStatus;
   String failCode = 'indisponible';
@@ -135,6 +138,20 @@ class FakeV2Server implements V2Transport {
       return status == 0 ? const V2Response(0, null) : _error(status, failCode, status == 429 ? 3 : null);
     }
     final uri = Uri.parse('http://x$path');
+    if (method == 'POST' && uri.path.startsWith('/paniers/')) {
+      _requireBody(payload, 'paniers.json#/\$defs/demande');
+      final uuid = uri.pathSegments[1];
+      if (uri.pathSegments[2] == 'liberation') {
+        released.add(uuid);
+        return const V2Response(204, null);
+      }
+      if (takenElsewhere.contains(uuid)) return _error(409, 'panier_deja_repris');
+      final cart = entities['panier|$uuid'];
+      if (cart == null) return _error(404, 'requete_invalide');
+      taken.add(uuid);
+      final data = cart['donnees'] as Map;
+      return _ok({'panier_uuid': uuid, 'libelle': data['libelle'], 'expire_le': '2026-10-29T08:30:00Z', 'contenu': data['contenu']}, 'paniers.json#/\$defs/reprise');
+    }
     switch ((method, uri.path)) {
       case ('POST', '/appairage'):
         _requireBody(payload, 'appairage.json#/\$defs/demande');
@@ -166,6 +183,7 @@ class FakeV2Server implements V2Transport {
         _requireBody(payload, 'instantanes.json#/\$defs/demande');
         final all = entities.values.where((e) => e['action'] == 'upsert').map((e) => {...e}..remove('operations_couvertes')).toList();
         _snapshot = all;
+        snapshotReasons.add((payload as Map)['raison'] as String);
         final integrated = [for (final e in received.entries) if (e.value['etat'] == 'integree') e.key];
         return _ok({
           'uuid': '99999999-9999-4999-8999-999999999999',
@@ -213,6 +231,10 @@ class FakeV2Server implements V2Transport {
   }
 
   List<Map<String, dynamic>>? _snapshot;
+  final snapshotReasons = <String>[];
+  final taken = <String>[];
+  final released = <String>[];
+  final takenElsewhere = <String>{};
   Map<String, dynamic>? lastAck;
 
   Map<String, dynamic> _result(String uuid) {
@@ -227,6 +249,10 @@ class FakeV2Server implements V2Transport {
       'vente': integrated && r['operation']['type'] == 'vente' ? {'uuid': uuid, 'numero': r['numero']} : null,
       'mouvements': integrated && r['operation']['type'] == 'vente' ? [for (final m in r['operation']['contenu']['mouvements'] as List) m['mouvement_uuid']] : [],
       'couverture': {'curseur': integrated ? _cursor(sequence) : null},
+      if (integrated) ...?switch (resultDetails?.call(Map<String, dynamic>.from(r['operation'] as Map))) {
+        final details? => {'details': details},
+        _ => null,
+      },
     };
   }
 

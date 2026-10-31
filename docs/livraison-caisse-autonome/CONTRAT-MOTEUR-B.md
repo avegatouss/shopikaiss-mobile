@@ -195,3 +195,38 @@ Au-delà du seuil du rôle du caissier, la saisie reste possible jusqu'au plafon
 - Échecs comptés par responsable, gardés sur le terminal : 3 essais, puis 30 s doublées à chaque échec, 15 min au plus.
 - La vente porte `autorisations[]` (`type: remise`, `approbateur_id`, `motif`, `preuve: code_local|<horodatage>`) seulement si le seuil du caissier est dépassé.
 - Ne couvre pas `survente` ni `prix_manuel`.
+
+## Clients (2.1, lot 2)
+
+Capacités `client.lecture` et `client.creation` annoncées avec `contrat.2_1`. La première obtention de `client.lecture` déclenche un seul instantané (`reparation`). Le client de passage n'est pas proposé ; aucune fonction de solde.
+
+- Adaptateur : `searchCustomers` {query}, `createCustomer` {name, phone}, `setCustomer` {uuid, name}. Vue : `customer`. Capacités : `customer`, `customer_create`. Erreur : `client_refuse`.
+- `createCustomer` rend la fiche existante si le téléphone normalisé est déjà connu, refuse un numéro illisible, exige le droit `clients_creer`.
+- La création précède toujours la vente dans la file. Une fois intégrée, le client créé disparaît de la liste locale au profit de la fiche du journal ; son uuid reste accepté dans les paniers conservés. `details.client_uuid_canonique` n'est pas utilisé.
+
+## Clôture de session (2.1, lot 3)
+
+Capacité `session.cloture`, droit `caisse_cloturer`, comptage à l'aveugle : l'attendu n'est ni affiché ni exposé par l'adaptateur.
+
+- Adaptateur : `closeSession` {cash, comment, counts: [{method, amount, justification}]}, panier vide. Capacité `close_session`. Erreurs `panier_en_cours`, `cloture_refusee`. `status.last_closure` est à brancher par C si l'écran en a besoin (`engine.lastClosure()`).
+- Le terminal calcule un attendu si l'ouverture de la session est dans sa file (fond + encaissements, arrondi compris). Un écart exige alors un commentaire ou une justification. Session ouverte en ligne : attendu inconnu, commentaire facultatif, risque d'arbitrage côté serveur.
+- La session se ferme aussitôt sur le terminal. Une ouverture est refusée tant que la clôture précédente est `a_arbitrer`. Rejet protocole : la session du serveur reprend.
+- Le Z (`details.z`) est conservé et visible dans le journal des opérations. Pas d'impression du Z.
+
+## Paniers partagés (2.1, lot 4)
+
+Capacité `panier.partage`, instantané unique à la première obtention. Un panier mis en attente par un caissier identifié est publié (`panier_suspendre`) et reste aussi sur le terminal.
+
+- Adaptateur : `suspendDraft` {label}, `drafts` donne `shared`, `resumeShared` {shared_id}, `deleteShared` {shared_id}. Capacité `shared_carts`. Erreur `panier_refuse`.
+- Reprise d'un panier publié : réseau requis, renouvelée à chaque synchronisation, libérée si le panier est vidé. Prix figés conservés (`prix_fige`) et repris dans la vente avec `panier_uuid`.
+- Suspendre de nouveau : nouvel uuid. Repris : `remplace_uuid`. Non repris : `panier_supprimer` d'abord.
+- Un panier local intégré puis absent du journal (vendu ou supprimé ailleurs) quitte la liste. `remise_saisie` en % n'est pas conservée après reprise.
+
+## Retours limités (2.1, lot 5)
+
+Fermés par défaut : capacité `retour.especes`, `retours.mode` = `especes`, fonction `retour` absente de `fonctions_restreintes`, droits `retour_creer` et `retour_rembourser_especes`, session ouverte. Ventes de ce terminal seulement, dans `retours.delai_jours`, jusqu'à `retours.max_montant`.
+
+- Adaptateur : `returnableSale` {sale_id}, `previewReturn` {sale_id, lines: [{line_id, quantity}]}, `commitReturn` {sale_id, lines, reason}. Capacité `returns`. Erreur `retour_refuse`. Quantités en unité de base.
+- Montant selon §3.13 : part = arrondi(net × total_ligne / brut), demi vers le haut ; rendu = arrondi(part × (avant + q) / Q) − arrondi(part × avant / Q).
+- Parts inexactes : règle `boutique.regles.retour_residuel` (`refuse`, `last_line`, `largest_share`, `largest_fraction`), appliquée comme `ReturnService`. Clé absente ou cas non chiffrable : le terminal refuse et renvoie en ligne. Si la règle change entre deux retours d'une vente, le serveur garde la première : `a_arbitrer`.
+- Limites : un retour fait en ligne sur la même vente n'est pas vu du terminal (écart `a_arbitrer`) ; produit à lots non détecté (`a_arbitrer`) ; aucun bon de retour imprimé ; tiroir ouvert si une imprimante est branchée.

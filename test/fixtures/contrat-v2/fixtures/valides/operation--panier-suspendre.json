@@ -1,0 +1,37 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000006",
+    "type": "panier_suspendre",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 44,
+    "cree_le": "2026-10-29T08:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "panier_uuid": "b1000000-0000-4000-8000-000000000001",
+        "libelle": "Commande de Mme Diallo",
+        "remplace_uuid": null,
+        "contenu": {
+            "lignes": [
+                {
+                    "produit_uuid": "11111111-1111-4111-8111-111111111111",
+                    "conditionnement_uuid": null,
+                    "quantite": "2.000000",
+                    "remise": 0
+                }
+            ],
+            "client_uuid": null,
+            "remise_globale": 0,
+            "livraison": 0,
+            "note": null,
+            "tarif": "detail"
+        }
+    },
+    "empreinte": "264e0e1b0932ca896960bd5454f535e654193000e5c0900caa13f1d5cd37acd3"
+}
