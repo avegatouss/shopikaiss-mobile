@@ -31,6 +31,11 @@ class WindowsRegisterController extends ChangeNotifier {
     );
   }
   final WindowsHost host;
+
+  /// Ticket d'une vente enregistrée, selon le réglage du poste ; rend le message à afficher.
+  Future<String> Function(String operation)? saleTicket;
+  String? ticketMessage;
+  String? _ticketOperation;
   final SaleIntentJournal? journal;
   Future<void>? _recovery;
   bool _journalBlocked = false;
@@ -202,6 +207,20 @@ class WindowsRegisterController extends ChangeNotifier {
     return null;
   }
 
+  /// Appelé une fois la fenêtre de paiement fermée : une imprimante lente ou absente ne touche pas la vente.
+  Future<void> printPendingTicket() async {
+    final print = saleTicket;
+    final operation = _ticketOperation;
+    _ticketOperation = null;
+    if (print == null || operation == null) return;
+    try {
+      ticketMessage = await print(operation);
+    } catch (_) {
+      ticketMessage = 'Impression à vérifier. La vente est conservée : réimprimez depuis Ventes récentes.';
+    }
+    if (!_disposed) notifyListeners();
+  }
+
   Future<void> commitSale({Map<String, dynamic>? approval}) async {
     if (!canPay) return;
     final operation = _checkoutId ??= const Uuid().v4();
@@ -238,8 +257,10 @@ class WindowsRegisterController extends ChangeNotifier {
       }
       await _resolveIntent(operation);
       receipt = result['number'] as String?;
+      ticketMessage = null;
       _checkoutId = null;
       await refresh();
+      _ticketOperation = operation;
     } on HostFailure catch (error) {
       message = error.message;
       if (error.outcomeUnknown) {

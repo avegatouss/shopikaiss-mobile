@@ -24,6 +24,9 @@ class ScreenSettings {
   String imageLayout = 'left';
   String imageFit = 'contain';
   String backOffice = '';
+
+  /// Ticket après une vente : `ask` (demandé au caissier) ou `auto`.
+  String ticketMode = 'ask';
   Uri? get backOfficeUri {
     final uri = Uri.tryParse(backOffice.trim());
     return uri != null &&
@@ -61,6 +64,7 @@ class ScreenSettings {
       if (['contain', 'cover'].contains(data['image_fit'])) {
         result.imageFit = data['image_fit'] as String;
       }
+      if (data['ticket_mode'] == 'auto') result.ticketMode = 'auto';
       result.compact = data['compact'] == true;
       result.tileWidth = (data['tile_width'] as num).toDouble().clamp(150, 330);
       result.cataloguePercent = (data['catalogue_percent'] as num)
@@ -85,6 +89,7 @@ class ScreenSettings {
         'image_layout': imageLayout,
         'image_fit': imageFit,
         'back_office': backOffice,
+        'ticket_mode': ticketMode,
       }),
       flush: true,
     );
@@ -148,6 +153,18 @@ class ScreenSettingsPanel extends StatelessWidget {
             const Text(
               'Adresse HTTPS valide requise, sans paramètres ni identifiants.',
             ),
+          DropdownButtonFormField<String>(
+            initialValue: settings.ticketMode,
+            decoration: const InputDecoration(labelText: 'Ticket après une vente'),
+            items: const [
+              DropdownMenuItem(value: 'ask', child: Text('Demander avant d’imprimer')),
+              DropdownMenuItem(value: 'auto', child: Text('Impression automatique')),
+            ],
+            onChanged: (value) {
+              settings.ticketMode = value ?? 'ask';
+              onChanged();
+            },
+          ),
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.print_outlined),

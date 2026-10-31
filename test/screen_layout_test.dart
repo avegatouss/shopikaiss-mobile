@@ -411,6 +411,18 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
+    testWidgets('icône % de la ligne : ouvre la remise, pas la quantité', (tester) async {
+      final session = await _session(inches: 8.0, approver: true);
+      await _pump(tester, const Size(800, 1280), session);
+      await tester.tap(find.textContaining('Article numéro 1 ').first);
+      await tester.pump();
+      await tester.tap(find.byTooltip('Remise de ligne'));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(TextField, 'Pourcentage'), findsOneWidget);
+      expect(find.widgetWithText(TextField, 'Quantité'), findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('clôture à l’aveugle sur petit téléphone : refus affiché, aucun attendu, aucun débordement', (tester) async {
       final session = await _session(inches: 4.0, approver: true);
       await _pump(tester, const Size(320, 568), session);

@@ -1536,7 +1536,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final amounts = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(tooltip: 'Remise de ligne', visualDensity: VisualDensity.compact, icon: const Icon(Icons.percent, size: 18), onPressed: () => _editLine(snapshot, line)),
+        IconButton(tooltip: 'Remise de ligne', visualDensity: VisualDensity.compact, icon: const Icon(Icons.percent, size: 18), onPressed: () => _editDiscount(line, line.quantity)),
         Text(formatFcfa(line.total), style: const TextStyle(fontWeight: FontWeight.bold)),
         IconButton(
           tooltip: 'Retirer du panier',
@@ -1672,6 +1672,25 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     );
   }
 
+  /// Remise de la ligne pour la quantité [quantity] : directe depuis l'icône %, ou depuis la fenêtre de la ligne.
+  Future<void> _editDiscount(CartLine line, BigInt quantity) async {
+    final refusal = _discountRefusal;
+    if (refusal != null) return _toast(refusal);
+    final base = lineBase(line.unitPrice, quantity);
+    final others = _cart.where((l) => l != line).fold<int>(0, (sum, l) => sum + l.discount);
+    final result = await _askDiscount(
+      line.label,
+      line.discountEntry,
+      (entry) => _checkDiscount(entry, base, _engine.enterableLineDiscount(_operator!, base), others, label: line.label),
+    );
+    if (result == null) return;
+    final entry = result.$1;
+    final amount = entry == null
+        ? 0
+        : enteredDiscount(type: entry.type, value: entry.value, base: base, rounding: _engine.percentRounding, label: line.label);
+    setState(() => (line.discountEntry = entry, line.discount = amount));
+  }
+
   Future<void> _editLine(Snapshot snapshot, CartLine line) async {
     final quantity = TextEditingController(text: formatMicros(line.quantity));
     final refusal = _discountRefusal;
@@ -1699,19 +1718,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     onPressed: () async {
                       final q = parseMicros(quantity.text);
                       if (q == null || q <= BigInt.zero) return setLocal(() => error = 'Quantité invalide (six décimales au plus).');
-                      final base = lineBase(line.unitPrice, q);
-                      final others = _cart.where((l) => l != line).fold<int>(0, (sum, l) => sum + l.discount);
-                      final result = await _askDiscount(
-                        line.label,
-                        line.discountEntry,
-                        (entry) => _checkDiscount(entry, base, _engine.enterableLineDiscount(_operator!, base), others, label: line.label),
-                      );
-                      if (result == null) return;
-                      final entry = result.$1;
-                      final amount = entry == null
-                          ? 0
-                          : enteredDiscount(type: entry.type, value: entry.value, base: base, rounding: _engine.percentRounding, label: line.label);
-                      setState(() => (line.discountEntry = entry, line.discount = amount));
+                      await _editDiscount(line, q);
                       setLocal(() {});
                     },
                   ),
@@ -1809,22 +1816,34 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       _draftUuid = const Uuid().v4();
     });
     unawaited(_refreshSold());
-    await _print(snapshot, operation, lines, payments);
+    // Le tiroir s'ouvre pour les espèces, que le ticket soit imprimé ou non.
+    final session = widget.session;
+    if (session.hasPrinter && payments.any((p) => p.method.isCash)) unawaited(session.channel.openDrawer());
+    var printed = _look.ticketMode == 'auto';
+    if (printed) await _print(snapshot, operation, lines, payments);
     final change = payments.fold<int>(0, (sum, p) => sum + p.change);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        icon: Icon(Icons.check_circle, color: _brand, size: 48),
-        title: Text('Vente ${operation.number}'),
-        content: Text(
-          change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : 'Vente enregistrée sur le terminal.',
-          style: const TextStyle(fontSize: 20),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          icon: Icon(Icons.check_circle, color: _brand, size: 48),
+          title: Text('Vente ${operation.number}'),
+          content: Text(
+            change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : 'Vente enregistrée sur le terminal.',
+            style: const TextStyle(fontSize: 20),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () async {
+                await _print(snapshot, operation, lines, payments, duplicate: printed);
+                setDialog(() => printed = true);
+              },
+              child: Text(printed ? 'Réimprimer' : 'Imprimer le ticket'),
+            ),
+            FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Vente suivante')),
+          ],
         ),
-        actions: [
-          TextButton(onPressed: () => _print(snapshot, operation, lines, payments, duplicate: true), child: const Text('Réimprimer')),
-          FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Vente suivante')),
-        ],
       ),
     );
     _searchFocus.requestFocus();
@@ -1955,7 +1974,6 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     );
     if (session.hasPrinter) {
       final result = await session.channel.printRaw(offlineTicketBytes(text));
-      if (payments.any((p) => p.method.isCash) && !duplicate) await session.channel.openDrawer();
       if (!result.ok) _toast('Ticket non imprimé (${result.error}) : la vente est bien enregistrée.');
       return;
     }

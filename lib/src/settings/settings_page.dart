@@ -47,6 +47,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late int _cartWidth = _settings.cartWidth;
   late String _imageMode = _settings.imageMode;
   late String _imageFit = _settings.imageFit;
+  late String _ticketMode = _settings.ticketMode;
 
   List<Map<String, dynamic>> _btDevices = const [];
   List<Map<String, dynamic>> _serialPorts = const [];
@@ -115,6 +116,16 @@ class _SettingsPageState extends State<SettingsPage> {
               _Info('Pilote actif', driverLabels[_session.activeDriver] ?? _session.activeDriver),
             ]),
             _Section(title: 'Imprimante', children: [
+              DropdownButtonFormField<String>(
+                initialValue: _ticketMode,
+                decoration: const InputDecoration(labelText: 'Ticket après une vente', prefixIcon: Icon(Icons.receipt_long)),
+                items: const [
+                  DropdownMenuItem(value: 'ask', child: Text('Demander avant d’imprimer')),
+                  DropdownMenuItem(value: 'auto', child: Text('Impression automatique')),
+                ],
+                onChanged: (v) => setState(() => _ticketMode = v ?? 'ask'),
+              ),
+              const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 initialValue: _driver,
                 decoration: const InputDecoration(labelText: 'Pilote', prefixIcon: Icon(Icons.print)),
@@ -391,6 +402,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ..cartWidth = _cartWidth
       ..imageMode = _imageMode
       ..imageFit = _imageFit
+      ..ticketMode = _ticketMode
       ..customerDisplayUrl = displayUrl
       ..adminCode = _code.text.trim();
     if (persist) {

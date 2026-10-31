@@ -380,9 +380,28 @@ class _RegisterState extends State<_Register> {
     ),
   );
   WindowsRegisterController get c => widget.controller;
+  /// Ticket après une vente : demandé au caissier, ou imprimé d'office selon le réglage du poste.
+  Future<String> _saleTicket(String operation) async {
+    if (_screen.ticketMode != 'auto') {
+      final print = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Imprimer le ticket ?'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Non')),
+            FilledButton(autofocus: true, onPressed: () => Navigator.pop(context, true), child: const Text('Imprimer')),
+          ],
+        ),
+      );
+      if (print != true) return 'Ticket disponible dans Ventes récentes.';
+    }
+    return printOriginalTicket(c.host, operation);
+  }
+
   @override
   void initState() {
     super.initState();
+    c.saleTicket = _saleTicket;
     _display = CustomerDisplayService(c);
     unawaited(_display.start());
     c.refresh();
@@ -888,7 +907,7 @@ class _RegisterState extends State<_Register> {
               if (c.receipt != null)
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text('Vente enregistrée · ${c.receipt}'),
+                  child: Text('Vente enregistrée · ${c.receipt}${c.ticketMessage == null ? '' : ' · ${c.ticketMessage}'}'),
                 ),
               Expanded(
                 child: LayoutBuilder(
@@ -1689,6 +1708,7 @@ class _PaymentState extends State<_Payment> {
                       c.receipt != null &&
                       c.uncertainOperation == null) {
                     Navigator.of(context).pop();
+                    unawaited(c.printPendingTicket());
                   }
                 }
               : null,

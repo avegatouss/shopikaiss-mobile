@@ -3,6 +3,17 @@ import 'package:flutter/material.dart';
 import '../ipc/protocol.dart';
 import '../platform/receipt_printing.dart';
 
+/// Ticket original d'une vente enregistrée ; rend le message à afficher. Vérifie l'imprimante avant de demander l'original
+/// au moteur, qui en consigne l'émission : une imprimante absente laisse l'original disponible dans l'historique.
+Future<String> printOriginalTicket(WindowsHost host, String operation) async {
+  final unavailable = await ReceiptPrinting.unavailableReason();
+  if (unavailable != null) return unavailable;
+  final result = await host.call(HostCommand.printTicket, operationId: operation, arguments: {'operation_id': operation});
+  final lines = result['lines'];
+  if (result['operation_id'] != operation || lines is! List || lines.any((v) => v is! String)) throw const FormatException();
+  return ReceiptPrinting.printLines(lines.cast<String>());
+}
+
 /// Read-only access to persisted sales; never retries or submits a payment.
 class SalesHistoryDialog extends StatefulWidget {
   const SalesHistoryDialog({super.key, required this.host});
@@ -24,23 +35,7 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
       _error = null;
     });
     try {
-      final unavailable = await ReceiptPrinting.unavailableReason();
-      if (unavailable != null) {
-        if (mounted) _error = unavailable;
-        return;
-      }
-      final result = await widget.host.call(
-        HostCommand.printTicket,
-        operationId: operation,
-        arguments: {'operation_id': operation},
-      );
-      final lines = result['lines'];
-      if (result['operation_id'] != operation ||
-          lines is! List ||
-          lines.any((v) => v is! String)) {
-        throw const FormatException();
-      }
-      final message = await ReceiptPrinting.printLines(lines.cast<String>());
+      final message = await printOriginalTicket(widget.host, operation);
       if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(message)));

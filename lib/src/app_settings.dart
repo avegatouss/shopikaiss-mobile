@@ -24,7 +24,11 @@ class AppSettings {
     this.cartWidth = 380,
     this.imageMode = 'top',
     this.imageFit = 'cover',
+    this.ticketMode = 'ask',
   });
+
+  /// Ticket après une vente : `ask` (demandé au caissier) ou `auto`.
+  String ticketMode;
 
   /// Couleurs de la caisse Windows : vert, bleu, prune, terre cuite.
   static const defaultBrandColor = 0xFF164E42;
@@ -126,6 +130,7 @@ class AppSettings {
       cartWidth: p.getInt('cartWidth') ?? 380,
       imageMode: p.getString('imageMode') ?? 'top',
       imageFit: p.getString('imageFit') ?? 'cover',
+      ticketMode: p.getString('ticketMode') ?? 'ask',
     );
   }
 
@@ -150,6 +155,7 @@ class AppSettings {
     await p.setInt('cartWidth', cartWidth);
     await p.setString('imageMode', imageMode);
     await p.setString('imageFit', imageFit);
+    await p.setString('ticketMode', ticketMode);
   }
 }
 

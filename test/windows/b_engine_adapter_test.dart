@@ -162,6 +162,27 @@ void main() {
     expect((await host.call(HostCommand.view))['lines'], isEmpty);
   });
 
+  test('ticket imprimé une fois après la vente ; une panne d’impression ne touche pas la vente', () async {
+    await prepare();
+    final controller = WindowsRegisterController(host);
+    addTearDown(controller.dispose);
+    await controller.refresh();
+    final printed = <String>[];
+    controller.saleTicket = (operation) async {
+      printed.add(operation);
+      throw StateError('imprimante débranchée');
+    };
+    await controller.commitSale();
+    expect(printed, isEmpty, reason: 'jamais pendant l’encaissement');
+    await controller.printPendingTicket();
+    await controller.printPendingTicket();
+    expect(printed, hasLength(1));
+    expect(controller.receipt, isNotEmpty);
+    expect(controller.uncertainOperation, isNull);
+    expect(controller.ticketMessage, contains('Impression à vérifier'));
+    expect(await store.operations(), hasLength(1));
+  });
+
   test(
     'lost commit reply, restart, local lookup and replay produce one sale',
     () async {
