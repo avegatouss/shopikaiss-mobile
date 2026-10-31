@@ -18,7 +18,7 @@ import 'package:uuid/uuid.dart';
 ///     flutter test test/integration/essai_parite_test.dart
 ///
 /// Phases : `parcours` (client créé, vente citée, panier partagé publié, repris et supprimé, retour si la boutique les
-/// ouvre) ; `paniers` (reprend et supprime les paniers Essai B) ; `cloture` (comptage à l'aveugle de SK_ESPECES francs, ferme la session du terminal).
+/// ouvre) ; `retour` (SK_VENTE) ; `fusion` (SK_TELEPHONE, déjà saisi côté web) ; `paniers` (reprend et supprime les paniers Essai B) ; `cloture` (comptage à l'aveugle de SK_ESPECES francs, ferme la session du terminal).
 void main() {
   final env = Platform.environment;
   final origin = env['SK_ORIGINE'] ?? 'https://demo.khoga.ci';
@@ -57,8 +57,11 @@ void main() {
       note('synchro $label : envoyées ${r.sent}, intégrées ${r.integrated}, à arbitrer ${r.pending}, refusées ${r.refused} ${r.message ?? ''}');
     }
 
-    await sync('initiale');
-    expect(engine.blockReason, isNull, reason: engine.blockReason);
+    // Fusion : le terminal ne doit pas lire la fiche créée sur le web avant d'envoyer la sienne.
+    if (phase != 'fusion') {
+      await sync('initiale');
+      expect(engine.blockReason, isNull, reason: engine.blockReason);
+    }
     final status = await run('status');
     final capabilities = status['capabilities'] as Map;
     note('capacités : ${[for (final k in ['customer', 'customer_create', 'shared_carts', 'returns', 'close_session', 'image_schedule']) '$k=${(capabilities[k] as Map)['allowed']}'].join(' ')}');
@@ -123,6 +126,39 @@ void main() {
         note('retour : $done');
         await sync('après retour');
       }
+    }
+
+    if (phase == 'retour') {
+      final saleId = env['SK_VENTE']!;
+      final closure = await engine.lastClosure();
+      note('dernière clôture : ${closure?.serverStatus} · ${closure?.message ?? ''} · ${closure?.content['z'] ?? closure?.content.keys.toList()}');
+      if (!engine.sessionOpen) {
+        await step('ouverture de session', 'openSession', {'float': 10000});
+        await sync('après ouverture');
+      }
+      final preview = await step('vente retournable', 'returnableSale', {'sale_id': saleId});
+      note('lignes : ${preview?['lines']}');
+      if (preview != null) {
+        final line = (preview['lines'] as List).first as Map;
+        final lines = [{'line_id': line['line_id'], 'quantity': '1'}];
+        note('aperçu : ${await step('aperçu du retour', 'previewReturn', {'sale_id': saleId, 'lines': lines})}');
+        final done = await step('retour', 'commitReturn', {'sale_id': saleId, 'lines': lines, 'reason': 'Essai B retour'}, const Uuid().v4());
+        note('retour : $done');
+        await sync('après retour');
+      }
+      for (final o in (await engine.history()).reversed.take(3)) {
+        note('${o.number} ${o.type} → ${o.serverStatus} ${o.serverNumber ?? ''} ${o.message ?? ''}');
+      }
+    }
+
+    if (phase == 'fusion') {
+      final phone = env['SK_TELEPHONE']!;
+      final created = await step('création client', 'createCustomer', {'name': 'Essai B fusion', 'phone': phone}, const Uuid().v4());
+      note('client local : ${created?['customer'] ?? created}');
+      await sync('envoi');
+      await Future<void>.delayed(const Duration(seconds: 7));
+      await sync('journal');
+      note('clients trouvés : ${[for (final c in await engine.searchCustomers(phone)) '${c.uuid} ${c.name} attente=${c.pending}'].join(', ')}');
     }
 
     if (phase == 'paniers') {
