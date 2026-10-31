@@ -178,6 +178,28 @@ abstract class CaisseEngine extends EngineNotifier {
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
+  /// Paniers partagés avec le web et les autres terminaux (contrat 2.1, capacité `panier.partage`).
+  bool get sharedCartsSupported => false;
+
+  /// Paniers publiés visibles depuis ce terminal, le plus récent d'abord.
+  Future<List<SharedCart>> sharedCarts() async => const [];
+
+  /// Publie le panier : toujours un nouvel uuid, un panier publié est immuable. Rend sa référence.
+  Future<SharedCartRef> suspendShared(Operator operator, List<CartLine> lines, SaleExtras extras, {SharedCartRef? previous, String? label}) =>
+      throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+
+  /// Reprise exclusive, réseau requis ; renouvelée à chaque synchronisation tant que le panier est tenu.
+  Future<TakenCart> takeSharedCart(Operator operator, String uuid) => throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+
+  /// Rend le panier repris aux autres caisses ; sans réseau, la reprise expire d'elle-même.
+  Future<void> releaseSharedCart(Operator operator, String uuid) async {}
+
+  /// Retire le panier pour tous.
+  Future<void> deleteSharedCart(Operator operator, String uuid, {String reason = 'Supprimé sur le terminal'}) async {}
+
+  /// `publie`, `local` (pas encore publié, reprenable hors ligne) ou `disparu` (vendu ou supprimé ailleurs).
+  Future<String> sharedCartState(String uuid) async => 'local';
+
   /// [operator] peut-il clôturer la session ouverte (capacité `session.cloture`, droit `caisse_cloturer`) ?
   bool canCloseSession(Operator operator) => false;
 

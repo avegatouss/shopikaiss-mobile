@@ -292,6 +292,11 @@
             "fichier": "valides/operation--cloture-session.json",
             "schema": "operation.json",
             "valide": true
+        },
+        {
+            "fichier": "valides/operation--panier-suspendre.json",
+            "schema": "operation.json",
+            "valide": true
         }
     ]
 }

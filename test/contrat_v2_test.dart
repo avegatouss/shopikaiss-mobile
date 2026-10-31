@@ -37,7 +37,7 @@ void main() {
 
   group('Schémas SK-SCHEMA-1 : fixtures valides et invalides', () {
     final fixtures = (json('fixtures/index.json')! as Map)['fixtures'] as List;
-    test('54 fixtures présentes (révision 2.1, lot 3)', () => expect(fixtures, hasLength(54)));
+    test('55 fixtures présentes (révision 2.1, lot 4)', () => expect(fixtures, hasLength(55)));
     for (final raw in fixtures) {
       final fixture = raw as Map;
       test('${fixture['fichier']}', () {

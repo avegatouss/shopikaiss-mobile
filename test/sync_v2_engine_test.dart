@@ -679,6 +679,60 @@ void main() {
     server.verdict = (op) => op['type'] == 'cloture_session' ? 'a_arbitrer' : 'integree';
     await e.sync();
     await expectLater(e.openSession(0, closer), refused('arbitrage'));
+    server.verdict = null;
+
+    // Lot 4 : paniers partagés. Première obtention : un instantané ; seul le panier de ce point de vente est listé.
+    const webCart = 'ca000000-0000-4000-8000-000000000001';
+    const otherShopCart = 'ca000000-0000-4000-8000-000000000002';
+    Map<String, dynamic> panier(List<String> terminaux, {int prix = 450}) => {
+      'etat': 'en_attente', 'libelle': 'Table 4', 'auteur_operateur_id': '7', 'terminal_origine_uuid': fakeTerminal, 'terminaux': terminaux, 'repris_par': null,
+      'contenu': {
+        'lignes': [
+          {'produit_uuid': fakeSavon, 'conditionnement_uuid': null, 'libelle': 'Savon', 'quantite': '2.000000', 'coefficient': '1.000000', 'prix_unitaire': prix, 'remise': 0},
+        ],
+        'client_uuid': null, 'client_nom': null, 'remise_globale': 0, 'livraison': 0, 'note': 'À livrer', 'tarif': 'detail',
+      },
+      'cree_le': '2026-10-29T07:00:00Z', 'modifie_le': '2026-10-29T07:00:00Z',
+    };
+    final before4 = server.snapshotReasons.length;
+    server
+      ..capabilities = [...server.capabilities, 'panier.partage']
+      ..put('panier', webCart, panier([fakeTerminal]))
+      ..put('panier', otherShopCart, panier(['0d000000-0000-4000-8000-0000000000ff']));
+    await e.sync();
+    await e.sync();
+    expect(e.blockReason, isNull);
+    expect(server.snapshotReasons.skip(before4), ['reparation']);
+    expect((await e.sharedCarts()).map((c) => c.uuid), [webCart]);
+
+    // Reprise : prix figé du panier, conservé dans la vente, panier consommé.
+    server.takenElsewhere.add(webCart);
+    await expectLater(e.takeSharedCart(closer, webCart), refused('déjà repris'));
+    server.takenElsewhere.clear();
+    final held = await e.takeSharedCart(closer, webCart);
+    expect([held.ref.claimed, held.lines.single.unitPrice, held.lines.single.quantity, held.note], [isTrue, 450, BigInt.from(2000000), 'À livrer']);
+    await e.sync();
+    expect(server.taken.length, 2, reason: 'reprise renouvelée à la synchronisation');
+
+    await e.openSession(0, closer).then<void>((_) {}, onError: (Object _) {});
+    if (e.sessionOpen) {
+      final frozen = await e.recordSale(held.lines, [CartPayment(method: cashMethod, amount: 900, received: 900)], closer, extras: const SaleExtras(sharedCart: webCart));
+      final frozenContent = (await e.v2.operation(frozen.uuid))!['operation']['contenu'] as Map;
+      expect([(frozenContent['lignes'] as List).single['prix_unitaire'], frozenContent['panier_uuid']], [450, webCart]);
+    }
+    // Suspendu de nouveau : nouvel uuid, remplace l'ancien repris ; non repris : suppression explicite d'abord.
+    final replaced = await e.suspendShared(closer, held.lines, const SaleExtras(), previous: held.ref);
+    expect(replaced.uuid, isNot(webCart));
+    final replacedContent = (await e.v2.operation(replaced.uuid))!['operation']['contenu'] as Map;
+    expect(replacedContent['remplace_uuid'], webCart);
+    final again = await e.suspendShared(closer, held.lines, const SaleExtras(), previous: replaced);
+    expect(((await e.v2.operation(again.uuid))!['operation']['contenu'] as Map)['remplace_uuid'], isNull);
+    final types = [for (final r in (await e.v2.operationRows()).take(2)) (r['operation'] as Map)['type']];
+    expect(types, ['panier_suspendre', 'panier_supprimer']);
+    expect(await e.sharedCartState(again.uuid), 'local');
+
+    await e.sync();
+    expect(await e.sharedCartState(again.uuid), 'disparu', reason: 'intégré et absent du journal : vendu ou supprimé ailleurs');
     await adapter.close();
   });
 

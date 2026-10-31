@@ -57,6 +57,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   int _delivery = 0;
   String? _note;
   Customer? _customer;
+  SharedCartRef? _shared;
 
   /// Paniers mis en attente sur ce terminal.
   int _suspendedCount = 0;
@@ -95,10 +96,30 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (mounted) setState(() {});
   }
 
-  Future<List<StoredDraft>> _suspended() async => [for (final d in await _engine.openDrafts()) if (d.content['suspendu'] == true) d];
+  /// Paniers en attente de ce terminal ; ceux vendus ou supprimés ailleurs sont retirés.
+  Future<List<StoredDraft>> _suspended() async {
+    final drafts = <StoredDraft>[];
+    for (final d in await _engine.openDrafts()) {
+      if (d.content['suspendu'] != true) continue;
+      final ref = SharedCartRef.fromJson(d.content['panier']);
+      if (ref != null && await _engine.sharedCartState(ref.uuid) == 'disparu') {
+        await _engine.deleteDraft(d.uuid);
+      } else {
+        drafts.add(d);
+      }
+    }
+    return drafts;
+  }
+
+  /// Paniers publiés par le web ou d'autres terminaux, hors ceux déjà listés sur ce terminal.
+  Future<List<SharedCart>> _published(List<StoredDraft> drafts) async {
+    final linked = {for (final d in drafts) SharedCartRef.fromJson(d.content['panier'])?.uuid};
+    return [for (final c in await _engine.sharedCarts()) if (!linked.contains(c.uuid)) c];
+  }
 
   Future<void> _refreshSuspended() async {
-    final count = (await _suspended()).length;
+    final drafts = await _suspended();
+    final count = drafts.length + (await _published(drafts)).length;
     if (mounted) setState(() => _suspendedCount = count);
   }
 
@@ -108,6 +129,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _delivery = 0;
     _note = null;
     _customer = null;
+    _shared = null;
+  }
+
+  /// Panier repris vidé à la main : rendu aux autres caisses.
+  void _releaseIfEmpty() {
+    if (_cart.isNotEmpty || _shared == null) return;
+    if (_shared!.claimed && _operator != null) unawaited(_engine.releaseSharedCart(_operator!, _shared!.uuid));
+    _shared = null;
   }
 
   /// Sous-total du panier (après remises de ligne) : base de la remise globale.
@@ -523,6 +552,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (_globalEntry != null) 'remise_globale_saisie': _globalEntry!.toJson(),
     if (_delivery != 0) 'livraison': _delivery,
     if (_note != null) 'note': _note,
+    if (_shared != null) 'panier': _shared!.toJson(),
     if (_customer != null) 'client': {'uuid': _customer!.uuid, 'nom': _customer!.name},
     'paiements': const [],
     'suspendu': true,
@@ -530,6 +560,19 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   Future<void> _suspendCart() async {
     if (_cart.isEmpty) return;
+    if (_engine.sharedCartsSupported && _operator != null) {
+      try {
+        final totals = _totals(_snapshot!);
+        _shared = await _engine.suspendShared(
+          _operator!,
+          List.of(_cart),
+          SaleExtras(globalDiscount: totals.globalDiscount, delivery: _delivery, note: _note, customer: _customer),
+          previous: _shared,
+        );
+      } on OfflineRefusal catch (e) {
+        return _toast(e.message);
+      }
+    }
     if (!await _engine.saveDraft(_draftUuid, 1, _draftContent())) return _toast('Ce panier a déjà été enregistré.');
     setState(() {
       _clearCart();
@@ -542,13 +585,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Reprise d'un panier en attente, au catalogue et aux prix courants ; un article disparu est signalé et retiré.
   Future<void> _openSuspended(Snapshot snapshot) async {
     final drafts = await _suspended();
+    final published = await _published(drafts);
     if (!mounted) return;
-    final chosen = await showDialog<(StoredDraft, bool)>(
+    final chosen = await showDialog<(Object, bool)>(
       context: context,
       builder: (context) => SimpleDialog(
         title: const Text('Paniers en attente'),
         children: [
-          if (drafts.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun panier en attente.')),
+          if (drafts.isEmpty && published.isEmpty) const Padding(padding: EdgeInsets.all(16), child: Text('Aucun panier en attente.')),
           for (final d in drafts)
             ListTile(
               title: Text('${(d.content['lignes'] as List).length} article(s)'),
@@ -556,14 +600,37 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               onTap: () => Navigator.pop(context, (d, true)),
               trailing: IconButton(tooltip: 'Supprimer', icon: const Icon(Icons.delete_outline), onPressed: () => Navigator.pop(context, (d, false))),
             ),
+          for (final c in published)
+            ListTile(
+              enabled: !c.takenElsewhere,
+              title: Text(c.label),
+              subtitle: Text('${c.linesCount} article(s)${c.takenElsewhere ? ' · repris sur une autre caisse' : ' · partagé'}'),
+              onTap: () => Navigator.pop(context, (c, true)),
+              trailing: c.takenElsewhere
+                  ? null
+                  : IconButton(tooltip: 'Supprimer', icon: const Icon(Icons.delete_outline), onPressed: () => Navigator.pop(context, (c, false))),
+            ),
         ],
       ),
     );
     if (chosen == null || !mounted) return;
-    final (draft, resume) = chosen;
+    final (target, resume) = chosen;
+    if (target is SharedCart) return _openPublished(target, resume);
+    final draft = target as StoredDraft;
+    var ref = SharedCartRef.fromJson(draft.content['panier']);
     if (!resume) {
+      if (ref != null && _operator != null) await _engine.deleteSharedCart(_operator!, ref.uuid);
       await _engine.deleteDraft(draft.uuid);
       return _refreshSuspended();
+    }
+    // Un panier déjà publié ne se reprend qu'avec l'accord du serveur.
+    if (ref != null && await _engine.sharedCartState(ref.uuid) == 'publie') {
+      if (_operator == null) return _toast('Identifiez le caissier.');
+      try {
+        ref = (await _engine.takeSharedCart(_operator!, ref.uuid)).ref;
+      } on OfflineRefusal catch (e) {
+        return _toast(e.message);
+      }
     }
     if (_cart.isNotEmpty) await _suspendCart();
     final lines = <CartLine>[];
@@ -583,6 +650,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         quantity: parseMicros(raw['quantite'] as String),
         discount: raw['remise'] as int,
         discountEntry: entry == null ? null : DiscountEntry.fromJson(entry),
+        fixedPrice: raw['prix_fige'] as int?,
       ));
     }
     await _engine.deleteDraft(draft.uuid);
@@ -594,9 +662,37 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       _delivery = draft.content['livraison'] as int? ?? 0;
       _note = draft.content['note'] as String?;
       _customer = customerFromDraft(draft.content['client']);
+      _shared = ref;
     });
     await _refreshSuspended();
     if (missing > 0) _toast('$missing article(s) retiré(s) du catalogue : non repris.');
+  }
+
+  /// Panier publié par le web ou un autre terminal : reprise exclusive, prix figés par le serveur.
+  Future<void> _openPublished(SharedCart cart, bool resume) async {
+    final operator = _operator;
+    if (operator == null) return _toast('Identifiez le caissier.');
+    if (!resume) {
+      await _engine.deleteSharedCart(operator, cart.uuid);
+      return _refreshSuspended();
+    }
+    final TakenCart taken;
+    try {
+      taken = await _engine.takeSharedCart(operator, cart.uuid);
+    } on OfflineRefusal catch (e) {
+      return _toast(e.message);
+    }
+    if (_cart.isNotEmpty) await _suspendCart();
+    setState(() {
+      _clearCart();
+      _cart.addAll(taken.lines);
+      _globalEntry = taken.globalDiscount == 0 ? null : DiscountEntry('montant', '${taken.globalDiscount}');
+      _delivery = taken.delivery;
+      _note = taken.note;
+      _customer = taken.customer;
+      _shared = taken.ref;
+    });
+    await _refreshSuspended();
   }
 
   /// Actions du panier : remise globale, livraison et note exigent le contrat 2.1.
@@ -1184,6 +1280,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                               onPressed: () => setState(() {
                                 line.quantity -= BigInt.from(1000000);
                                 if (line.quantity <= BigInt.zero) _cart.remove(line);
+                                _releaseIfEmpty();
                                 if (line.discountEntry case final entry? when !entry.isPercent && line.discount > line.base) {
                                   line.discountEntry = null;
                                   line.discount = 0;
@@ -1295,7 +1392,16 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             ],
           ),
           actions: [
-            TextButton(onPressed: () => {setState(() => _cart.remove(line)), Navigator.pop(context)}, child: const Text('Retirer')),
+            TextButton(
+              onPressed: () {
+                setState(() {
+                  _cart.remove(line);
+                  _releaseIfEmpty();
+                });
+                Navigator.pop(context);
+              },
+              child: const Text('Retirer'),
+            ),
             FilledButton(
               onPressed: () {
                 final q = parseMicros(quantity.text);
@@ -1342,7 +1448,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         payments,
         _operator!,
         draftUuid: _draftUuid,
-        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer),
+        extras: SaleExtras(globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer, sharedCart: _shared?.uuid),
       );
     } on OfflineRefusal catch (e) {
       _toast(e.message);

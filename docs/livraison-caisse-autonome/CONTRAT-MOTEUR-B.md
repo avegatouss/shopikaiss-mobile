@@ -212,3 +212,12 @@ Capacité `session.cloture`, droit `caisse_cloturer`, comptage à l'aveugle : l'
 - Le terminal calcule un attendu si l'ouverture de la session est dans sa file (fond + encaissements, arrondi compris). Un écart exige alors un commentaire ou une justification. Session ouverte en ligne : attendu inconnu, commentaire facultatif, risque d'arbitrage côté serveur.
 - La session se ferme aussitôt sur le terminal. Une ouverture est refusée tant que la clôture précédente est `a_arbitrer`. Rejet protocole : la session du serveur reprend.
 - Le Z (`details.z`) est conservé et visible dans le journal des opérations. Pas d'impression du Z.
+
+## Paniers partagés (2.1, lot 4)
+
+Capacité `panier.partage`, instantané unique à la première obtention. Un panier mis en attente par un caissier identifié est publié (`panier_suspendre`) et reste aussi sur le terminal.
+
+- Adaptateur : `suspendDraft` {label}, `drafts` donne `shared`, `resumeShared` {shared_id}, `deleteShared` {shared_id}. Capacité `shared_carts`. Erreur `panier_refuse`.
+- Reprise d'un panier publié : réseau requis, renouvelée à chaque synchronisation, libérée si le panier est vidé. Prix figés conservés (`prix_fige`) et repris dans la vente avec `panier_uuid`.
+- Suspendre de nouveau : nouvel uuid. Repris : `remplace_uuid`. Non repris : `panier_supprimer` d'abord.
+- Un panier local intégré puis absent du journal (vendu ou supprimé ailleurs) quitte la liste. `remise_saisie` en % n'est pas conservée après reprise.

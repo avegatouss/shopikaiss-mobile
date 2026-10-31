@@ -22,6 +22,7 @@
             "requete_invalide",
             "corps_trop_grand",
             "trop_de_requetes",
+            "panier_deja_repris",
             "indisponible"
           ]
         },

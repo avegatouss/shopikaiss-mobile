@@ -88,7 +88,7 @@ const knownV2Types = {
 };
 
 /// Types ajoutés par la révision 2.1 (donnees-2.1.json), connus seulement quand la forme 2.1 est active.
-const knownV2Types21 = {'categorie', 'client'};
+const knownV2Types21 = {'categorie', 'client', 'panier'};
 
 /// Résultat de l'application d'une page du journal.
 class V2ApplyResult {

@@ -14,6 +14,7 @@ import '../offline/models.dart';
 import '../offline/store.dart';
 import 'contract_schemas.dart';
 import 'schema_validator.dart';
+import 'decimal6.dart';
 import 'v2_client.dart';
 import 'v2_sale.dart';
 import 'v2_store.dart';
@@ -169,6 +170,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.customerReadCapability,
           CaisseV2Client.customerCreateCapability,
           CaisseV2Client.sessionCloseCapability,
+          CaisseV2Client.sharedCartCapability,
         ],
       ],
     );
@@ -258,6 +260,9 @@ class V2Engine extends CaisseEngine {
       await _drainLegacy();
       final report = await engine.run();
       final failure = report.failure;
+      if (failure == null && _heldCart != null) {
+        await _client!.takeCart(_heldCart!.$1, '${_heldCart!.$2}').then<void>((_) {}, onError: (Object _) => _heldCart = null);
+      }
       if (failure != null) {
         await _failed(failure);
       } else {
@@ -418,6 +423,136 @@ class V2Engine extends CaisseEngine {
 
   @override
   String? get deliveryRight => _shopRules?['livraison_droit'] as String?;
+
+  /// Panier repris en ce moment (uuid, opérateur) : sa reprise de 30 minutes est renouvelée à chaque synchronisation.
+  (String, int)? _heldCart;
+
+  @override
+  bool get sharedCartsSupported => saleExtrasSupported && _serverOffers(CaisseV2Client.sharedCartCapability);
+
+  @override
+  Future<List<SharedCart>> sharedCarts() async {
+    if (!sharedCartsSupported) return const [];
+    final me = _device['terminal_uuid'];
+    final carts = <SharedCart>[];
+    for (final e in (await v2.entities('panier')).entries) {
+      if (!(e.value['terminaux'] as List).contains(me)) continue;
+      final taken = e.value['repris_par'] as Map?;
+      carts.add(SharedCart(
+        uuid: e.key,
+        label: e.value['libelle'] as String,
+        linesCount: ((e.value['contenu'] as Map)['lignes'] as List).length,
+        takenElsewhere: taken != null && taken['terminal_uuid'] != me,
+        modifiedAt: e.value['modifie_le'] as String,
+      ));
+    }
+    return carts..sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
+  }
+
+  @override
+  Future<String> sharedCartState(String uuid) async {
+    if ((await v2.entities('panier')).containsKey(uuid)) return 'publie';
+    return (await v2.operation(uuid))?['etat'] == V2OperationState.integrated ? 'disparu' : 'local';
+  }
+
+  @override
+  Future<SharedCartRef> suspendShared(Operator operator, List<CartLine> lines, SaleExtras extras, {SharedCartRef? previous, String? label}) => serialized(() async {
+    if (!sharedCartsSupported) throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+    if (lines.isEmpty || lines.length > 100) throw const OfflineRefusal('Entre 1 et 100 lignes par panier.');
+    if ((lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) && !hasRight(operator, 'remise')) {
+      throw OfflineRefusal('${operator.name} n’a pas le droit d’accorder une remise : retirez-la avant de partager ce panier.');
+    }
+    final name = (label ?? '').trim().isEmpty ? 'Panier ${now.toIso8601String().substring(0, 16).replaceFirst('T', ' ')}' : label!.trim();
+    if (name.length > 150) throw const OfflineRefusal('Nom du panier trop long (150 caractères au plus).');
+    final content = {
+      'lignes': [
+        for (final l in lines)
+          {
+            'produit_uuid': _productUuids[l.product.id] ?? (throw OfflineRefusal('« ${l.product.name} » n’est plus au catalogue local.')),
+            'conditionnement_uuid': l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.'))),
+            'quantite': Decimal6.format(l.quantity.toInt()),
+            'remise': l.discount,
+          },
+      ],
+      'client_uuid': extras.customer?.uuid,
+      'remise_globale': extras.globalDiscount,
+      'livraison': extras.delivery,
+      'note': extras.note,
+      'tarif': 'detail',
+    };
+    // Sans reprise, le serveur ne retire pas l'ancien panier de lui-même : suppression explicite, avant, dans l'ordre.
+    if (previous != null && !previous.claimed) {
+      await _record(_newUuid(), 'panier_supprimer', operator, (_) => {'panier_uuid': previous.uuid, 'motif': 'Remplacé sur le terminal'});
+    }
+    final uuid = _newUuid();
+    await _record(uuid, 'panier_suspendre', operator, (_) => {
+      'panier_uuid': uuid,
+      'libelle': name,
+      'remplace_uuid': previous?.claimed == true ? previous!.uuid : null,
+      'contenu': content,
+    });
+    if (previous?.uuid == _heldCart?.$1) _heldCart = null;
+    await _afterWrite();
+    return SharedCartRef(uuid);
+  });
+
+  @override
+  Future<TakenCart> takeSharedCart(Operator operator, String uuid) async {
+    final client = _client;
+    if (client == null || !sharedCartsSupported) throw const OfflineRefusal('Paniers partagés non disponibles sur ce terminal.');
+    final Map<String, dynamic> taken;
+    try {
+      taken = await client.takeCart(uuid, '${operator.id}');
+    } on V2Failure catch (failure) {
+      throw OfflineRefusal(switch (failure) {
+        V2Failure(code: 'panier_deja_repris') => 'Ce panier est déjà repris sur une autre caisse.',
+        V2Failure(status: 404) => 'Ce panier a été vendu ou supprimé.',
+        V2Failure(kind: V2FailureKind.unavailable) => 'Reprise impossible sans réseau : ce panier est partagé.',
+        _ => failure.message,
+      });
+    }
+    final content = taken['contenu'] as Map;
+    final raw = (content['lignes'] as List).cast<Map>();
+    final ids = await v2.localIds([for (final l in raw) ...[l['produit_uuid'] as String, if (l['conditionnement_uuid'] != null) l['conditionnement_uuid'] as String]]);
+    final lines = <CartLine>[];
+    for (final l in raw) {
+      final product = snapshot?.products.where((p) => p.id == ids[l['produit_uuid']]).firstOrNull;
+      final packaging = l['conditionnement_uuid'] == null ? null : product?.packaging(ids[l['conditionnement_uuid']]);
+      if (product == null || (l['conditionnement_uuid'] != null && packaging == null)) {
+        await client.releaseCart(uuid, '${operator.id}').then<void>((_) {}, onError: (Object _) {});
+        throw OfflineRefusal('Ce panier contient « ${l['libelle']} », indisponible sur ce terminal : reprenez-le en ligne.');
+      }
+      lines.add(CartLine(
+        product: product,
+        packaging: packaging,
+        quantity: parseMicros(l['quantite'] as String),
+        discount: l['remise'] as int,
+        fixedPrice: l['prix_unitaire'] as int,
+      ));
+    }
+    _heldCart = (uuid, operator.id);
+    return TakenCart(
+      ref: SharedCartRef(uuid, claimed: true),
+      lines: lines,
+      globalDiscount: content['remise_globale'] as int,
+      delivery: content['livraison'] as int,
+      note: content['note'] as String?,
+      customer: content['client_uuid'] == null ? null : Customer(uuid: content['client_uuid'] as String, name: content['client_nom'] as String? ?? 'Client'),
+    );
+  }
+
+  @override
+  Future<void> releaseSharedCart(Operator operator, String uuid) async {
+    if (_heldCart?.$1 == uuid) _heldCart = null;
+    await _client?.releaseCart(uuid, '${operator.id}').then<void>((_) {}, onError: (Object _) {});
+  }
+
+  @override
+  Future<void> deleteSharedCart(Operator operator, String uuid, {String reason = 'Supprimé sur le terminal'}) => serialized(() async {
+    if (_heldCart?.$1 == uuid) _heldCart = null;
+    await _record(_newUuid(), 'panier_supprimer', operator, (_) => {'panier_uuid': uuid, 'motif': reason});
+    await _afterWrite();
+  });
 
   @override
   bool canCloseSession(Operator operator) =>
@@ -697,6 +832,7 @@ class V2Engine extends CaisseEngine {
               quantityMicros: l.quantity.toInt(),
               discount: l.discount,
               discountEntry: l.discountEntry,
+              fixedPrice: l.fixedPrice,
             ),
         ];
         final revision21 = v2.contract21;
@@ -733,6 +869,7 @@ class V2Engine extends CaisseEngine {
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
         );
+        if (extras.sharedCart == _heldCart?.$1) _heldCart = null;
         await _afterWrite();
         return operation;
       });

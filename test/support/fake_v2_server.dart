@@ -136,6 +136,20 @@ class FakeV2Server implements V2Transport {
       return status == 0 ? const V2Response(0, null) : _error(status, failCode, status == 429 ? 3 : null);
     }
     final uri = Uri.parse('http://x$path');
+    if (method == 'POST' && uri.path.startsWith('/paniers/')) {
+      _requireBody(payload, 'paniers.json#/\$defs/demande');
+      final uuid = uri.pathSegments[1];
+      if (uri.pathSegments[2] == 'liberation') {
+        released.add(uuid);
+        return const V2Response(204, null);
+      }
+      if (takenElsewhere.contains(uuid)) return _error(409, 'panier_deja_repris');
+      final cart = entities['panier|$uuid'];
+      if (cart == null) return _error(404, 'requete_invalide');
+      taken.add(uuid);
+      final data = cart['donnees'] as Map;
+      return _ok({'panier_uuid': uuid, 'libelle': data['libelle'], 'expire_le': '2026-10-29T08:30:00Z', 'contenu': data['contenu']}, 'paniers.json#/\$defs/reprise');
+    }
     switch ((method, uri.path)) {
       case ('POST', '/appairage'):
         _requireBody(payload, 'appairage.json#/\$defs/demande');
@@ -216,6 +230,9 @@ class FakeV2Server implements V2Transport {
 
   List<Map<String, dynamic>>? _snapshot;
   final snapshotReasons = <String>[];
+  final taken = <String>[];
+  final released = <String>[];
+  final takenElsewhere = <String>{};
   Map<String, dynamic>? lastAck;
 
   Map<String, dynamic> _result(String uuid) {
