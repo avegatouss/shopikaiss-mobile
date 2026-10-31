@@ -1922,6 +1922,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final reason = TextEditingController();
     int? amount;
     String? error;
+    OfflineOperation? recorded;
+    Map<String, int>? recordedQuantities;
     Map<String, int>? quantities() {
       final result = <String, int>{};
       for (final e in fields.entries) {
@@ -1971,7 +1973,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 final wanted = quantities();
                 if (wanted == null) return setLocal(() => error = 'Quantité invalide.');
                 try {
-                  await _engine.recordReturn(operator, sale.uuid, wanted, reason.text);
+                  recorded = await _engine.recordReturn(operator, sale.uuid, wanted, reason.text);
+                  recordedQuantities = wanted;
                   if (context.mounted) Navigator.pop(context, true);
                 } on OfflineRefusal catch (e) {
                   setLocal(() => error = e.message);
@@ -1987,7 +1990,58 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       if (widget.session.hasPrinter) await widget.session.channel.openDrawer();
       _changed();
       _toast('Retour enregistré. Rendez le montant en espèces.');
+      final operation = recorded;
+      if (operation != null) {
+        await _returnSlip(sale, operation, [
+          for (final l in lines)
+            if (recordedQuantities![l.lineUuid] case final q?) ('${l.label} x ${formatMicros(BigInt.from(q))}', ''),
+          ('Rendu en especes', formatFcfa((operation.content['montant'] as num).toInt())),
+          ('Motif : ${reason.text.trim()}', ''),
+        ]);
+      }
     }
+  }
+
+  /// Bon de retour : imprimé d'office en mode automatique, sinon sur demande, comme le ticket de vente.
+  Future<void> _returnSlip(OfflineOperation sale, OfflineOperation operation, List<(String, String)> rows) async {
+    if (!mounted) return;
+    final print = _look.ticketMode == 'auto' ||
+        await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Imprimer le bon de retour ?'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Non')),
+                  FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Imprimer')),
+                ],
+              ),
+            ) ==
+            true;
+    if (print) await _printSlip('BON DE RETOUR ${sale.number ?? ''}', operation, rows);
+  }
+
+  /// Z d'une clôture intégrée, depuis le journal.
+  Future<void> _printZ(OfflineOperation operation) async {
+    final z = (operation.content['z'] as Map).cast<String, dynamic>();
+    await _printSlip('RAPPORT Z', operation, [
+      ('Compte', formatFcfa(z['compte'] as int)),
+      ('Theorique', formatFcfa(z['theorique'] as int)),
+      ('Ecart', formatFcfa(z['ecart'] as int)),
+    ]);
+  }
+
+  Future<void> _printSlip(String title, OfflineOperation operation, List<(String, String)> rows) async {
+    final snapshot = _snapshot;
+    if (snapshot == null) return;
+    final session = widget.session;
+    await _printText(offlineSlipLines(
+      snapshot: snapshot,
+      title: title,
+      date: operation.date,
+      operatorName: snapshot.operatorById(operation.operatorId)?.name ?? '',
+      paperWidth: session.rollWidth > 0 ? session.rollWidth : 58,
+      rows: rows,
+    ), failure: 'Bon non imprimé');
   }
 
   void _openJournal() {
@@ -1997,6 +2051,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           engine: _engine,
           onReprint: _reprint,
           onReturn: _operator != null && _engine.returnsOpen(_operator!) ? _startReturn : null,
+          onPrintZ: _printZ,
         ),
       ),
     );
@@ -2030,9 +2085,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       paperWidth: width,
       duplicate: duplicate,
     );
+    await _printText(text, failure: 'Ticket non imprimé', saved: ' : la vente est bien enregistrée.');
+  }
+
+  Future<void> _printText(List<String> text, {required String failure, String saved = '.'}) async {
+    final session = widget.session;
     if (session.hasPrinter) {
       final result = await session.channel.printRaw(offlineTicketBytes(text));
-      if (!result.ok) _toast('Ticket non imprimé (${result.error}) : la vente est bien enregistrée.');
+      if (!result.ok) _toast('$failure (${result.error})$saved');
       return;
     }
     if (!mounted) return;

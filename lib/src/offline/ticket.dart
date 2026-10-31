@@ -86,6 +86,41 @@ List<String> offlineTicketLines({
   return [for (final line in out) stripAccents(line)];
 }
 
+/// Bon de caisse (retour, Z) à la largeur du rouleau : en-tête de la boutique, [title], lignes libellé / valeur.
+List<String> offlineSlipLines({
+  required Snapshot snapshot,
+  required String title,
+  required DateTime date,
+  required String operatorName,
+  required int paperWidth,
+  required List<(String, String)> rows,
+}) {
+  final cols = EscPos.columnsFor(paperWidth);
+  final store = snapshot.store;
+  String cut(String text) => text.length > cols ? text.substring(0, cols) : text;
+  String center(String text) => '${' ' * ((cols - cut(text).length) ~/ 2)}${cut(text)}';
+  String pair(String left, String right) {
+    final room = cols - right.length - 1;
+    if (right.isEmpty) return cut(left);
+    final l = left.length > room ? left.substring(0, room < 0 ? 0 : room) : left;
+    return '$l${' ' * (cols - l.length - right.length)}$right';
+  }
+
+  String two(int v) => v.toString().padLeft(2, '0');
+  final out = [
+    center(store.legalName),
+    '-' * cols,
+    center(title),
+    pair('Date', '${two(date.day)}/${two(date.month)}/${date.year} ${two(date.hour)}:${two(date.minute)}'),
+    pair('Caisse', snapshot.terminal.name),
+    pair('Caissier', operatorName),
+    '-' * cols,
+    for (final (left, right) in rows) pair(left, right),
+    '-' * cols,
+  ];
+  return [for (final line in out) stripAccents(line)];
+}
+
 /// Lignes de texte → ESC/POS (police A, titre en gras, coupe).
 Uint8List offlineTicketBytes(List<String> lines) {
   final out = BytesBuilder()..add(EscPos.init());

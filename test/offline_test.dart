@@ -341,6 +341,16 @@ void main() {
           paperWidth: width,
         );
         expect(ticket.every((l) => l.length <= (width == 80 ? 48 : 32)), isTrue, reason: ticket.join('\n'));
+        final slip = offlineSlipLines(
+          snapshot: engine.snapshot!,
+          title: 'BON DE RETOUR HL-001-000042',
+          date: DateTime(2026, 10, 31, 9, 5),
+          operatorName: 'Awa Koné',
+          paperWidth: width,
+          rows: [('Un article au libellé beaucoup trop long pour tenir sur une seule ligne du rouleau de caisse', ''), ('Rendu en especes', '4 500 F')],
+        );
+        expect(slip.every((l) => l.length <= (width == 80 ? 48 : 32)), isTrue, reason: slip.join('\n'));
+        expect(slip.join('\n'), allOf(contains('BON DE RETOUR'), contains('31/10/2026 09:05'), contains('4 500 F')));
         expect(ticket.join('\n'), contains('HL-001-000042'));
         expect(ticket.join('\n'), contains('Elegance SARL'));
         expect(ticket.join('\n'), contains('Monnaie rendue'));

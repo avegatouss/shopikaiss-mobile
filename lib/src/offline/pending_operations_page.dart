@@ -7,7 +7,7 @@ import 'money.dart';
 /// Journal des opérations hors ligne du terminal : en attente d'envoi, transmises (intégrées ou à arbitrer par la
 /// boutique), refusées. Les opérations transmises restent visibles 30 jours.
 class PendingOperationsPage extends StatefulWidget {
-  const PendingOperationsPage({super.key, required this.engine, this.onReprint, this.onReturn});
+  const PendingOperationsPage({super.key, required this.engine, this.onReprint, this.onReturn, this.onPrintZ});
 
   final CaisseEngine engine;
 
@@ -16,6 +16,9 @@ class PendingOperationsPage extends StatefulWidget {
 
   /// Retour en espèces d'une vente ; absent si les retours hors ligne sont fermés.
   final Future<void> Function(OfflineOperation operation)? onReturn;
+
+  /// Impression du Z d'une clôture intégrée.
+  final Future<void> Function(OfflineOperation operation)? onPrintZ;
 
   @override
   State<PendingOperationsPage> createState() => _PendingOperationsPageState();
@@ -86,7 +89,9 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
                   _ => '',
                 }}'),
                 trailing: !o.isSale
-                    ? null
+                    ? (o.content['z'] != null && widget.onPrintZ != null
+                          ? IconButton(tooltip: 'Imprimer le Z', icon: const Icon(Icons.print), onPressed: () => widget.onPrintZ!(o))
+                          : null)
                     : Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
