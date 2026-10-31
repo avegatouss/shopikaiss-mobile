@@ -163,6 +163,8 @@ class LocalRegisterAdapter {
         return view;
       case 'setLineDiscount':
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
+      case 'setLineLot':
+        return _setLineLot(_text(args, 'line_id', max: 64), args['lot_uuid'] as String?);
       case 'setGlobalDiscount':
         return _setGlobalDiscount(_entry(args));
       case 'setDelivery':
@@ -460,6 +462,13 @@ class LocalRegisterAdapter {
             'discount_entry': line.entry?.toJson(),
             'total_label': cart == null ? '' : formatFcfa(cart.total, currency),
             'available': cart != null,
+            'lot_uuid': line.lotUuid,
+            'lot_label': cart?.lot?.label,
+            'lots': [
+              for (final l in cart?.product.lots ?? const <ProductLot>[])
+                if (l.remaining > BigInt.zero)
+                  {'uuid': l.uuid, 'label': '${l.label} · ${formatMicros(l.remaining)} disponible(s) · ${formatFcfa(l.price, currency)}/unité', 'expires_on': l.expiresOn},
+            ],
             'stock_after_label': cart == null || cart.product.unlimitedStock
                 ? ''
                 : _stockLabel(cart.product, (sold[cart.product.id] ?? BigInt.zero) + demand[cart.product.id]!),
@@ -691,6 +700,15 @@ class LocalRegisterAdapter {
     final micros = parseMicros(quantity);
     if (micros == null || micros <= BigInt.zero) throw const AdapterFailure('quantite_invalide', 'Quantité invalide (positive, six décimales au plus).');
     return _mutate(() => line.quantity = micros);
+  }
+
+  /// Lot de la ligne ; null = choix automatique selon la règle de la boutique.
+  Future<Map<String, dynamic>> _setLineLot(String lineId, String? lot) async {
+    final line = _draft.lines.where((l) => l.id == lineId).firstOrNull;
+    if (line == null) throw const AdapterFailure('ligne_inconnue', 'Ligne introuvable dans le panier.');
+    final product = _snapshot().byId(line.productId);
+    if (lot != null && !(product?.lots.any((l) => l.uuid == lot) ?? false)) throw const AdapterFailure('lot_inconnu', 'Le lot choisi est indisponible dans cette boutique.');
+    return _mutate(() => line.lotUuid = lot);
   }
 
   /// Remise de ligne en francs (0 = retirer). Droit `remise` du caissier et plafond de la politique, contrôlés de
@@ -1321,6 +1339,7 @@ class _Draft {
           id: m['id'] as String,
           productId: (m['produit_id'] as num).toInt(),
           packagingId: (m['conditionnement_id'] as num?)?.toInt(),
+          lotUuid: m['lot_uuid'] as String?,
           quantity: parseMicros('${m['quantite']}') ?? BigInt.zero,
           discount: (m['remise'] as num?)?.toInt() ?? 0,
           entry: m['remise_saisie'] is Map ? DiscountEntry.fromJson(m['remise_saisie'] as Map) : null,
@@ -1388,6 +1407,7 @@ class _Draft {
           'id': l.id,
           'produit_id': l.productId,
           'conditionnement_id': l.packagingId,
+          if (l.lotUuid != null) 'lot_uuid': l.lotUuid,
           'quantite': formatMicros(l.quantity),
           'remise': l.discount,
           if (l.entry != null) 'remise_saisie': l.entry!.toJson(),
@@ -1408,7 +1428,10 @@ class _Draft {
 }
 
 class _DraftLine {
-  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0, this.entry, this.price});
+  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0, this.entry, this.price, this.lotUuid});
+
+  /// Lot choisi ; null = choix automatique selon la règle de la boutique.
+  String? lotUuid;
 
   /// Prix figé d'un panier partagé ; null = prix du catalogue.
   final int? price;
@@ -1430,7 +1453,8 @@ class _DraftLine {
     if (product == null) return null;
     final packaging = packagingId == null ? null : product.packaging(packagingId);
     if (packagingId != null && packaging == null) return null;
-    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry, fixedPrice: price);
+    final lot = product.lots.where((l) => l.uuid == lotUuid).firstOrNull;
+    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry, fixedPrice: price, lot: lot);
   }
 }
 

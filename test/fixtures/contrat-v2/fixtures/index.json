@@ -302,6 +302,11 @@
             "fichier": "valides/operation--retour.json",
             "schema": "operation.json",
             "valide": true
+        },
+        {
+            "fichier": "valides/donnees--lot.json",
+            "schema": "donnees-2.1.json#/$defs/lot",
+            "valide": true
         }
     ]
 }

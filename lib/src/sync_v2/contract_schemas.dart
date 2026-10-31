@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 5, retour_residuel) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 6, lots.vente) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -471,6 +471,10 @@ const contractV2Schemas = <String, String>{
                             }
                         }
                     ]
+                },
+                "gere_par_lots": {
+                    "type": "boolean",
+                    "description": "Capacité lots.vente seulement : produit vendu par lot, avec vente_locale selon actif. Sa quantité se lit sur les stock.projection produit:lot."
                 }
             }
         },
@@ -905,6 +909,17 @@ const contractV2Schemas = <String, String>{
                                 "largest_share",
                                 "largest_fraction"
                             ]
+                        },
+                        "lots_mode": {
+                            "enum": [
+                                "fifo",
+                                "dernier_achat",
+                                "prix_bas",
+                                "fefo",
+                                "manuel",
+                                "prix_unique"
+                            ],
+                            "description": "Capacité lots.vente seulement : règle d’allocation de la boutique, même sens que la caisse web."
                         }
                     }
                 },
@@ -1417,6 +1432,53 @@ const contractV2Schemas = <String, String>{
                 },
                 "modifie_le": {
                     "$ref": "commun.json#/$defs/horodatage"
+                }
+            }
+        },
+        "lot": {
+            "description": "Capacité lots.vente : lot d’un produit. Quantité sur la stock.projection de clé produit:lot.",
+            "type": "object",
+            "required": [
+                "produit_uuid",
+                "reference",
+                "entree",
+                "peremption",
+                "prix_vente",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "reference": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 255
+                },
+                "entree": {
+                    "type": "string",
+                    "description": "Date d’entrée UTC, ordre des modes fifo et dernier_achat."
+                },
+                "peremption": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"
+                        }
+                    ]
+                },
+                "prix_vente": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "actif": {
+                    "type": "boolean"
                 }
             }
         }
@@ -2169,6 +2231,10 @@ const contractV2Schemas = <String, String>{
                         "gros"
                     ],
                     "description": "Révision 2.1 : prix appliqué (gros = prix_gros du produit ou du conditionnement)."
+                },
+                "lot_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Capacité lots.vente : lot vendu, obligatoire pour un produit à lots. Une ligne par lot."
                 }
             }
         },

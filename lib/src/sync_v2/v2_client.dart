@@ -107,6 +107,9 @@ class CaisseV2Client {
   /// Retours limités en espèces (2.1, lot 5).
   static const returnCapability = 'retour.especes';
 
+  /// Vente des produits à lots (2.1 lot 6).
+  static const lotsCapability = 'lots.vente';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;

@@ -172,6 +172,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.sessionCloseCapability,
           CaisseV2Client.sharedCartCapability,
           CaisseV2Client.returnCapability,
+          CaisseV2Client.lotsCapability,
         ],
       ],
     );
@@ -524,8 +525,8 @@ class V2Engine extends CaisseEngine {
     final stocked = {for (final m in (content['mouvements'] as List).cast<Map>()) m['produit_uuid']};
     final movements = [
       for (final e in quantities.entries)
-        if (lines.firstWhere((l) => l['ligne_uuid'] == e.key)['produit_uuid'] case final product when stocked.contains(product))
-          {'mouvement_uuid': _newUuid(), 'produit_uuid': product, 'lot_uuid': null, 'variation': Decimal6.format(e.value)},
+        if (lines.firstWhere((l) => l['ligne_uuid'] == e.key) case final line when stocked.contains(line['produit_uuid']))
+          {'mouvement_uuid': _newUuid(), 'produit_uuid': line['produit_uuid'], 'lot_uuid': line['lot_uuid'], 'variation': Decimal6.format(e.value)},
     ];
     final operation = await _record(operationUuid ?? _newUuid(), 'retour', operator, (_) => {
       'vente_ref': {'operation_uuid': saleUuid},
@@ -993,16 +994,9 @@ class V2Engine extends CaisseEngine {
         // Moyens admis : ceux du catalogue local (politique paiements.moyens_locaux et capacités du serveur), vérifiés
         // par checkSale ; une seule ligne d'espèces (la monnaie se rend sur elle).
         if (payments.where((p) => p.method.isCash).length > 1) throw const OfflineRefusal('Une seule ligne d’espèces par vente.');
+        final allocation = allocateLots(s, lines);
         final cart = [
-          for (final l in lines)
-            V2CartLine(
-              productUuid: _productUuids[l.product.id] ?? (throw OfflineRefusal('« ${l.product.name} » n’est plus au catalogue local.')),
-              packagingUuid: l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.'))),
-              quantityMicros: l.quantity.toInt(),
-              discount: l.discount,
-              discountEntry: l.discountEntry,
-              fixedPrice: l.fixedPrice,
-            ),
+          for (final l in lines) ..._cartLines(l, allocation[l]),
         ];
         final revision21 = v2.contract21;
         final builder = V2SaleBuilder(products: _products, packagings: _packagings, revisions: _revisions, newUuid: _newUuid);
@@ -1039,6 +1033,8 @@ class V2Engine extends CaisseEngine {
           calculation: revision21 ? '2' : '1',
         );
         if (extras.sharedCart == _heldCart?.$1) _heldCart = null;
+        // Reste par lot : la vente suivante ne doit pas puiser dans ce qui vient de partir.
+        if (allocation.isNotEmpty) await _rebuild();
         await _afterWrite();
         return operation;
       });
@@ -1233,6 +1229,11 @@ class V2Engine extends CaisseEngine {
     for (final c in barcodes.values) {
       (barcodesOf[c['produit_uuid']] ??= []).add(c);
     }
+    final lotsOf = <Object?, List<MapEntry<String, Map<String, dynamic>>>>{};
+    for (final l in (await v2.entities('lot')).entries) {
+      (lotsOf[l.value['produit_uuid']] ??= []).add(l);
+    }
+    final estimated = lotsOf.isEmpty ? const <String, int>{} : await v2.estimatedStock();
     final session = await _ownSession();
     final changesSeconds = ((_state?['delais'] as Map?)?['changements_secondes'] as int?) ?? 60;
     final raw = <String, dynamic>{
@@ -1275,6 +1276,7 @@ class V2Engine extends CaisseEngine {
               'prix': e.value['prix'],
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
+              if (e.value['gere_par_lots'] == true) ..._lotView(e.key, e.value, lotsOf[e.key] ?? const [], stock, estimated),
               'conditionnements': [
                 for (final k in packagingsOf[e.key] ?? const <MapEntry<String, Map<String, dynamic>>>[])
                   if (k.value['actif'] == true)
@@ -1298,6 +1300,85 @@ class V2Engine extends CaisseEngine {
     _discountCaps = caps;
     _sessionUuid = session?['session_uuid'] as String?;
     snapshot = Snapshot(raw);
+  }
+
+  /// Ligne(s) de vente d'une ligne du panier : une par lot pour un produit à lots, remise répartie au prorata.
+  List<V2CartLine> _cartLines(CartLine l, List<LotSegment>? segments) {
+    final productUuid = _productUuids[l.product.id] ?? (throw OfflineRefusal('« ${l.product.name} » n’est plus au catalogue local.'));
+    final packagingUuid = l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.')));
+    if (segments == null || segments.length == 1) {
+      return [
+        V2CartLine(
+          productUuid: productUuid,
+          packagingUuid: packagingUuid,
+          quantityMicros: l.quantity.toInt(),
+          discount: l.discount,
+          discountEntry: l.discountEntry,
+          fixedPrice: segments == null ? l.fixedPrice : l.unitPrice,
+          lotUuid: segments?.single.lot.uuid,
+        ),
+      ];
+    }
+    const refusal = OfflineRefusal('Quantité à cheval sur plusieurs lots : choisissez un lot ou réduisez la quantité.');
+    final million = BigInt.from(Decimal6.scale);
+    final coefficient = l.packaging == null ? million : parseMicros(l.packaging!.coefficient) ?? million;
+    final total = segments.fold(BigInt.zero, (sum, x) => sum + x.base);
+    final out = <V2CartLine>[];
+    var discounted = 0;
+    var bases = 0;
+    for (final (i, x) in segments.indexed) {
+      if ((x.base * million).remainder(coefficient) != BigInt.zero) throw refusal;
+      final quantity = x.base * million ~/ coefficient;
+      final discount = i == segments.length - 1 ? l.discount - discounted : (BigInt.from(l.discount) * x.base ~/ total).toInt();
+      discounted += discount;
+      bases += lineBase(l.unitPrice, quantity);
+      out.add(V2CartLine(
+        productUuid: productUuid,
+        packagingUuid: packagingUuid,
+        quantityMicros: quantity.toInt(),
+        discount: discount,
+        discountEntry: discount == 0 ? null : DiscountEntry('montant', '$discount'),
+        fixedPrice: l.unitPrice,
+        lotUuid: x.lot.uuid,
+      ));
+    }
+    if (bases != l.base) throw refusal;
+    return out;
+  }
+
+  /// Vue d'un produit à lots : lots vendables dans l'ordre du mode de la boutique, stock et prix d'après eux.
+  ///
+  /// Le mode `prix_bas` du web trie sur le prix d'achat, non publié au terminal : ici sur le prix de vente.
+  Map<String, dynamic> _lotView(String product, Map<String, dynamic> data, List<MapEntry<String, Map<String, dynamic>>> lots, Map<String, Map<String, dynamic>> stock, Map<String, int> estimated) {
+    final mode = (_shopRules?['lots_mode'] ?? 'fifo') as String;
+    int entered(MapEntry<String, Map<String, dynamic>> a, MapEntry<String, Map<String, dynamic>> b) {
+      final date = (a.value['entree'] as String).compareTo(b.value['entree'] as String);
+      return date != 0 ? date : a.key.compareTo(b.key);
+    }
+
+    int compare(MapEntry<String, Map<String, dynamic>> a, MapEntry<String, Map<String, dynamic>> b) {
+      final order = switch (mode) {
+        'dernier_achat' => entered(b, a),
+        'prix_bas' => (a.value['prix_vente'] as int).compareTo(b.value['prix_vente'] as int),
+        'fefo' => ((a.value['peremption'] ?? '9999-12-31') as String).compareTo((b.value['peremption'] ?? '9999-12-31') as String),
+        _ => 0,
+      };
+      return order != 0 ? order : entered(a, b);
+    }
+
+    final ordered = lots.where((e) => e.value['actif'] == true).toList()..sort(compare);
+    int price(Map<String, dynamic> lot) => mode == 'prix_unique' ? data['prix'] as int : lot['prix_vente'] as int;
+    var total = 0;
+    Object? firstPrice;
+    final views = <Map<String, dynamic>>[];
+    for (final e in ordered) {
+      final key = '$product:${e.key}';
+      total += Decimal6.parseSigned((stock[key]?['quantite'] ?? '0.000000') as String);
+      final left = estimated[key] ?? 0;
+      if (left > 0) firstPrice ??= price(e.value);
+      views.add({'uuid': e.key, 'reference': e.value['reference'], 'entree': e.value['entree'], 'peremption': e.value['peremption'], 'prix': price(e.value), 'reste': Decimal6.format(left < 0 ? 0 : left)});
+    }
+    return {'gere_par_lots': true, 'lots_mode': mode, 'lots': views, 'stock': Decimal6.format(total < 0 ? 0 : total), 'prix': firstPrice ?? data['prix']};
   }
 
   /// Session du terminal : celle du serveur si elle est ouverte ; sinon l'ouverture locale tant que le serveur ne l'a

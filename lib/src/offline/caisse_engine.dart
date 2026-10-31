@@ -39,6 +39,49 @@ class SyncReport {
 }
 
 /// Refus lisible d'une vente hors ligne (règle de la boutique, saisie).
+/// Part d'une ligne servie par un lot, en unité de base.
+class LotSegment {
+  const LotSegment(this.lot, this.base);
+
+  final ProductLot lot;
+  final BigInt base;
+}
+
+/// Répartit les lignes de produits à lots sur les lots du catalogue courant [s], avec les refus de la caisse web
+/// (`LotAllocationService::plan`, `LotSaleSplitter::unitPrice`) ; les lignes du panier se réservent les unes les autres.
+Map<CartLine, List<LotSegment>> allocateLots(Snapshot s, List<CartLine> lines) {
+  final taken = <String, BigInt>{};
+  final result = <CartLine, List<LotSegment>>{};
+  for (final line in lines) {
+    final product = s.byId(line.product.id) ?? line.product;
+    if (!product.managedByLots) continue;
+    BigInt left(ProductLot lot) => lot.remaining - (taken[lot.uuid] ?? BigInt.zero);
+    var available = product.lots.where((l) => left(l) > BigInt.zero).toList();
+    final chosen = line.lot;
+    if (chosen != null) {
+      available = available.where((l) => l.uuid == chosen.uuid).toList();
+      if (available.isEmpty) throw const OfflineRefusal('Le lot choisi est indisponible dans cette boutique.');
+    } else if (line.packaging == null && product.lotMode == 'manuel' && available.map((l) => l.price).toSet().length > 1) {
+      throw const OfflineRefusal('Choisissez le lot à vendre : plusieurs prix de vente sont disponibles.');
+    }
+    var rest = baseQuantity(line.quantity, line.packaging?.coefficient);
+    final segments = <LotSegment>[];
+    for (final lot in available) {
+      if (rest <= BigInt.zero) break;
+      final part = rest < left(lot) ? rest : left(lot);
+      segments.add(LotSegment(lot, part));
+      taken[lot.uuid] = (taken[lot.uuid] ?? BigInt.zero) + part;
+      rest -= part;
+    }
+    if (rest > BigInt.zero) throw const OfflineRefusal('Quantité insuffisante dans les lots vendables ; aucune vente sans lot d’origine.');
+    if (line.packaging == null && segments.any((x) => x.lot.price != line.unitPrice)) {
+      throw const OfflineRefusal('Plusieurs prix de lots : choisissez un lot ou utilisez un conditionnement.');
+    }
+    result[line] = segments;
+  }
+  return result;
+}
+
 class OfflineRefusal implements Exception {
   const OfflineRefusal(this.message);
 
@@ -447,6 +490,7 @@ abstract class CaisseEngine extends EngineNotifier {
         throw OfflineRefusal('Remise sur « ${line.label} » au-delà du maximum hors ligne (${s.rules.maxLineDiscountPercent} %).');
       }
     }
+    allocateLots(s, lines);
     if ((extras.note?.length ?? 0) > 2000) throw const OfflineRefusal('Note trop longue (2 000 caractères au plus).');
     final WebTotals totals;
     try {

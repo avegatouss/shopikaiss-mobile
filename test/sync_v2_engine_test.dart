@@ -922,6 +922,90 @@ void main() {
     await adapter.close();
   });
 
+  test('lots.vente : lots dans l’ordre de la boutique, une ligne par lot, remise au prorata, refus du web, stock déduit', () async {
+    server.put('politique', 'remises.ligne_max_pourcent', {'cle_politique': 'remises.ligne_max_pourcent', 'valeur': 50, 'source': 'boutique', 'verrouillee': false});
+    await paired();
+    const riz = '0a000000-0000-4000-8000-0000000000a1';
+    const huile = '0a000000-0000-4000-8000-0000000000a2';
+    const ancien = '0e000000-0000-4000-8000-000000000001';
+    const recent = '0e000000-0000-4000-8000-000000000002';
+    const cher = '0e000000-0000-4000-8000-000000000003';
+    const bas = '0e000000-0000-4000-8000-000000000004';
+    Map<String, dynamic> produit(String nom) => {
+      'nom': nom, 'reference': null, 'categorie': null, 'prix': 900, 'stock_illimite': false, 'actif': true, 'vente_locale': true, 'gere_par_lots': true,
+      'categorie_uuid': null, 'marque': null, 'fournisseur': null, 'unite': null,
+      'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null, 'cree_le': null, 'favori': false, 'promotions': <Map<String, dynamic>>[], 'image': null,
+    };
+    void lot(String uuid, String product, String ref, String entree, int prix, String quantite, {String? peremption}) => server
+      ..put('lot', uuid, {'produit_uuid': product, 'reference': ref, 'entree': entree, 'peremption': peremption, 'prix_vente': prix, 'actif': true})
+      ..put('stock.projection', '$product:$uuid', {'produit_uuid': product, 'lot_uuid': uuid, 'quantite': quantite});
+    server
+      ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1', 'lots.vente']
+      ..put('boutique', fakeShop, {
+        'nom': 'Boutique', 'devise': 'FCFA', 'tva_taux': '0.000000', 'tva_incluse': true,
+        'regles': {
+          'remise_pourcentage_arrondi': 'down', 'arrondi_especes': null, 'trop_percu': 'cash_change', 'moins_a_un': 'refuse',
+          'livraison_droit': null, 'ouverture_session': 'automatic', 'survente': 'refuse',
+          'gros': {'actif': false, 'mode': 'cart', 'quantite_min': null, 'droit': null, 'remises': 'refuse', 'prix_lot': 'refuse'},
+          'fuseau': 'Africa/Abidjan', 'nouveau_jours': 7, 'lots_mode': 'fifo',
+        },
+        'ticket': {'raison_sociale': null, 'adresse': null, 'telephone': null, 'ncc': null, 'entete': null, 'pied': null, 'largeur_papier': 80},
+        'devise_secondaire': null,
+      }, critical: true)
+      ..put('produit', fakeSavon, {...produit('Savon')}..remove('gere_par_lots'))
+      ..put('produit', fakeService, {...produit('Emballage'), 'stock_illimite': true}..remove('gere_par_lots'))
+      ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
+      ..put('operateur', 'operateur:7', {'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'remise', 'vente'], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false}, critical: true)
+      ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
+      ..put('operateur', 'operateur:8', {'operateur_id': '8', 'nom': 'Stagiaire', 'pin_empreinte': null, 'droits': <String>[], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false})
+      ..put('produit', riz, produit('Riz'))
+      ..put('produit', huile, produit('Huile'));
+    lot(recent, riz, 'R-2', '2026-10-20T08:00:00Z', 1000, '5.000000');
+    lot(ancien, riz, 'R-1', '2026-10-01T08:00:00Z', 1000, '3.000000', peremption: '2020-01-01');
+    lot(bas, huile, 'H-1', '2026-10-01T08:00:00Z', 1000, '2.000000');
+    lot(cher, huile, 'H-2', '2026-10-02T08:00:00Z', 1200, '2.000000');
+
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid, pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true, contract21: true);
+    await e.load('https://boutique.exemple.ci');
+    expect((await e.sync()).reachable, isTrue);
+    expect(e.blockReason, isNull);
+    final s = e.snapshot!;
+    final operator = s.operators.first;
+    Product named(String name) => e.snapshot!.products.firstWhere((p) => p.name == name);
+
+    final rice = named('Riz');
+    expect([rice.managedByLots, rice.price, rice.stockMicros.toInt(), [for (final l in rice.lots) l.reference]], [true, 1000, 8000000, ['R-1', 'R-2']]);
+    expect(rice.lots.first.expiredOn('2026-10-31'), isTrue);
+
+    // Quantité à cheval sur deux lots : deux lignes de contrat, remise répartie, total inchangé.
+    final line = CartLine(product: rice, quantity: BigInt.from(4000000), discount: 100);
+    final sale = await e.recordSale([line], [cash(e, 3900)], operator);
+    Future<Map> stored(OfflineOperation op) async => (((await e.v2.operation(op.uuid))!['operation'] as Map)['contenu'] as Map);
+    final content = await stored(sale);
+    final lines = (content['lignes'] as List).cast<Map>();
+    expect([for (final l in lines) [l['lot_uuid'], l['quantite'], l['remise'], l['prix_unitaire']]], [[ancien, '3.000000', 75, 1000], [recent, '1.000000', 25, 1000]]);
+    expect([for (final m in (content['mouvements'] as List).cast<Map>()) [m['lot_uuid'], m['variation']]], [[ancien, '-3.000000'], [recent, '-1.000000']]);
+    expect((content['totaux'] as Map)['a_payer'], 3900);
+
+    // Stock déduit lot par lot, avant toute réponse du serveur.
+    expect([for (final l in named('Riz').lots) l.remaining.toInt()], [0, 4000000]);
+    await expectLater(e.recordSale([CartLine(product: named('Riz'), quantity: BigInt.from(5000000))], [cash(e, 5000)], operator),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('aucune vente sans lot d’origine'))));
+
+    // Deux prix sans lot choisi : refus du web ; lot choisi : prix du lot.
+    final oil = named('Huile');
+    await expectLater(e.recordSale([CartLine(product: oil, quantity: BigInt.from(3000000))], [cash(e, 3000)], operator),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Plusieurs prix de lots'))));
+    final picked = CartLine(product: oil, lot: oil.lots.last);
+    expect(picked.unitPrice, 1200);
+    final chosen = await e.recordSale([picked], [cash(e, 1200)], operator);
+    expect((((await stored(chosen))['lignes'] as List).single as Map)['lot_uuid'], cher);
+
+    // Une ligne réserve le lot pour la suivante.
+    await expectLater(e.recordSale([CartLine(product: named('Huile'), lot: named('Huile').lots.last), CartLine(product: named('Huile'), lot: named('Huile').lots.last)], [cash(e, 2400)], operator),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Le lot choisi est indisponible'))));
+  });
+
   test('contrat 2.1 (lot 1b) : remise %, remise globale, livraison, note, arrondi espèces — intégrée au franc près', () async {
     // En 2.0 : remise globale, livraison et note indisponibles, avec le motif.
     final legacy = await paired();

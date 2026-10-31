@@ -335,6 +335,39 @@ class Promotion {
       (from == null || from!.compareTo(day) <= 0) && to.compareTo(day) >= 0 && !exclusions.any((x) => x.$1.compareTo(day) <= 0 && x.$2.compareTo(day) >= 0);
 }
 
+/// Lot d'un produit (capacité `lots.vente`) : [remaining] = stock estimé du lot, ventes locales non couvertes déduites.
+class ProductLot {
+  ProductLot(Map<String, dynamic> m)
+    : uuid = m['uuid'] as String,
+      reference = m['reference'] as String?,
+      enteredAt = DateTime.tryParse('${m['entree'] ?? ''}'),
+      expiresOn = m['peremption'] as String?,
+      price = (m['prix'] as num).toInt(),
+      remaining = parseMicros(m['reste'] as String) ?? BigInt.zero;
+
+  final String uuid;
+  final String? reference;
+  final DateTime? enteredAt;
+
+  /// Péremption AAAA-MM-JJ, ou null.
+  final String? expiresOn;
+  final int price;
+  final BigInt remaining;
+
+  /// Le web ne bloque pas un lot périmé : la caisse le signale.
+  bool expiredOn(String day) => expiresOn != null && expiresOn!.compareTo(day) < 0;
+
+  /// Libellé de la caisse web : référence, sinon date d'entrée.
+  String get label {
+    final ref = reference;
+    if (ref != null && ref.isNotEmpty) return ref;
+    final d = enteredAt?.toLocal();
+    if (d == null) return 'Lot';
+    String two(int v) => v.toString().padLeft(2, '0');
+    return 'Lot du ${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}';
+  }
+}
+
 /// Image principale d'un produit (contrat 2.1) ; [hash] change quand elle doit être retéléchargée.
 class ProductImage {
   ProductImage(Map<String, dynamic> m)
@@ -367,6 +400,9 @@ class Product {
       unlimitedStock = m['stock_illimite'] == true,
       stockMicros = parseMicros(((m['stock'] ?? '0') as String).replaceFirst('-', '')) ?? BigInt.zero,
       negativeStock = ((m['stock'] ?? '0') as String).startsWith('-'),
+      managedByLots = m['gere_par_lots'] == true,
+      lotMode = (m['lots_mode'] ?? 'fifo') as String,
+      lots = [for (final l in (m['lots'] as List? ?? const [])) ProductLot(Map<String, dynamic>.from(l as Map))],
       packagings = [for (final p in (m['conditionnements'] as List? ?? const [])) Packaging(Map<String, dynamic>.from(p as Map))],
       codes = [for (final c in (m['codes'] as List? ?? const [])) ProductCode(Map<String, dynamic>.from(c as Map))];
 
@@ -374,6 +410,11 @@ class Product {
   final String name;
   final String? reference;
   final String? category;
+
+  /// Produit vendu par lots (capacité `lots.vente`) ; [lots] dans l'ordre d'allocation de [lotMode].
+  final bool managedByLots;
+  final String lotMode;
+  final List<ProductLot> lots;
   final String? brand;
   final String? supplier;
 
@@ -453,7 +494,7 @@ class SaleExtras {
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.
 class CartLine {
-  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry})
+  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry, this.lot})
     : quantity = quantity ?? BigInt.from(1000000);
 
   /// Saisie de la remise (montant ou pourcentage), figée dans la vente 2.1 ; [discount] en est le montant.
@@ -464,10 +505,13 @@ class CartLine {
   BigInt quantity;
   int discount;
 
+  /// Lot choisi par le caissier ; null = choix automatique selon la règle de la boutique.
+  ProductLot? lot;
+
   /// Prix déjà encaissé (réimpression d'une vente enregistrée) ; null = prix du catalogue.
   final int? fixedPrice;
 
-  int get unitPrice => fixedPrice ?? packaging?.price ?? product.price;
+  int get unitPrice => fixedPrice ?? packaging?.price ?? lot?.price ?? product.price;
   String get label => packaging == null ? product.name : '${product.name} (${packaging!.name})';
   int get base => lineBase(unitPrice, quantity);
   int get total => lineTotal(unitPrice, quantity, discount);

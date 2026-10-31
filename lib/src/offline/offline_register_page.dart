@@ -616,6 +616,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           'quantite': formatMicros(l.quantity),
           'remise': l.discount,
           if (l.discountEntry != null) 'remise_saisie': l.discountEntry!.toJson(),
+          if (l.lot != null) 'lot_uuid': l.lot!.uuid,
         },
     ],
     if (_globalEntry != null) 'remise_globale_saisie': _globalEntry!.toJson(),
@@ -720,6 +721,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         discount: raw['remise'] as int,
         discountEntry: entry == null ? null : DiscountEntry.fromJson(entry),
         fixedPrice: raw['prix_fige'] as int?,
+        lot: product.lots.where((l) => l.uuid == raw['lot_uuid']).firstOrNull,
       ));
     }
     await _engine.deleteDraft(draft.uuid);
@@ -813,12 +815,12 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   /// Refus d'une action demandée : fenêtre à fermer, le message ne disparaît pas sans avoir été lu.
-  Future<void> _refuse(String message) async {
+  Future<void> _refuse(String message, {String title = 'Remise impossible'}) async {
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Remise impossible'),
+        title: Text(title),
         content: Text(message),
         actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
       ),
@@ -1446,7 +1448,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       );
     }
     setState(() {
-      final existing = _cart.where((l) => l.product.id == product.id && l.packaging?.id == chosen?.id).firstOrNull;
+      final existing = _cart.where((l) => l.product.id == product.id && l.packaging?.id == chosen?.id && l.lot == null).firstOrNull;
       if (existing != null) {
         existing.quantity += BigInt.from(1000000);
       } else {
@@ -1520,6 +1522,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final alert = !tracked || !first
         ? null
         : stockAlert(line.product.signedStock - (_sold[line.product.id] ?? BigInt.zero), _inCart(line.product), line.product.alertThreshold, _engine.oversellPolicy);
+    final shownLot = line.lot ?? line.product.lots.where((l) => l.remaining > BigInt.zero).firstOrNull;
+    final expired = shownLot?.expiredOn(DateTime.now().toIso8601String().substring(0, 10)) ?? false;
     final step = Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -1571,6 +1575,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           children: [
             Text(line.label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
             if (line.discount > 0) Text('${formatFcfa(line.unitPrice)} − ${formatFcfa(line.discount)}', style: const TextStyle(fontSize: 11)),
+            if (shownLot != null)
+              Text(
+                '${line.lot == null ? 'Automatique : ' : ''}${shownLot.label}${expired ? ' · périmé le ${shownLot.expiresOn}' : ''}',
+                style: TextStyle(fontSize: 11, color: expired ? Colors.red : null),
+              ),
             if (tracked) Text('Après vente : ${_stockText(_stockAfterCart(line.product))}', style: const TextStyle(fontSize: 11)),
             if (alert != null) Text(alert.message, style: TextStyle(fontSize: 11, color: alert.level == 'short' ? Colors.red : Colors.brown)),
             Row(children: [step, const Spacer(), Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: amounts))]),
@@ -1707,6 +1716,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Future<void> _editLine(Snapshot snapshot, CartLine line) async {
     final quantity = TextEditingController(text: formatMicros(line.quantity));
     final refusal = _discountRefusal;
+    var lot = line.lot;
     String? error;
     await showDialog<void>(
       context: context,
@@ -1722,6 +1732,22 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(labelText: 'Quantité'),
               ),
+              if (line.product.managedByLots && line.fixedPrice == null)
+                DropdownButtonFormField<String?>(
+                  initialValue: lot?.uuid,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Lot à vendre'),
+                  items: [
+                    const DropdownMenuItem(value: null, child: Text('Choix automatique selon la règle de la boutique')),
+                    for (final l in line.product.lots)
+                      if (l.remaining > BigInt.zero)
+                        DropdownMenuItem(
+                          value: l.uuid,
+                          child: Text('${l.label} · ${formatMicros(l.remaining)} disponible(s) · ${formatFcfa(l.price)}/unité', overflow: TextOverflow.ellipsis),
+                        ),
+                  ],
+                  onChanged: (v) => setLocal(() => lot = line.product.lots.where((l) => l.uuid == v).firstOrNull),
+                ),
               if (refusal == null)
                 Align(
                   alignment: Alignment.centerLeft,
@@ -1758,10 +1784,24 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               onPressed: () {
                 final q = parseMicros(quantity.text);
                 if (q == null || q <= BigInt.zero) return setLocal(() => error = 'Quantité invalide (six décimales au plus).');
+                final before = line.unitPrice;
+                final previous = line.lot;
+                line.lot = lot;
+                // Le prix suit le lot : la remise saisie sur l'ancien prix ne vaut plus.
+                final repriced = line.unitPrice != before;
                 final base = lineBase(line.unitPrice, q);
                 final entry = line.discountEntry;
-                if (entry != null && !entry.isPercent && line.discount > base) return setLocal(() => error = 'La remise dépasse le montant de la ligne.');
-                setState(() => line.quantity = q);
+                if (!repriced && entry != null && !entry.isPercent && line.discount > base) {
+                  line.lot = previous;
+                  return setLocal(() => error = 'La remise dépasse le montant de la ligne.');
+                }
+                setState(() {
+                  line.quantity = q;
+                  if (repriced) {
+                    line.discount = 0;
+                    line.discountEntry = null;
+                  }
+                });
                 Navigator.pop(context);
               },
               child: const Text('Valider'),
@@ -1773,6 +1813,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Future<void> _checkout(Snapshot snapshot, int payable) async {
+    try {
+      allocateLots(snapshot, _cart);
+    } on OfflineRefusal catch (e) {
+      return _refuse(e.message, title: 'Lot à vérifier');
+    }
     final globalDiscount = _totals(snapshot).globalDiscount;
     SaleApproval? approval;
     if (!_engine.withinDiscountLimits(_operator!, _cart, globalDiscount)) {

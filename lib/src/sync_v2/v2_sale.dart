@@ -5,7 +5,7 @@ import 'decimal6.dart';
 
 /// Ligne d'un panier v2, telle que choisie à l'écran (catalogue de la projection v2).
 class V2CartLine {
-  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry, this.fixedPrice});
+  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry, this.fixedPrice, this.lotUuid});
 
   final String productUuid;
   final String? packagingUuid;
@@ -17,6 +17,9 @@ class V2CartLine {
 
   /// Prix figé d'un panier partagé ; null = prix du catalogue.
   final int? fixedPrice;
+
+  /// Lot vendu, obligatoire pour un produit à lots (une ligne par lot).
+  final String? lotUuid;
 }
 
 /// Paiement d'une vente (au plus 10) ; [received] = somme remise par le client (espèces seulement), [reference] =
@@ -83,6 +86,7 @@ class V2SaleBuilder {
         throw V2SaleInvalid('« ${product['nom']} » ne se vend qu’en ligne.');
       }
       if (item.quantityMicros <= 0) throw const V2SaleInvalid('Quantité invalide.');
+      if (product['gere_par_lots'] == true && item.lotUuid == null) throw V2SaleInvalid('« ${product['nom']} » : lot manquant.');
       final pack = item.packagingUuid == null ? null : packagings[item.packagingUuid];
       if (item.packagingUuid != null && (pack == null || pack['actif'] != true || pack['produit_uuid'] != item.productUuid)) {
         throw const V2SaleInvalid('Conditionnement absent ou inactif.');
@@ -106,9 +110,10 @@ class V2SaleBuilder {
         'total': base - item.discount,
         'revision_prix': revisions[item.packagingUuid ?? item.productUuid] ?? '0',
         if (revision21) 'remise_saisie': item.discountEntry?.toJson(),
+        if (item.lotUuid != null) 'lot_uuid': item.lotUuid,
       });
-      if (product['stock_illimite'] != true) {
-        movements.add({'mouvement_uuid': newUuid(), 'produit_uuid': item.productUuid, 'lot_uuid': null, 'variation': Decimal6.format(-baseQuantity)});
+      if (product['stock_illimite'] != true || item.lotUuid != null) {
+        movements.add({'mouvement_uuid': newUuid(), 'produit_uuid': item.productUuid, 'lot_uuid': item.lotUuid, 'variation': Decimal6.format(-baseQuantity)});
       }
       bases.add(base);
       lineDiscounts.add(item.discount);

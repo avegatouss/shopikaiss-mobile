@@ -404,6 +404,10 @@
                         "gros"
                     ],
                     "description": "Révision 2.1 : prix appliqué (gros = prix_gros du produit ou du conditionnement)."
+                },
+                "lot_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Capacité lots.vente : lot vendu, obligatoire pour un produit à lots. Une ligne par lot."
                 }
             }
         },

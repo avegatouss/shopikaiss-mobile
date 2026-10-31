@@ -66,7 +66,7 @@ class V2Sync {
       // Première obtention de `client.lecture` : le journal ne redonne pas les clients déjà publiés.
       bool shared(String capability) => client.capabilities.contains(capability) && ((state['capacites_serveur'] as List?)?.contains(capability) ?? false);
       final revision = '${contract21 ? '2.1' : '2.0'}'
-          '${shared(CaisseV2Client.customerReadCapability) ? '+clients' : ''}${shared(CaisseV2Client.sharedCartCapability) ? '+paniers' : ''}';
+          '${shared(CaisseV2Client.customerReadCapability) ? '+clients' : ''}${shared(CaisseV2Client.sharedCartCapability) ? '+paniers' : ''}${shared(CaisseV2Client.lotsCapability) ? '+lots' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {
