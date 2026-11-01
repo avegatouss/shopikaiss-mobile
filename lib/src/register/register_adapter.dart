@@ -301,6 +301,7 @@ class LocalRegisterAdapter {
   String? _extrasRefusal() => engine.saleExtrasSupported ? null : 'Disponible quand la boutique est passée au contrat 2.1.';
 
   String? _wholesaleRefusal() {
+    if (_draft.sharedCart != null) return 'Le mode tarifaire d’un panier repris est figé.';
     final rules = engine.wholesaleRules;
     final operator = _operator;
     if (rules == null || !rules.manual) return 'La bascule « Tarif gros » du panier n’est pas activée dans cette boutique.';
@@ -478,6 +479,7 @@ class LocalRegisterAdapter {
             'available': cart != null,
             'lot_uuid': line.lotUuid,
             'lot_label': cart?.lot?.label,
+            'lot_expires_on': cart?.lot?.expiresOn,
             'wholesale': cart?.wholesale ?? false,
             'wholesale_refused': cart?.wholesaleRefused ?? false,
             'lots': [

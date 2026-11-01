@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../ipc/protocol.dart';
 import 'register_controller.dart';
 import 'payment_message.dart';
+import 'cash_documents.dart';
 
 /// Persists an immutable request before a financial mutation. Retry uses the
 /// same operation id and payload, including after an application restart.
@@ -406,6 +407,12 @@ class _CashOperationsState extends State<CashOperationsDialog> {
         ),
       ),
       actions: [
+        if (done)
+          TextButton.icon(
+            onPressed: busy ? null : () => showDialog<void>(context: context, builder: (_) => CashDocumentsDialog(host: c.host)),
+            icon: const Icon(Icons.print),
+            label: Text(widget.returns ? 'Imprimer le bon de retour' : 'Consulter / imprimer le Z'),
+          ),
         TextButton(
           onPressed: busy ? null : () => Navigator.pop(context),
           child: const Text('Fermer'),

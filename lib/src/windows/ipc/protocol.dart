@@ -46,6 +46,8 @@ enum HostCommand {
   commitSale,
   saleStatus,
   history,
+  cashDocuments,
+  cashDocument,
   reprint,
   printTicket,
   synchronize,

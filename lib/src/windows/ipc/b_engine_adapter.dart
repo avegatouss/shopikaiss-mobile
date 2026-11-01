@@ -1,4 +1,6 @@
 import '../../register/register_adapter.dart';
+import '../../offline/ticket.dart';
+import '../../offline/money.dart';
 import 'host_server.dart';
 import 'protocol.dart';
 
@@ -14,6 +16,29 @@ class BEngineAdapter implements WindowsEngineAdapter {
     Map<String, dynamic> arguments,
     String? operationId,
   ) async {
+    if (command == HostCommand.cashDocuments || command == HostCommand.cashDocument) {
+      final documents = (await inner.engine.history()).where((o) => o.type == 'retour' || o.type == 'cloture_session').toList().reversed;
+      if (command == HostCommand.cashDocuments) {
+        return {'items': [for (final o in documents) {'operation_id': o.uuid, 'title': o.type == 'retour' ? 'Bon de retour' : 'Rapport Z', 'date': o.date.toIso8601String(), 'available': o.type == 'retour' || o.content['z'] is Map, 'status': o.serverStatus ?? o.status}]};
+      }
+      final matches = documents.where((o) => o.uuid == arguments['operation_id']);
+      if (matches.isEmpty) throw const HostFailure('document_absent', 'Document introuvable sur ce poste.');
+      final o = matches.first;
+      final snapshot = inner.engine.snapshot;
+      if (snapshot == null) throw const HostFailure('document_absent', 'Référentiel indisponible.');
+      final rows = <(String, String)>[('Operation', o.uuid), ('Etat', o.serverStatus ?? o.status)];
+      if (o.type == 'retour') {
+        rows.add(('Remboursement especes', formatFcfa(o.content['montant'] as int)));
+        rows.add(('Motif', '${o.content['motif'] ?? ''}'));
+      } else {
+        final z = o.content['z'];
+        if (z is! Map) throw const HostFailure('z_attendu', 'Le rapport Z sera disponible après synchronisation.');
+        for (final entry in {'compte': 'Compte', 'theorique': 'Theorique', 'ecart': 'Ecart'}.entries) {
+          rows.add((entry.value, formatFcfa(z[entry.key] as int)));
+        }
+      }
+      return {'operation_id': o.uuid, 'lines': offlineSlipLines(snapshot: snapshot, title: o.type == 'retour' ? 'BON DE RETOUR' : 'RAPPORT Z', date: o.date, operatorName: snapshot.operatorById(o.operatorId)?.name ?? '', paperWidth: 80, rows: rows)};
+    }
     if (command == HostCommand.login) {
       final snapshot = inner.engine.snapshot;
       final id = arguments['operator_id'];

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
+import 'package:shopikaiss_terminal/src/offline/models.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/windows/ipc/b_engine_adapter.dart';
@@ -125,6 +126,22 @@ void main() {
     );
     await host.call(HostCommand.setPayment, arguments: {'method': 'especes'});
   }
+
+  test('cash documents are read-only and Z cannot disclose an unconfirmed count', () async {
+    final operation = OfflineOperation(uuid: nextId(), sequence: 1, type: 'cloture_session', number: null, date: DateTime(2026, 11, 1), operatorId: 7, content: {'compte': 5000});
+    await store.append(operation);
+    var list = await host.call(HostCommand.cashDocuments);
+    expect((list['items'] as List).single['available'], false);
+    await expectLater(host.call(HostCommand.cashDocument, arguments: {'operation_id': operation.uuid}), throwsA(isA<HostFailure>()));
+    operation.content['z'] = {'compte': 5000, 'theorique': 4900, 'ecart': 100};
+    await store.update(operation);
+    list = await host.call(HostCommand.cashDocuments);
+    expect((list['items'] as List).single['available'], true);
+    final before = (await store.operations()).length;
+    final document = await host.call(HostCommand.cashDocument, arguments: {'operation_id': operation.uuid});
+    expect((document['lines'] as List).join('\n'), contains('RAPPORT Z'));
+    expect((await store.operations()).length, before);
+  });
 
   test(
     'missing server PIN is configuration failure without consuming attempts',

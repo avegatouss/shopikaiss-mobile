@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'lot_wholesale.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -1252,6 +1253,7 @@ class _RegisterState extends State<_Register> {
               ),
             ],
           ),
+          WholesaleButton(controller: c),
           Expanded(
             child: c.lines.isEmpty
                 ? const Center(child: Text('Scannez votre premier article.'))
@@ -1276,6 +1278,7 @@ class _RegisterState extends State<_Register> {
                                 fontSize: 13,
                               ),
                             ),
+                            LineLotChoice(controller: c, line: line),
                             if (line['stock_after_label'] != null)
                               Text(
                                 'Après vente : ${line['stock_after_label']}',

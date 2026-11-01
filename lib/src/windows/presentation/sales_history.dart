@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'cash_documents.dart';
 
 import '../ipc/protocol.dart';
 import '../platform/receipt_printing.dart';
@@ -146,6 +147,7 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
             ),
     ),
     actions: [
+      TextButton(onPressed: _busy ? null : () => showDialog<void>(context: context, builder: (_) => CashDocumentsDialog(host: widget.host)), child: const Text('Bons de retour / Z')),
       if (_ticket != null)
         TextButton.icon(
           icon: const Icon(Icons.print_outlined),
