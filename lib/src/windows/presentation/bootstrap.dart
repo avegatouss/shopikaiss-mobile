@@ -8,6 +8,7 @@ import '../ipc/process_host.dart';
 import '../ipc/protocol.dart';
 import '../ipc/supervised_host.dart';
 import '../platform/sale_intent.dart';
+import '../platform/site_profiles.dart';
 import 'register_app.dart';
 import 'brand_logo.dart';
 import 'register_controller.dart';
@@ -31,6 +32,7 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
   bool busy = false;
   bool entered = false;
   String? error;
+  SiteProfiles? profiles;
 
   @override
   void initState() {
@@ -55,9 +57,12 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
       if (local == null || !p.isAbsolute(local)) {
         throw StateError('LocalAppData');
       }
-      // Same default as EngineHost; this directory must not be changed to
-      // bypass an unresolved intent or an existing engine lock.
-      final data = p.join(local, 'ShopiKaiss', 'caisse');
+      if (profiles == null) {
+        final saved = SiteProfiles(p.join(local, 'ShopiKaiss'));
+        await saved.load();
+        profiles = saved;
+      }
+      final data = profiles!.dataDirectory;
       // A v1 intent must never be reconciled as "not found" by a v2-only
       // lookup. Keep it intact and require its resolution with the old host.
       if (await File(p.join(data, 'pending-sale.json')).exists()) {
@@ -95,7 +100,44 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
 
   Future<void> _status() async {
     status = await host!.call(HostCommand.status);
+    if (status['web_origin'] is String) await profiles?.labelOrigin(status['web_origin'] as String, terminal: status['terminal_name'] as String?);
     if (controller!.uncertainOperation != null) await controller!.reconcile();
+  }
+
+  Future<void> _chooseSite(BuildContext dialogContext) async {
+    if (busy || profiles == null) return;
+    final selected = await showDialog<String>(context: dialogContext, builder: (context) => SimpleDialog(
+      title: const Text('Choisir une connexion'),
+      children: [
+        const Padding(padding: EdgeInsets.all(16), child: Text('Chaque connexion conserve son appairage, ses ventes et ses paniers. Aucun dossier de caisse n’est supprimé.')),
+        for (final entry in profiles!.names.entries)
+          SimpleDialogOption(onPressed: entry.key == profiles!.active ? null : () => Navigator.pop(context, entry.key), child: Text('${entry.value}${entry.key == profiles!.active ? ' · actuelle' : ''}')),
+        SimpleDialogOption(onPressed: () => Navigator.pop(context, 'new'), child: const Text('+ Connecter un autre site / terminal')),
+      ],
+    ));
+    if (!mounted || selected == null) return;
+    await _run(() async {
+      final currentStatus = await host!.call(HostCommand.status);
+      final view = await host!.call(HostCommand.view);
+      final blocked = siteSwitchRefusal(currentStatus, view, uncertain: controller!.uncertainOperation != null || await hasUnresolvedSiteIntent(profiles!.dataDirectory));
+      if (blocked != null) throw HostFailure('site_switch_refused', blocked);
+      // Complete normal engine shutdown before changing the active directory.
+      await host!.close();
+      controller?.dispose();
+      controller = null;
+      host = null;
+      try {
+        if (await hasUnresolvedSiteIntent(profiles!.dataDirectory)) throw const HostFailure('site_switch_refused', 'Une opération reste à vérifier sur cette connexion.');
+        await profiles!.select(selected == 'new' ? null : selected);
+      } catch (_) {
+        await _connect();
+        rethrow;
+      }
+      status = {};
+      operatorId = null;
+      pin.clear(); code.clear(); origin.clear();
+      await _connect();
+    });
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -165,6 +207,10 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
                       style: TextStyle(fontSize: 24),
                     ),
                     const SizedBox(height: 16),
+                    if (profiles != null) ...[
+                      Text('Connexion : ${profiles!.names[profiles!.active]}'),
+                      Builder(builder: (dialogContext) => TextButton.icon(onPressed: busy ? null : () => _chooseSite(dialogContext), icon: const Icon(Icons.dns_outlined), label: const Text('Changer de site / appairage'))),
+                    ],
                     if (error != null) Text(error!),
                     if (controller?.message != null) Text(controller!.message!),
                     if (status['block_reason'] != null)
@@ -304,6 +350,15 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
                       onPressed: busy ? null : () => _run(_connect),
                       child: const Text('Reconnexion / vérifier'),
                     ),
+                    if (status['paired'] == true)
+                      TextButton.icon(
+                        onPressed: busy ? null : () => _run(() async {
+                          await host!.call(HostCommand.synchronize);
+                          await _status();
+                        }),
+                        icon: const Icon(Icons.sync),
+                        label: Text('Synchroniser · ${status['pending'] ?? '?'} en attente'),
+                      ),
                   ],
                 ),
               ),
