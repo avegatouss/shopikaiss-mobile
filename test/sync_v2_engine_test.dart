@@ -957,7 +957,7 @@ void main() {
       ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
       ..put('operateur', 'operateur:7', {'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'remise', 'vente'], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false}, critical: true)
       ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
-      ..put('operateur', 'operateur:8', {'operateur_id': '8', 'nom': 'Stagiaire', 'pin_empreinte': null, 'droits': <String>[], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false})
+      ..put('operateur', 'operateur:8', {'operateur_id': '8', 'nom': 'Stagiaire', 'pin_empreinte': 'empreinte', 'droits': <String>[], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false})
       ..put('produit', riz, produit('Riz'))
       ..put('produit', huile, produit('Huile'));
     lot(recent, riz, 'R-2', '2026-10-20T08:00:00Z', 1000, '5.000000');
@@ -1013,6 +1013,9 @@ void main() {
     const huile = '0a000000-0000-4000-8000-0000000000b2';
     const carton = '0c000000-0000-4000-8000-0000000000b1';
     const lotHuile = '0e000000-0000-4000-8000-0000000000b2';
+    const beurre = '0a000000-0000-4000-8000-0000000000b3';
+    const lotBeurre = '0e000000-0000-4000-8000-0000000000b3';
+    const panierGros = 'ca000000-0000-4000-8000-0000000000b1';
     Map<String, dynamic> produit(String nom, {bool lots = false}) => {
       'nom': nom, 'reference': null, 'categorie': null, 'prix': 1000, 'stock_illimite': true, 'actif': true, 'vente_locale': true, 'gere_par_lots': lots,
       'categorie_uuid': null, 'marque': null, 'fournisseur': null, 'unite': null,
@@ -1030,19 +1033,32 @@ void main() {
       'devise_secondaire': null,
     };
     server
-      ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1', 'lots.vente']
+      ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1', 'lots.vente', 'panier.partage']
       ..put('boutique', fakeShop, boutique('cart_and_quantity', 'refuse'), critical: true)
       ..put('produit', fakeSavon, {...produit('Savon')}..remove('gere_par_lots'))
       ..put('produit', fakeService, {...produit('Emballage'), 'stock_illimite': true}..remove('gere_par_lots'))
       ..put('conditionnement', fakePack, {'produit_uuid': fakeSavon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 5500, 'defaut': false, 'actif': true, 'prix_gros': null})
       ..put('operateur', 'operateur:7', {'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'remise', 'vente'], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false}, critical: true)
       ..put('moyen_paiement', 'moyen:especes', {'code': 'especes', 'nom': 'Espèces', 'especes': true, 'local': true, 'reference': 'aucune'})
-      ..put('operateur', 'operateur:8', {'operateur_id': '8', 'nom': 'Stagiaire', 'pin_empreinte': null, 'droits': <String>[], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false})
+      ..put('operateur', 'operateur:8', {'operateur_id': '8', 'nom': 'Stagiaire', 'pin_empreinte': 'empreinte', 'droits': ['vente'], 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false})
       ..put('produit', savon, produit('Savon gros'))
       ..put('conditionnement', carton, {'produit_uuid': savon, 'nom': 'Carton de 12', 'coefficient': '12.000000', 'prix': 11000, 'defaut': false, 'actif': true, 'prix_gros': 9000})
       ..put('produit', huile, produit('Huile lot', lots: true))
       ..put('lot', lotHuile, {'produit_uuid': huile, 'reference': 'H-1', 'entree': '2026-10-01T08:00:00Z', 'peremption': null, 'prix_vente': 1000, 'actif': true})
-      ..put('stock.projection', '$huile:$lotHuile', {'produit_uuid': huile, 'lot_uuid': lotHuile, 'quantite': '50.000000'});
+      ..put('stock.projection', '$huile:$lotHuile', {'produit_uuid': huile, 'lot_uuid': lotHuile, 'quantite': '50.000000'})
+      ..put('produit', beurre, produit('Beurre lot', lots: true))
+      ..put('lot', lotBeurre, {'produit_uuid': beurre, 'reference': 'B-1', 'entree': '2026-10-01T08:00:00Z', 'peremption': null, 'prix_vente': 1200, 'actif': true})
+      ..put('stock.projection', '$beurre:$lotBeurre', {'produit_uuid': beurre, 'lot_uuid': lotBeurre, 'quantite': '50.000000'})
+      ..put('panier', panierGros, {
+        'etat': 'en_attente', 'libelle': 'Grossiste', 'auteur_operateur_id': '7', 'terminal_origine_uuid': fakeTerminal, 'terminaux': [fakeTerminal], 'repris_par': null,
+        'contenu': {
+          'lignes': [
+            {'produit_uuid': savon, 'conditionnement_uuid': null, 'libelle': 'Savon gros', 'quantite': '2.000000', 'coefficient': '1.000000', 'prix_unitaire': 800, 'remise': 0},
+          ],
+          'client_uuid': null, 'client_nom': null, 'remise_globale': 0, 'livraison': 0, 'note': null, 'tarif': 'gros',
+        },
+        'cree_le': '2026-10-29T07:00:00Z', 'modifie_le': '2026-10-29T07:00:00Z',
+      });
 
     final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid, pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true, contract21: true);
     await e.load('https://boutique.exemple.ci');
@@ -1079,6 +1095,26 @@ void main() {
     final oilSale = await e.recordSale([oil], [cash(e, 8000)], operator, extras: const SaleExtras(wholesale: true));
     final oilLine = ((await e.v2.operation(oilSale.uuid))!['operation']['contenu']['lignes'] as List).single as Map;
     expect([oilLine['tarif'], oilLine['prix_unitaire'], oilLine['lot_uuid']], ['gros', 800, lotHuile]);
+
+    // Sans le droit de la boutique : bascule refusée à la vente.
+    final trainee = e.snapshot!.operators.firstWhere((o) => o.name == 'Stagiaire');
+    await expectLater(e.recordSale([line(1)], [cash(e, 800)], trainee, extras: const SaleExtras(wholesale: true)),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('pas le droit'))));
+
+    // Lot à un autre prix que la fiche, règle « refuse » : ligne signalée, vente refusée.
+    final butter = CartLine(product: named('Beurre lot'), tier: tier);
+    expect([butter.unitPrice, butter.wholesale, butter.wholesaleRefused], [1200, false, true]);
+    await expectLater(e.recordSale([butter], [cash(e, 1200)], operator, extras: const SaleExtras(wholesale: true)),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Tarif gros refusé'))));
+    tier.cart = false;
+
+    // Panier repris au tarif gros : tarif et prix figé conservés jusqu'à la vente.
+    final taken = await e.takeSharedCart(operator, panierGros);
+    expect([taken.wholesale, taken.lines.single.unitPrice], [isTrue, 800]);
+    final fromCart = await e.recordSale(taken.lines, [cash(e, 1600)], operator, extras: const SaleExtras(wholesale: true, sharedCart: panierGros));
+    final fromCartContent = (await e.v2.operation(fromCart.uuid))!['operation']['contenu'] as Map;
+    expect([fromCartContent['tarif'], ((fromCartContent['lignes'] as List).single as Map)['prix_unitaire'], fromCartContent['panier_uuid']], ['gros', 800, panierGros]);
+    tier.cart = true;
 
     // Prix du lot différent de la fiche : règle prix_lot de la boutique.
     (int, bool, bool) lotPriced(String rule, int lotPrice, {int? wholesale = 800}) {

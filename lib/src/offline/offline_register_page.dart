@@ -1379,11 +1379,19 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         children: [
           if (!product.unlimitedStock) Text('Stock : ${_stockText(stock)}', style: TextStyle(color: stock <= BigInt.zero ? Colors.red : Colors.black54)),
           _badges(product, stock),
+          ?_wholesaleHint(product),
         ],
       ),
       trailing: Text(formatFcfa(product.price), style: const TextStyle(fontWeight: FontWeight.bold)),
       onTap: () => _add(product, null),
     );
+  }
+
+  /// Prix de gros du produit, si la boutique a le tarif gros.
+  Widget? _wholesaleHint(Product product) {
+    final price = product.wholesalePrice;
+    if (price == null || _engine.wholesaleRules == null) return null;
+    return Text('Gros : ${formatFcfa(price)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Colors.black54));
   }
 
   Widget _productTile(Product product) {
@@ -1426,6 +1434,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 ],
               ),
               _badges(product, stock),
+              ?_wholesaleHint(product),
               if (!product.unlimitedStock)
                 Text(_stockText(stock), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 12, color: stock <= BigInt.zero ? Colors.red : Colors.black87)),
             ],
