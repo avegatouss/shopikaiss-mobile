@@ -436,6 +436,7 @@ void main() {
       }, critical: true)
       ..put('categorie', hygiene, {'nom': 'Hygiène', 'ordre': 2, 'actif': true})
       ..put('categorie', services, {'nom': 'Services', 'ordre': 1, 'actif': true})
+      ..put('categorie', '0b000000-0000-4000-8000-0000000000ff', {'nom': 'Partagée ailleurs', 'ordre': 0, 'actif': true})
       ..put('produit', fakeSavon, {
         ...produit21('Savon', 'SAV', 500, false, hygiene, 'Dove'),
         'favori': true,
@@ -465,7 +466,7 @@ void main() {
     expect(e.blockReason, isNull);
 
     final s = e.snapshot!;
-    expect(s.categories, ['Services', 'Hygiène'], reason: 'ordre de la boutique, pas alphabétique');
+    expect(s.categories, ['Services', 'Hygiène'], reason: 'ordre de la boutique, pas alphabétique ; catégorie sans produit de la boutique masquée');
     final savonProduct = s.byCode('6190000000011')!.$1;
     expect([savonProduct.category, savonProduct.brand, savonProduct.supplier, savonProduct.unit], ['Hygiène', 'Dove', 'Grossiste Plateau', 'Pièce']);
     expect(s.search('dove').single.name, 'Savon');

@@ -1218,7 +1218,9 @@ class V2Engine extends CaisseEngine {
       return category != null && category['actif'] == true ? category['nom'] as String : product['categorie'] as String?;
     }
 
-    final orderedCategories = categories.values.where((c) => c['actif'] == true).toList()
+    // Onglets du web : catégories portant un produit actif de la boutique (une catégorie partagée peut n'en porter qu'ailleurs).
+    final used = {for (final p in products.values) if (p['actif'] == true) p['categorie_uuid']};
+    final orderedCategories = categories.entries.where((c) => c.value['actif'] == true && used.contains(c.key)).map((c) => c.value).toList()
       ..sort((a, b) => (a['ordre'] as int).compareTo(b['ordre'] as int));
     final localMethods = (policies['paiements.moyens_locaux'] as List?)?.cast<String>() ?? const <String>[];
     // Espèces, et moyens déclarés quand les deux côtés ont la capacité ; toujours dans la politique de la boutique.
