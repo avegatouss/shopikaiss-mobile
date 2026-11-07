@@ -459,6 +459,7 @@ class LocalRegisterAdapter {
                   ? null
                   : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height, 'path': engine.imagePath(p.image!)},
               'price_label': formatFcfa(p.price, currency),
+              'wholesale_price_label': p.wholesalePrice == null || engine.wholesaleRules == null ? null : formatFcfa(p.wholesalePrice!, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'stock_after_label': p.unlimitedStock ? '' : _stockLabel(p, (sold[p.id] ?? BigInt.zero) + (demand[p.id] ?? BigInt.zero)),
               'packagings': [for (final k in p.packagings) {'id': k.id, 'name': k.name, 'price_label': formatFcfa(k.price, currency)}],

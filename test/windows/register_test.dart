@@ -47,6 +47,7 @@ class _Host implements WindowsHost {
         'id': 'p1',
         'name': 'Produit de test',
         'price_label': '2 000 F',
+        'wholesale_price_label': '1 800 F',
       },
     ],
     'lines': [
@@ -1145,6 +1146,7 @@ void main() {
       await tester.pumpWidget(WindowsRegisterApp(controller: c));
       await tester.pumpAndSettle();
       if (size.width < 900) {
+        expect(find.text('Gros : 1 800 F'), findsOneWidget);
         await tester.tap(find.text('Panier').first);
         await tester.pumpAndSettle();
       }

@@ -1092,6 +1092,8 @@ class _RegisterState extends State<_Register> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text('Stock : ${p['stock_label'] ?? "à vérifier"}'),
+                          if (p['wholesale_price_label'] != null)
+                            Text('Gros : ${p['wholesale_price_label']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
                           ProductBadges(product: p),
                         ],
                       ),
@@ -1105,7 +1107,7 @@ class _RegisterState extends State<_Register> {
                     maxCrossAxisExtent: _screen.tileWidth,
                     mainAxisExtent:
                         _screen.tileWidth * 115 / 175 +
-                        24 +
+                        42 +
                         (_screen.imageLayout == 'top' ? 68 : 0),
                     crossAxisSpacing: 4,
                     mainAxisSpacing: 4,
@@ -1180,6 +1182,8 @@ class _RegisterState extends State<_Register> {
                                 ],
                               ),
                               const SizedBox(height: 4),
+                              if (p['wholesale_price_label'] != null)
+                                Text('Gros : ${p['wholesale_price_label']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
                               ProductBadges(product: p),
                               Text(
                                 p['stock_label'] as String? ??
