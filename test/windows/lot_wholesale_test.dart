@@ -92,6 +92,7 @@ void main() {
                       'uuid': 'lot1',
                       'label': 'Lot A',
                       'expires_on': '2026-10-01',
+                      'expiry_label': '01/10/2026',
                     },
                   ],
                 },
@@ -102,6 +103,9 @@ void main() {
       );
       await tester.tap(find.byType(DropdownButton<String>));
       await tester.pumpAndSettle();
+      expect(find.textContaining('péremption 01/10/2026'), findsWidgets);
+      expect(tester.widget<Text>(find.textContaining('Lot A').last).style?.color,
+          Theme.of(tester.element(find.byType(LineLotChoice))).colorScheme.error);
       await tester.tap(find.textContaining('Lot A').last);
       await tester.pumpAndSettle();
       expect(host.command, HostCommand.setLineLot);

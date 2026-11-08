@@ -3,9 +3,10 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+
+import 'receipt_pdf.dart';
 
 /// App-specific printer; never changes the Windows system default.
 class ReceiptPrinting {
@@ -50,27 +51,12 @@ class ReceiptPrinting {
     final font = pw.Font.ttf(
       ByteData.sublistView(await fontFile.readAsBytes()),
     );
-    final doc = pw.Document();
-    doc.addPage(
-      pw.MultiPage(
-        pageFormat: PdfPageFormat(
-          80 * PdfPageFormat.mm,
-          297 * PdfPageFormat.mm,
-          marginAll: 4 * PdfPageFormat.mm,
-        ),
-        theme: pw.ThemeData.withFont(base: font),
-        build: (_) => [
-          for (final line in lines)
-            pw.Text(line, style: const pw.TextStyle(fontSize: 9)),
-        ],
-      ),
-    );
-    final bytes = await doc.save();
+    final receipt = await buildReceiptPdf(lines, font: font);
     final sent = await Printing.directPrintPdf(
       printer: matching.first,
-      onLayout: (_) async => bytes,
+      onLayout: (_) async => receipt.bytes,
       name: 'Shopikaiss - ticket',
-      format: PdfPageFormat(80 * PdfPageFormat.mm, 297 * PdfPageFormat.mm),
+      format: receipt.format,
       dynamicLayout: false,
     );
     return sent

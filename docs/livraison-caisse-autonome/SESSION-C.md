@@ -351,3 +351,12 @@ Validation du lot sites : 80 tests Windows PASS, dont les 4 tests de conservatio
 B 78e935e intégré (8651969 inclus). Onglets limités aux catégories actives portant un produit actif de la boutique. Vignettes Windows grille et liste : Gros : montant, fourni par wholesale_price_label dans la vue commune, seulement si prix gros et règles gros existent. Aucun calcul tarifaire déplacé vers Windows. Hauteur de carte adaptée et test de rendu sur petit écran enrichi.
 Validation : 97 tests Windows/moteur v2 PASS ; analyse ciblée sans remarque. Pas de nouvelle recette démo ni de vente réelle.
 Restaurant : relecture C déposée dans le plan commun hors dépôt, section 7. Points critiques : accusé afficheur perdu, issue TCP inconnue, secours seulement sur non-envoi certain, file durable possédée par B, jetons LAN et reprise de maître après panne. Aucun code restaurant avant validation du plan commun et du responsable. Demande à B de reprendre le commit Windows pour construire Android et Windows sur le même SHA (P5).
+
+## 8 novembre — retours d'essai B, paiement et tickets Windows
+
+B 6e3db30 intégré en avance rapide. Le sélecteur de lot affiche la date JJ/MM/AAAA et colore les lots périmés en rouge. La capacité retour présente le motif précis fourni par le moteur. Avant la fenêtre de paiement, preparePayment contrôle les règles du moteur (notamment gros + remise) sans écriture de vente ; un refus apparaît dans une fenêtre explicite, panier conservé. Le panier vide reste autorisé pour lire les moyens de paiement lors du comptage de clôture.
+
+L'impression par pilote produit désormais des pages rouleau de hauteur mesurée, largeur 80 mm. Les longs documents sont découpés en sections sans suppression des lignes. Voir IMPRESSION-WINDOWS.md pour le réglage du pilote POS-80 et la recette papier restante. Aucun envoi à l'imprimante pendant ce lot.
+
+Coordination : réponses C aux modèles ticket.modeles et aux questions R0 restaurant 4/11/12/13/16 déposées dans JOURNAL.md le 08/11. Les modèles et le restaurant ne sont pas annoncés comme disponibles dans cette version : schémas/fixtures serveur A et commandes moteur B restent à livrer. Le responsable a demandé leur implémentation ; le raccordement suivra ces contrats, sans type inventé par Windows.
+Validation : 112 tests Windows/adaptateur/moteur v2 réussis ; analyse ciblée sans anomalie. Régression de lecture des moyens sur panier vide corrigée avant validation finale. Pas de nouvelle vente réelle ni de recette papier.

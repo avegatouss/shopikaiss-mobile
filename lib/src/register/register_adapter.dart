@@ -274,7 +274,7 @@ class LocalRegisterAdapter {
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
       'close_session': cap(_operator == null ? 'Identifiez le caissier.' : (engine.canCloseSession(_operator!) ? null : 'Clôture non autorisée sur ce terminal.')),
-      'returns': cap(_operator != null && engine.returnsOpen(_operator!) ? null : 'Retours hors ligne non autorisés sur ce terminal.'),
+      'returns': cap(_operator == null ? 'Identifiez le caissier pour effectuer un retour.' : engine.returnBlocker(_operator!)),
       'image_schedule': cap(engine.imagesSupported ? null : 'Images non disponibles sur ce terminal.'),
       'shared_carts': cap(engine.sharedCartsSupported ? null : 'Paniers partagés non disponibles sur ce terminal.'),
       'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
@@ -486,7 +486,7 @@ class LocalRegisterAdapter {
             'lots': [
               for (final l in cart?.product.lots ?? const <ProductLot>[])
                 if (l.remaining > BigInt.zero)
-                  {'uuid': l.uuid, 'label': '${l.label} · ${formatMicros(l.remaining)} disponible(s) · ${formatFcfa(l.price, currency)}/unité', 'expires_on': l.expiresOn},
+                  {'uuid': l.uuid, 'label': '${l.label} · ${formatMicros(l.remaining)} disponible(s) · ${formatFcfa(l.price, currency)}/unité', 'expires_on': l.expiresOn, 'expiry_label': l.expiryLabel},
             ],
             'stock_after_label': cart == null || cart.product.unlimitedStock
                 ? ''
@@ -1065,6 +1065,24 @@ class LocalRegisterAdapter {
 
   Future<Map<String, dynamic>> _preparePayment() async {
     final snapshot = _snapshot();
+    final operator = _operator;
+    final lines = [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))];
+    if (lines.any((l) => l == null)) {
+      throw const AdapterFailure('panier_invalide', 'Panier vide ou article retiré du catalogue : corrigez le panier.');
+    }
+    try {
+      // Empty basket is also used to list payment methods for blind closure.
+      if (lines.isNotEmpty) {
+        if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant d’encaisser.');
+        engine.checkSaleRules(operator, lines.cast<CartLine>(), SaleExtras(
+        wholesale: _draft.wholesale, globalDiscount: _draft.globalDiscount,
+        globalEntry: _draft.globalEntry, delivery: _draft.delivery,
+        note: _draft.note, customer: _draft.customer, sharedCart: _draft.sharedCart?.uuid,
+      ));
+      }
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('vente_refusee', e.message);
+    }
     final payable = _payable(snapshot);
     return {
       'payable': payable,

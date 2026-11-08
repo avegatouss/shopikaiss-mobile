@@ -25,6 +25,7 @@ class _Host implements WindowsHost {
   bool failHistory = false;
   bool approvalSeen = false;
   bool refuseApproval = false;
+  bool refusePreparation = false;
   String? lookupId;
   Completer<Map<String, dynamic>>? pendingView;
   final Map<String, dynamic> state = {
@@ -107,6 +108,9 @@ class _Host implements WindowsHost {
       return pendingView!.future;
     }
     if (command == HostCommand.preparePayment) {
+      if (refusePreparation) {
+        throw const HostFailure('vente_refusee', 'Le tarif gros ne se cumule pas avec une remise.');
+      }
       return {
         'methods': [
           {'code': 'especes', 'name': 'Espèces', 'cash': true},
@@ -934,6 +938,26 @@ void main() {
     c.dispose();
     await host.close();
     await File(dir.path).delete();
+  });
+
+  testWidgets('payment refusal is a visible dialog and never opens payment', (tester) async {
+    tester.view.physicalSize = const Size(1366, 768);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final host = _Host()..refusePreparation = true;
+    final c = WindowsRegisterController(host);
+    addTearDown(() async { c.dispose(); await host.close(); });
+    await tester.pumpWidget(WindowsRegisterApp(controller: c));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Payer (F4)'));
+    await tester.pumpAndSettle();
+    expect(find.text('Paiement indisponible'), findsOneWidget);
+    expect(find.descendant(of: find.byType(AlertDialog), matching: find.text('Le tarif gros ne se cumule pas avec une remise.')), findsOneWidget);
+    expect(host.calls, isNot(contains(HostCommand.commitSale)));
+    await tester.tap(find.text('Compris'));
+    await tester.pumpAndSettle();
+    expect(find.text('Article en panier'), findsOneWidget);
   });
 
   testWidgets('catalogue and payment buttons use B commands', (tester) async {

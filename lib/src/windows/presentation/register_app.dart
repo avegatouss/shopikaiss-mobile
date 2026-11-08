@@ -427,7 +427,19 @@ class _RegisterState extends State<_Register> {
 
   Future<void> _payment() async {
     if (!c.canPay) return;
-    await c.command(HostCommand.preparePayment, {});
+    final prepared = await c.command(HostCommand.preparePayment, {});
+    if (!mounted) return;
+    if (prepared == null) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Paiement indisponible'),
+          content: Text(c.message ?? 'Le paiement ne peut pas être préparé. Réessayez après vérification du panier.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
+        ),
+      );
+      return;
+    }
     if (!mounted || !c.canPay) return;
     await showDialog<void>(
       context: context,

@@ -1091,6 +1091,21 @@ void main() {
     // Cumul refusé par la boutique, comme au web, et dès le bouton Payer.
     expect(() => e.checkSaleRules(operator, [line(1)..discount = 100], const SaleExtras(wholesale: true)),
         throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('ne se cumule pas'))));
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    // Closure still gets methods with an empty cart.
+    expect((await adapter.execute('preparePayment', {}, null))['methods'], isNotEmpty);
+    final basket = await adapter.execute('addProduct', {'product_id': named('Savon gros').id}, null);
+    final basketLine = (basket['lines'] as List).single['id'];
+    await adapter.execute('setWholesale', {'active': true}, null);
+    await adapter.execute('setLineDiscount', {'line_id': basketLine, 'amount': 50}, null);
+    final beforePreparation = e.pendingCount;
+    await expectLater(adapter.execute('preparePayment', {}, null),
+      throwsA(isA<AdapterFailure>().having((r) => r.message, 'message', contains('ne se cumule pas'))));
+    expect(e.pendingCount, beforePreparation, reason: 'preflight never records a sale');
+    expect((await adapter.execute('view', {}, null))['lines'], hasLength(1));
+    await adapter.execute('clear', {}, null);
     await expectLater(e.recordSale([line(1)..discount = 100], [cash(e, 700)], operator, extras: const SaleExtras(wholesale: true)),
         throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('ne se cumule pas'))));
 

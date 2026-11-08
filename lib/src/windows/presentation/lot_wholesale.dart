@@ -81,7 +81,10 @@ class LineLotChoice extends StatelessWidget {
                 DropdownMenuItem(
                   value: lot['uuid'] as String,
                   child: Text(
-                    '${lot['label']}${lot['expires_on'] == null ? '' : ' · péremption ${lot['expires_on']}'}',
+                    '${lot['label']}${lot['expires_on'] == null ? '' : ' · péremption ${lot['expiry_label'] ?? lot['expires_on']}'}',
+                    style: expiredLot(lot['expires_on'], DateTime.now())
+                        ? TextStyle(color: Theme.of(context).colorScheme.error)
+                        : null,
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -101,11 +104,16 @@ class LineLotChoice extends StatelessWidget {
             'Lot : ${line['lot_label']}',
             style: const TextStyle(fontSize: 11),
           ),
-      if (expiredLot(line['lot_expires_on'], DateTime.now()) || lots.any((lot) => lot['uuid'] == selected && expiredLot(lot['expires_on'], DateTime.now())))
-            Text(
-              'Lot périmé — vérifiez le produit.',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+        if (expiredLot(line['lot_expires_on'], DateTime.now()) ||
+            lots.any(
+              (lot) =>
+                  lot['uuid'] == selected &&
+                  expiredLot(lot['expires_on'], DateTime.now()),
+            ))
+          Text(
+            'Lot périmé — vérifiez le produit.',
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
       ],
     );
   }
