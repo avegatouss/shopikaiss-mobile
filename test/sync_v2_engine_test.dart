@@ -759,6 +759,7 @@ void main() {
 
     // Lot 5 : retours fermés par défaut ; ouverts par la capacité, la politique et les droits.
     expect(e.returnsOpen(closer), isFalse);
+    expect(e.returnBlocker(closer), contains('ne propose pas les retours'), reason: 'le journal dit pourquoi le retour est fermé');
     await expectLater(e.recordReturn(closer, frozen.uuid, const {}, 'x'), refused('non autorisé'));
     Map<String, dynamic> politique(String cle, Object valeur) => {
       'type': 'politique', 'critique': false, 'cle': cle, 'revision': '3', 'action': 'upsert',
@@ -776,6 +777,7 @@ void main() {
     expect(e.blockReason, isNull);
     final refunder = e.snapshot!.operators.firstWhere((o) => o.id == 7);
     expect(e.returnsOpen(refunder), isTrue);
+    expect(e.returnBlocker(refunder), isNull);
     final line = (await e.returnableLines(frozen.uuid)).single;
     expect(line.remaining, 2000000);
     expect(await e.returnAmount(frozen.uuid, {line.lineUuid: 1000000}), 450);
@@ -1086,7 +1088,9 @@ void main() {
     expect((await e.v2.operation(byCart.uuid))!['operation']['contenu']['tarif'], 'gros');
     expect(byCart.content['tarif'], 'gros');
 
-    // Cumul refusé par la boutique, comme au web.
+    // Cumul refusé par la boutique, comme au web, et dès le bouton Payer.
+    expect(() => e.checkSaleRules(operator, [line(1)..discount = 100], const SaleExtras(wholesale: true)),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('ne se cumule pas'))));
     await expectLater(e.recordSale([line(1)..discount = 100], [cash(e, 700)], operator, extras: const SaleExtras(wholesale: true)),
         throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('ne se cumule pas'))));
 

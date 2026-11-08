@@ -363,6 +363,12 @@ class ProductLot {
   /// Le web ne bloque pas un lot périmé : la caisse le signale.
   bool expiredOn(String day) => expiresOn != null && expiresOn!.compareTo(day) < 0;
 
+  /// Péremption au format JJ/MM/AAAA, ou null.
+  String? get expiryLabel {
+    final parts = expiresOn?.split('-');
+    return parts == null || parts.length != 3 ? expiresOn : '${parts[2]}/${parts[1]}/${parts[0]}';
+  }
+
   /// Libellé de la caisse web : référence, sinon date d'entrée.
   String get label {
     final ref = reference;

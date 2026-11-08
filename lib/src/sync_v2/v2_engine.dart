@@ -450,13 +450,17 @@ class V2Engine extends CaisseEngine {
   ({String mode, int max, int days}) _returnRules = (mode: 'en_ligne', max: 0, days: 0);
 
   @override
-  bool returnsOpen(Operator operator) =>
-      saleExtrasSupported &&
-      _serverOffers(CaisseV2Client.returnCapability) &&
-      _returnRules.mode == 'especes' &&
-      !((_state?['fonctions_restreintes'] as List?)?.any((f) => (f as Map)['fonction'] == 'retour') ?? true) &&
-      hasRight(operator, 'retour_creer') &&
-      hasRight(operator, 'retour_rembourser_especes');
+  String? returnBlocker(Operator operator) {
+    if (!saleExtrasSupported || !_serverOffers(CaisseV2Client.returnCapability)) return 'La boutique ne propose pas les retours hors ligne à ce terminal.';
+    if (_returnRules.mode != 'especes') return 'Les retours hors ligne en espèces ne sont pas activés dans les réglages de la boutique.';
+    if ((_state?['fonctions_restreintes'] as List?)?.any((f) => (f as Map)['fonction'] == 'retour') ?? true) return 'Les retours sont suspendus sur ce terminal par la boutique.';
+    if (!hasRight(operator, 'retour_creer')) return '${operator.name} n’a pas le droit de créer un retour.';
+    if (!hasRight(operator, 'retour_rembourser_especes')) return '${operator.name} n’a pas le droit de rembourser en espèces.';
+    return null;
+  }
+
+  @override
+  void checkSaleRules(Operator operator, List<CartLine> lines, SaleExtras extras) => _checkWholesale(operator, lines, extras);
 
   /// Vente du terminal, parts archivées par ligne, quantités déjà retournées et total déjà rendu. Si la boutique change de
   /// règle entre deux retours d'une vente, le serveur garde la première : écart, donc arbitrage.

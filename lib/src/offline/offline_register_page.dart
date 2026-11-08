@@ -1608,7 +1608,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             if (line.discount > 0) Text('${formatFcfa(line.unitPrice)} − ${formatFcfa(line.discount)}', style: const TextStyle(fontSize: 11)),
             if (shownLot != null)
               Text(
-                '${line.lot == null ? 'Automatique : ' : ''}${shownLot.label}${expired ? ' · périmé le ${shownLot.expiresOn}' : ''}',
+                '${line.lot == null ? 'Automatique : ' : ''}${shownLot.label}${expired ? ' · périmé le ${shownLot.expiryLabel}' : ''}',
                 style: TextStyle(fontSize: 11, color: expired ? Colors.red : null),
               ),
             if (line.wholesale && !_tier.cart) const Text('Prix de gros (seuil atteint)', style: TextStyle(fontSize: 11)),
@@ -1747,6 +1747,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Future<void> _editLine(Snapshot snapshot, CartLine line) async {
+    final today = DateTime.now().toIso8601String().substring(0, 10);
     final quantity = TextEditingController(text: formatMicros(line.quantity));
     final refusal = _discountRefusal;
     var lot = line.lot;
@@ -1776,7 +1777,12 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                       if (l.remaining > BigInt.zero)
                         DropdownMenuItem(
                           value: l.uuid,
-                          child: Text('${l.label} · ${formatMicros(l.remaining)} disponible(s) · ${formatFcfa(l.price)}/unité', overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            '${l.label}${l.expiresOn == null ? '' : l.expiredOn(today) ? ' · périmé le ${l.expiryLabel}' : ' · péremption ${l.expiryLabel}'} · '
+                            '${formatMicros(l.remaining)} disponible(s) · ${formatFcfa(l.price)}/unité',
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: l.expiredOn(today) ? Colors.red : null),
+                          ),
                         ),
                   ],
                   onChanged: (v) => setLocal(() => lot = line.product.lots.where((l) => l.uuid == v).firstOrNull),
@@ -1852,6 +1858,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       return _refuse(e.message, title: 'Lot à vérifier');
     }
     final globalDiscount = _totals(snapshot).globalDiscount;
+    try {
+      _engine.checkSaleRules(_operator!, _cart, SaleExtras(wholesale: _tier.cart, globalDiscount: globalDiscount, sharedCart: _shared?.uuid));
+    } on OfflineRefusal catch (e) {
+      return _refuse(e.message, title: 'Encaissement refusé');
+    }
     SaleApproval? approval;
     if (!_engine.withinDiscountLimits(_operator!, _cart, globalDiscount)) {
       approval = await _askApproval(globalDiscount);
@@ -1881,8 +1892,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         extras: SaleExtras(wholesale: _tier.cart, globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer, sharedCart: _shared?.uuid),
       );
     } on OfflineRefusal catch (e) {
-      _toast(e.message);
-      return;
+      return _refuse(e.message, title: 'Encaissement refusé');
     } catch (e, stack) {
       // Mémoire du terminal pleine, base locale illisible… : la vente n'existe pas, rien n'est imprimé, le panier reste.
       await ErrorJournal.record('Vente hors ligne non enregistrée : $e', stack);
@@ -1943,6 +1953,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Retour en espèces d'une vente de ce terminal : quantités par ligne, montant calculé, motif obligatoire.
   Future<void> _startReturn(OfflineOperation sale) async {
     final operator = _operator!;
+    final blocker = _engine.returnBlocker(operator);
+    if (blocker != null) return _refuse(blocker, title: 'Retour impossible');
     final List<ReturnableLine> lines;
     try {
       lines = await _engine.returnableLines(sale.uuid);
@@ -2083,7 +2095,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         builder: (_) => PendingOperationsPage(
           engine: _engine,
           onReprint: _reprint,
-          onReturn: _operator != null && _engine.returnsOpen(_operator!) ? _startReturn : null,
+          onReturn: _operator != null ? _startReturn : null,
           onPrintZ: _printZ,
         ),
       ),

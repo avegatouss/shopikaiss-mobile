@@ -228,7 +228,13 @@ abstract class CaisseEngine extends EngineNotifier {
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);
 
   /// Retours hors ligne ouverts à [operator] : fermés par défaut (capacité `retour.especes`, `retours.mode`, droits).
-  bool returnsOpen(Operator operator) => false;
+  bool returnsOpen(Operator operator) => returnBlocker(operator) == null;
+
+  /// Pourquoi [operator] ne peut pas faire de retour hors ligne, ou null s'il le peut.
+  String? returnBlocker(Operator operator) => 'Retours hors ligne non disponibles sur ce terminal.';
+
+  /// Contrôles de règle de la vente faits avant l'encaissement (tarif gros, cumul avec une remise) : [OfflineRefusal] sinon.
+  void checkSaleRules(Operator operator, List<CartLine> lines, SaleExtras extras) {}
 
   /// Lignes encore retournables d'une vente émise par ce terminal ; refus si le terminal ne peut pas chiffrer son retour.
   Future<List<ReturnableLine>> returnableLines(String saleUuid) => throw const OfflineRefusal('Retours non disponibles sur ce terminal.');
