@@ -2121,6 +2121,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }) async {
     final session = widget.session;
     final width = session.rollWidth > 0 ? session.rollWidth : 58;
+    final model = await _engine.ticketModelOf(operation);
     final text = offlineTicketLines(
       snapshot: snapshot,
       operation: operation,
@@ -2129,14 +2130,15 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       operatorName: operatorName ?? _operator?.name ?? '',
       paperWidth: width,
       duplicate: duplicate,
+      model: model,
     );
-    await _printText(text, failure: 'Ticket non imprimé', saved: ' : la vente est bien enregistrée.');
+    await _printText(text, failure: 'Ticket non imprimé', saved: ' : la vente est bien enregistrée.', compact: model?.compact ?? false);
   }
 
-  Future<void> _printText(List<String> text, {required String failure, String saved = '.'}) async {
+  Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false}) async {
     final session = widget.session;
     if (session.hasPrinter) {
-      final result = await session.channel.printRaw(offlineTicketBytes(text));
+      final result = await session.channel.printRaw(offlineTicketBytes(text, compact: compact));
       if (!result.ok) _toast('$failure (${result.error})$saved');
       return;
     }

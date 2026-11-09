@@ -358,6 +358,41 @@ void main() {
         expect(ticket.any((l) => RegExp(r'[^\x20-\x7E]').hasMatch(l)), isFalse);
       }
       expect(offlineTicketBytes(['A', 'B']).length, greaterThan(4));
+      // Avance avant coupe : 3 lignes, 2 en compact.
+      expect(offlineTicketBytes(['A']).sublist(offlineTicketBytes(['A']).length - 7), [27, 0x64, 3, 29, 0x56, 66, 0]);
+      expect(offlineTicketBytes(['A'], compact: true).reversed.skip(4).first, 2);
+    });
+
+    test('ticket : modèle de la boutique, blocs obligatoires, repli sur la disposition d’origine', () async {
+      await paired();
+      final lines = [soap()];
+      final payments = [CartPayment(method: cash(), amount: 2000, received: 5000)];
+      final sale = await engine.recordSale(lines, payments, cashier());
+      List<String> render(TicketModel? model) => offlineTicketLines(
+        snapshot: engine.snapshot!, operation: sale, lines: lines, payments: payments, operatorName: 'Awa', paperWidth: 80, model: model);
+      final origin = render(null);
+
+      // Pied avant les paiements, client et adresse masqués, « document » et « operations » oubliés : remis à leur place.
+      final model = TicketModel.tryParse({
+        'uuid': 'm1', 'nom': 'Economique', 'titre': 'Ticket', 'compact': true, 'entete': null, 'pied': 'Merci, a bientot',
+        'blocs': {'haut': ['nom', 'adresse', 'vendeur', 'inconnu'], 'bas': ['pied', 'paiements']},
+        'masques': ['adresse', 'document'],
+      })!;
+      expect(model.top, ['nom', 'document', 'vendeur'], reason: 'bloc inconnu ignoré, masque d’un bloc obligatoire sans effet');
+      expect(model.bottom, ['pied', 'paiements', 'operations', 'fne']);
+      final text = render(model).join(' | ');
+      expect(text, contains('TICKET HORS LIGNE'));
+      expect(text, contains('Numero definitif attribue'), reason: 'la mention provisoire ne se perd jamais');
+      expect(text.indexOf('Merci, a bientot'), lessThan(text.indexOf('Monnaie rendue')));
+      expect(render(model).length, lessThan(origin.length), reason: 'compact : une ligne par article');
+
+      // Modèle illisible : disposition d'origine, un ticket sort toujours.
+      expect(TicketModel.tryParse({'blocs': 'x'}), isNull);
+      expect(TicketModel.tryParse(null), isNull);
+
+      // Le modèle connu à la vente suit la réimpression.
+      await engine.store.write('ticket.modele.${sale.uuid}', jsonEncode(model.raw));
+      expect((await engine.ticketModelOf(sale))!.title, 'TICKET');
     });
 
     test('recherche et code-barres de conditionnement', () async {

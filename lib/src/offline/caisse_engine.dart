@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:isolate';
 
 import 'package:bcrypt/bcrypt.dart';
@@ -440,6 +441,18 @@ abstract class CaisseEngine extends EngineNotifier {
     final until = DateTime.tryParse(raw?.split('|').elementAtOrNull(1) ?? '');
     if (until == null || !now.isBefore(until)) return null;
     return until.difference(now);
+  }
+
+  /// Garde le modèle de ticket en vigueur avec la vente : sa réimpression suit le modèle connu à la vente.
+  Future<void> rememberTicketModel(OfflineOperation sale) async {
+    final model = snapshot?.ticketModel;
+    if (model != null) await store.write('ticket.modele.${sale.uuid}', jsonEncode(model.raw));
+  }
+
+  /// Modèle de ticket connu à la vente, ou null (vente antérieure ou disposition d'origine).
+  Future<TicketModel?> ticketModelOf(OfflineOperation sale) async {
+    final raw = await store.read('ticket.modele.${sale.uuid}');
+    return raw == null ? null : TicketModel.tryParse(jsonDecode(raw));
   }
 
   /// Lignes et paiements d'une vente locale enregistrée, pour réimprimer son ticket : prix et quantités tels

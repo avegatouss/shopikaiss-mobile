@@ -18,7 +18,8 @@ class Snapshot {
       methods = [for (final m in (raw['moyens'] as List? ?? const [])) PaymentMethodInfo(Map<String, dynamic>.from(m as Map))],
       operators = [for (final o in (raw['caissiers'] as List? ?? const [])) Operator(Map<String, dynamic>.from(o as Map))],
       products = [for (final p in (raw['produits'] as List? ?? const [])) Product(Map<String, dynamic>.from(p as Map))],
-      coverage = raw['couverture_stock'] is Map ? StockCoverage(Map<String, dynamic>.from(raw['couverture_stock'] as Map)) : null {
+      coverage = raw['couverture_stock'] is Map ? StockCoverage(Map<String, dynamic>.from(raw['couverture_stock'] as Map)) : null,
+      ticketModel = TicketModel.tryParse(raw['modele_ticket']) {
     for (final product in products) {
       for (final code in product.codes) {
         _byCode[code.code] = (product, code.packagingId);
@@ -31,6 +32,9 @@ class Snapshot {
 
   /// Couverture du stock transmise avec ce référentiel (B-REQ-002), ou null pour un serveur qui ne la fournit pas.
   final StockCoverage? coverage;
+
+  /// Modèle de ticket résolu pour ce terminal (capacité `ticket.modeles`), ou null : disposition d'origine.
+  final TicketModel? ticketModel;
   final bool available;
   final String? reason;
   final StoreInfo store;
@@ -339,6 +343,63 @@ class Promotion {
 
   bool activeOn(String day) =>
       (from == null || from!.compareTo(day) <= 0) && to.compareTo(day) >= 0 && !exclusions.any((x) => x.$1.compareTo(day) <= 0 && x.$2.compareTo(day) >= 0);
+}
+
+/// Modèle de ticket du web (MODELES-TICKET.md) : blocs visibles dans l'ordre, titre, mode compact, textes propres.
+///
+/// Un bloc inconnu est ignoré ; un bloc obligatoire absent reprend sa place d'origine ; un modèle illisible donne null.
+class TicketModel {
+  TicketModel._(this.raw, this.top, this.bottom, this.title, this.compact, this.header, this.footer);
+
+  static const originTop = ['logo', 'nom', 'adresse', 'telephone', 'ncc', 'entete', 'document', 'vendeur', 'client', 'restaurant', 'note'];
+  static const originBottom = ['avantages', 'remises', 'paiements', 'operations', 'fne', 'qr', 'pied'];
+  static const required = {'document', 'operations', 'fne'};
+
+  static TicketModel? tryParse(Object? raw) {
+    try {
+      if (raw is! Map) return null;
+      final blocks = raw['blocs'] as Map;
+      final hidden = {...(raw['masques'] as List? ?? const []).cast<String>()}..removeAll(required);
+      List<String> zone(List<String> origin, List listed) {
+        final chosen = [for (final b in listed.cast<String>()) if (origin.contains(b) && !hidden.contains(b)) b];
+        for (final b in origin.where(required.contains)) {
+          if (chosen.contains(b)) continue;
+          // Place d'origine : juste après le dernier bloc retenu qui le précède à l'origine.
+          final before = origin.sublist(0, origin.indexOf(b));
+          final at = chosen.lastIndexWhere(before.contains);
+          chosen.insert(at + 1, b);
+        }
+        return List.unmodifiable(chosen);
+      }
+
+      String? text(Object? v) => v is String && v.trim().isNotEmpty ? v : null;
+      final title = text(raw['titre']);
+      return TicketModel._(
+        Map<String, dynamic>.from(raw),
+        zone(originTop, blocks['haut'] as List),
+        zone(originBottom, blocks['bas'] as List),
+        title == null ? null : (title.length > 40 ? title.substring(0, 40) : title).toUpperCase(),
+        raw['compact'] == true,
+        text(raw['entete']),
+        text(raw['pied']),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Données reçues, gardées avec chaque vente pour la réimprimer à l'identique.
+  final Map<String, dynamic> raw;
+  final List<String> top;
+  final List<String> bottom;
+
+  /// Titre du modèle en majuscules, ou null : titre d'origine.
+  final String? title;
+  final bool compact;
+
+  /// Textes d'en-tête et de pied propres au modèle ; null : ceux de la boutique.
+  final String? header;
+  final String? footer;
 }
 
 /// Lot d'un produit (capacité `lots.vente`) : [remaining] = stock estimé du lot, ventes locales non couvertes déduites.

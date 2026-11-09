@@ -1293,9 +1293,11 @@ class LocalRegisterAdapter {
     final snapshot = _snapshot();
     final (lines, payments) = engine.ticketParts(sale);
     final operatorName = snapshot.operatorById(sale.operatorId)?.name ?? 'Caissier ${sale.operatorId}';
+    final model = await engine.ticketModelOf(sale);
     return {
       'operation_id': sale.uuid,
       'duplicate': duplicate,
+      'compact': model?.compact ?? false,
       'lines': offlineTicketLines(
         snapshot: snapshot,
         operation: sale,
@@ -1304,6 +1306,7 @@ class LocalRegisterAdapter {
         operatorName: operatorName,
         paperWidth: paperWidth,
         duplicate: duplicate,
+        model: model,
       ),
     };
   }

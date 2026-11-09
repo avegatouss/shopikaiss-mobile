@@ -17,7 +17,7 @@ class EscPos {
 
   static List<int> init() => [esc, 0x40];
 
-  static List<int> feedAndCut() => [esc, 0x64, 4, gs, 0x56, 66, 0];
+  static List<int> feedAndCut([int lines = 4]) => [esc, 0x64, lines, gs, 0x56, 66, 0];
 
   /// Ticket de test en ASCII (aucune table de caractères requise).
   static Uint8List testTicket({required int paperWidth, required List<String> lines}) {

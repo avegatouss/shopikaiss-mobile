@@ -1060,6 +1060,7 @@ class V2Engine extends CaisseEngine {
         if (extras.sharedCart == _heldCart?.$1) _heldCart = null;
         // Reste par lot : la vente suivante ne doit pas puiser dans ce qui vient de partir.
         if (allocation.isNotEmpty) await _rebuild();
+        await rememberTicketModel(operation);
         await _afterWrite();
         return operation;
       });
@@ -1285,6 +1286,8 @@ class V2Engine extends CaisseEngine {
       'moyens': methods,
       'caissiers': operators,
       'categories': [for (final c in orderedCategories) c['nom']],
+      // Modèle résolu par le serveur pour ce terminal ; entité ignorée tant que ce client ne connaît pas le type.
+      'modele_ticket': (await v2.entities('modele_ticket')).values.where((m) => m['uuid'] == (_state?['ticket'] as Map?)?['modele_uuid']).firstOrNull,
       'produits': [
         for (final e in products.entries)
           if (e.value['actif'] == true && e.value['vente_locale'] == true)

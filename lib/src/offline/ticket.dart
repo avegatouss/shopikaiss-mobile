@@ -9,6 +9,9 @@ import 'money.dart';
 ///
 /// Il porte le numéro du ticket hors ligne (préfixe du terminal + séquence) : le numéro définitif de la vente est
 /// attribué par la boutique à la synchronisation, et le numéro hors ligne y reste en commentaire.
+///
+/// [model] : modèle de ticket connu à la vente (ordre des blocs, blocs masqués, titre, compact, textes) ; null pour la
+/// disposition d'origine. Les articles et les totaux restent fixes entre le haut et le bas.
 List<String> offlineTicketLines({
   required Snapshot snapshot,
   required OfflineOperation operation,
@@ -17,9 +20,11 @@ List<String> offlineTicketLines({
   required String operatorName,
   required int paperWidth,
   bool duplicate = false,
+  TicketModel? model,
 }) {
   final cols = EscPos.columnsFor(paperWidth);
   final store = snapshot.store;
+  final compact = model?.compact ?? false;
   final currency = store.currency == 'FCFA' ? 'F' : store.currency;
   String money(int amount) => formatFcfa(amount, currency);
   String pair(String left, String right) {
@@ -47,25 +52,58 @@ List<String> offlineTicketLines({
     }
   }
 
-  wrap(store.legalName);
-  if (store.address != null && store.address!.isNotEmpty) wrap(store.address!);
-  if (store.phone != null && store.phone!.isNotEmpty) wrap('Tel : ${store.phone}');
-  if (store.taxId != null && store.taxId!.isNotEmpty) wrap(store.taxId!);
-  if (store.header != null && store.header!.isNotEmpty) wrap(store.header!);
-  out.add('-' * cols);
-  out.add(center(duplicate ? 'REIMPRESSION - VENTE HORS LIGNE' : 'VENTE HORS LIGNE'));
-  out.add(pair('Ticket', operation.number ?? ''));
+  void filled(String? text, [String prefix = '']) {
+    if (text != null && text.isNotEmpty) wrap('$prefix$text');
+  }
+
   final d = operation.date;
   String two(int v) => v.toString().padLeft(2, '0');
-  out.add(pair('Date', '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}'));
-  out.add(pair('Caisse', snapshot.terminal.name));
-  out.add(pair('Caissier', operatorName));
-  if (operation.content['client_nom'] case final String customer when customer.isNotEmpty) out.add(pair('Client', customer));
-  if (operation.content['tarif'] case final String tier when tier != 'detail') out.add(tier == 'gros' ? 'Tarif gros' : 'Tarif gros par quantite');
+  // Blocs du ticket hors ligne ; ceux du web sans équivalent ici (logo, restaurant, avantages, QR…) n'impriment rien.
+  final blocks = <String, void Function()>{
+    'nom': () => wrap(store.legalName),
+    'adresse': () => filled(store.address),
+    'telephone': () => filled(store.phone, 'Tel : '),
+    'ncc': () => filled(store.taxId),
+    'entete': () => filled(model?.header ?? store.header),
+    'document': () {
+      out.add('-' * cols);
+      final title = model?.title ?? 'VENTE';
+      out.add(center('${duplicate ? 'REIMPRESSION - ' : ''}$title HORS LIGNE'));
+      out.add(pair('Ticket', operation.number ?? ''));
+      out.add(pair('Date', '${two(d.day)}/${two(d.month)}/${d.year} ${two(d.hour)}:${two(d.minute)}'));
+      if (operation.content['tarif'] case final String tier when tier != 'detail') out.add(tier == 'gros' ? 'Tarif gros' : 'Tarif gros par quantite');
+    },
+    'vendeur': () {
+      out.add(pair('Caisse', snapshot.terminal.name));
+      out.add(pair('Caissier', operatorName));
+    },
+    'client': () {
+      if (operation.content['client_nom'] case final String customer when customer.isNotEmpty) out.add(pair('Client', customer));
+    },
+    'paiements': () {
+      for (final payment in payments) {
+        out.add(pair(payment.method.name, money(payment.method.isCash ? (payment.received ?? payment.amount) : payment.amount)));
+        if (payment.change > 0) out.add(pair('Monnaie rendue', money(payment.change)));
+      }
+    },
+    'operations': () {
+      out.add('-' * cols);
+      wrap('Numero definitif attribue par la boutique au retour de la connexion.');
+    },
+    'pied': () => filled(model?.footer ?? store.footer),
+  };
+  for (final block in model?.top ?? TicketModel.originTop) {
+    blocks[block]?.call();
+  }
   out.add('-' * cols);
   for (final line in lines) {
-    wrap(line.label, centered: false);
     final quantity = formatMicros(line.quantity);
+    if (compact) {
+      // Une ligne par article : quantité, libellé, montant remise déduite.
+      out.add(pair('$quantity x ${line.label}', money(line.total)));
+      continue;
+    }
+    wrap(line.label, centered: false);
     out.add(pair('  $quantity x ${money(line.unitPrice)}', money(line.base)));
     if (line.discount > 0) out.add(pair('  Remise', '-${money(line.discount)}'));
   }
@@ -77,13 +115,9 @@ List<String> offlineTicketLines({
     out.add(pair(store.vatIncluded ? 'dont TVA $rate %' : 'TVA $rate %', money(totals.vat)));
   }
   out.add(pair('TOTAL', money(totals.payable)));
-  for (final payment in payments) {
-    out.add(pair(payment.method.name, money(payment.method.isCash ? (payment.received ?? payment.amount) : payment.amount)));
-    if (payment.change > 0) out.add(pair('Monnaie rendue', money(payment.change)));
+  for (final block in model?.bottom ?? TicketModel.originBottom) {
+    blocks[block]?.call();
   }
-  out.add('-' * cols);
-  wrap('Numero definitif attribue par la boutique au retour de la connexion.');
-  if (store.footer != null && store.footer!.isNotEmpty) wrap(store.footer!);
   return [for (final line in out) stripAccents(line)];
 }
 
@@ -122,8 +156,8 @@ List<String> offlineSlipLines({
   return [for (final line in out) stripAccents(line)];
 }
 
-/// Lignes de texte → ESC/POS (police A, titre en gras, coupe).
-Uint8List offlineTicketBytes(List<String> lines) {
+/// Lignes de texte → ESC/POS (police A, titre en gras, coupe) ; avance avant coupe : 2 lignes en compact, 3 sinon.
+Uint8List offlineTicketBytes(List<String> lines, {bool compact = false}) {
   final out = BytesBuilder()..add(EscPos.init());
   for (var i = 0; i < lines.length; i++) {
     final bold = i == 0;
@@ -131,6 +165,6 @@ Uint8List offlineTicketBytes(List<String> lines) {
     out.add(latin1.encode('${lines[i].replaceAll(RegExp(r'[^\x20-\x7E]'), '?')}\n'));
     if (bold) out.add([EscPos.esc, 0x45, 0]);
   }
-  out.add(EscPos.feedAndCut());
+  out.add(EscPos.feedAndCut(compact ? 2 : 3));
   return out.toBytes();
 }
