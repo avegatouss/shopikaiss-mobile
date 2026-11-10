@@ -29,8 +29,14 @@ Future<String> printOriginalTicket(WindowsHost host, String operation) async {
 
 /// Read-only access to persisted sales; never retries or submits a payment.
 class SalesHistoryDialog extends StatefulWidget {
-  const SalesHistoryDialog({super.key, required this.host});
+  const SalesHistoryDialog({
+    super.key,
+    required this.host,
+    this.printReceipt = ReceiptPrinting.printLines,
+  });
   final WindowsHost host;
+  final Future<String> Function(List<String> lines, {bool compact})
+  printReceipt;
 
   @override
   State<SalesHistoryDialog> createState() => _SalesHistoryDialogState();
@@ -39,6 +45,7 @@ class SalesHistoryDialog extends StatefulWidget {
 class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
   bool _busy = true;
   String? _error;
+  String? _printMessage;
   List<Map<String, dynamic>> _sales = [];
   List<String>? _ticket;
   bool _compact = false;
@@ -47,12 +54,12 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
     setState(() {
       _busy = true;
       _error = null;
+      _printMessage = null;
     });
     try {
       final message = await printOriginalTicket(widget.host, operation);
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(message)));
+        setState(() => _printMessage = message);
       }
     } catch (_) {
       if (mounted) _error = 'Impression à vérifier. La vente est conservée ; aucun renvoi automatique.';
@@ -71,6 +78,7 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
     setState(() {
       _busy = true;
       _error = null;
+      _printMessage = null;
     });
     try {
       final result = await widget.host.call(
@@ -124,41 +132,59 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
     content: SizedBox(
       width: 620,
       height: 420,
-      child: _busy
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(child: Text(_error!))
-          : _ticket != null
-          ? SingleChildScrollView(
-              child: SelectableText(
-                _ticket!.join('\n'),
-                style: const TextStyle(fontFamily: 'monospace'),
+      child: Column(
+        children: [
+          if (_printMessage != null)
+            Semantics(
+              liveRegion: true,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Text(_printMessage!),
               ),
-            )
-          : _sales.isEmpty
-          ? const Center(child: Text('Aucune vente enregistrée sur ce poste.'))
-          : ListView.builder(
-              itemCount: _sales.length,
-              itemBuilder: (context, index) {
-                final sale = _sales[index];
-                final id = sale['operation_id'];
-                return ListTile(
-                  title: Text(
-                    '${sale['server_number'] ?? sale['number'] ?? "Vente"} · ${sale['total_label'] ?? ""}',
-                  ),
-                  subtitle: Text('${sale['date'] ?? ""}\n${_status(sale)}'),
-                  isThreeLine: true,
-                  trailing: IconButton(
-                    tooltip: 'Imprimer le reçu',
-                    icon: const Icon(Icons.print_outlined),
-                    onPressed: id is String && !_busy
-                        ? () => _printOriginal(id)
-                        : null,
-                  ),
-                  onTap: id is String ? () => _load(id) : null,
-                );
-              },
             ),
+          Expanded(
+            child: _busy
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                ? Center(child: Text(_error!))
+                : _ticket != null
+                ? SingleChildScrollView(
+                    child: SelectableText(
+                      _ticket!.join('\n'),
+                      style: const TextStyle(fontFamily: 'monospace'),
+                    ),
+                  )
+                : _sales.isEmpty
+                ? const Center(
+                    child: Text('Aucune vente enregistrée sur ce poste.'),
+                  )
+                : ListView.builder(
+                    itemCount: _sales.length,
+                    itemBuilder: (context, index) {
+                      final sale = _sales[index];
+                      final id = sale['operation_id'];
+                      return ListTile(
+                        title: Text(
+                          '${sale['server_number'] ?? sale['number'] ?? "Vente"} · ${sale['total_label'] ?? ""}',
+                        ),
+                        subtitle: Text(
+                          '${sale['date'] ?? ""}\n${_status(sale)}',
+                        ),
+                        isThreeLine: true,
+                        trailing: IconButton(
+                          tooltip: 'Imprimer le reçu',
+                          icon: const Icon(Icons.print_outlined),
+                          onPressed: id is String && !_busy
+                              ? () => _printOriginal(id)
+                              : null,
+                        ),
+                        onTap: id is String ? () => _load(id) : null,
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     ),
     actions: [
       TextButton(
@@ -176,10 +202,13 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
           onPressed: _busy
               ? null
               : () async {
-                  setState(() => _busy = true);
+                  setState(() {
+                    _busy = true;
+                    _printMessage = null;
+                  });
                   String message;
                   try {
-                    message = await ReceiptPrinting.printLines(
+                    message = await widget.printReceipt(
                       _ticket!,
                       compact: _compact,
                     );
@@ -187,9 +216,10 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
                     message = 'Impression à vérifier. Aucun renvoi automatique ; vente conservée.';
                   }
                   if (mounted && context.mounted) {
-                    setState(() => _busy = false);
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(content: Text(message)));
+                    setState(() {
+                      _busy = false;
+                      _printMessage = message;
+                    });
                   }
                 },
           label: const Text('Imprimer le duplicata'),

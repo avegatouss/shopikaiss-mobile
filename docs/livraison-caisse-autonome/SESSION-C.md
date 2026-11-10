@@ -368,3 +368,8 @@ ESC/POS via Winspool RAW devient le mode par défaut des imprimantes de caisse. 
 Réglages : sélection imprimante, mode d'impression et bouton ticket d'essai sans vente (désactivé durant l'envoi, résultat lisible dans le panneau). Aucun ajout de dépendance. Voir IMPRESSION-WINDOWS.md pour l'installation et les limites physiques.
 
 Validation : 88 tests Windows réussis, 3 tests natifs réussis (dont spooler simulé : succès, ouverture/démarrage refusés, écriture partielle/échouée, fin refusée), analyse ciblée sans anomalie. Aucun ticket physique envoyé ; POS-80 reste à tester lorsqu'elle sera connectée. Compilation et paquet tracés dans le journal partagé. Les capacités restaurant/ticket.modeles non livrées par A restent désactivées.
+
+## 10 novembre — contrat ticket lot 7 et retour d'impression
+Le contrat serveur 3943f33c remplace la proposition : modele_ticket porte haut/bas directement ; ticket_terminal, dans journal/instantane, fournit l'affectation du terminal et son empreinte. Le moteur B 239f0fa lit encore la proposition ; demande d'adaptation et de consolidation des montants figes transmise au journal partage. Aucune annonce prematuree de ticket.modeles.
+Windows : retour d'impression original/duplicata affiche directement dans la fenetre historique/ticket, au lieu du SnackBar derriere la fenetre. Le contenu du duplicata reste visible apres impression. Test de rendu : lignes et compact du moteur conserves, bouton desactive pendant l'envoi, resultat incertain visible, aucune commande financiere ni second envoi automatique.
+Validation : 89 tests Windows passes ; analyse ciblee sans anomalie. Aucun envoi papier, aucune vente ni modification de base pendant cette validation.
