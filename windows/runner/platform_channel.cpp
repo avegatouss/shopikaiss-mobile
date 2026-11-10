@@ -1,6 +1,10 @@
 #include "platform_channel.h"
 #include "secret_protection.h"
 #include "customer_display.h"
+#include "raw_printer.h"
+#include <thread>
+#include <mutex>
+#include <map>
 #include <regex>
 #include <windows.h>
 #include <shlobj.h>
@@ -10,6 +14,11 @@
 #include <vector>
 
 namespace {
+struct RawJobs {
+  std::mutex mutex;
+  int sequence = 0;
+  std::map<std::string, RawPrintResult> jobs;
+};
 std::wstring Wide(const std::string& text) {
   const int size = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), static_cast<int>(text.size()), nullptr, 0);
   if (size <= 0) return {};
@@ -33,8 +42,60 @@ CreatePlatformChannel(flutter::BinaryMessenger* messenger, HWND window) {
   auto channel = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       messenger, "ci.khoga.shopikaiss/windows",
       &flutter::StandardMethodCodec::GetInstance());
-  channel->SetMethodCallHandler([window, display = std::make_shared<CustomerDisplay>(), fullscreen = false,
+  channel->SetMethodCallHandler([window, raw = std::make_shared<RawJobs>(), display = std::make_shared<CustomerDisplay>(), fullscreen = false,
       saved = WINDOWPLACEMENT{sizeof(WINDOWPLACEMENT)}, style = LONG_PTR{0}](const auto& call, auto result) mutable {
+    if (call.method_name() == "startRawPrint") {
+      const auto* args = call.arguments() ? std::get_if<flutter::EncodableMap>(call.arguments()) : nullptr;
+      const std::string* name = nullptr;
+      const std::vector<uint8_t>* bytes = nullptr;
+      if (args) {
+        auto n = args->find(flutter::EncodableValue("printer"));
+        auto b = args->find(flutter::EncodableValue("bytes"));
+        if (n != args->end()) name = std::get_if<std::string>(&n->second);
+        if (b != args->end()) bytes = std::get_if<std::vector<uint8_t>>(&b->second);
+      }
+      if (!name || !bytes || name->empty() || name->size() > 4096 || name->find('\0') != std::string::npos ||
+          bytes->empty() || bytes->size() > 1024 * 1024) {
+        result->Error("raw_not_sent", "Ticket ou imprimante invalide."); return;
+      }
+      const auto printer = Wide(*name);
+      if (printer.empty()) { result->Error("raw_not_sent", "Nom imprimante invalide."); return; }
+      std::string id;
+      {
+        std::lock_guard<std::mutex> lock(raw->mutex);
+        // Bound hung spooler calls without blocking the UI thread.
+        size_t pending = 0;
+        for (const auto& job : raw->jobs) if (job.second.status == "pending") ++pending;
+        if (pending >= 4) { result->Error("raw_not_sent", "Impressions en attente : verifier le spouleur."); return; }
+        if (raw->jobs.size() >= 64) {
+          for (auto it = raw->jobs.begin(); it != raw->jobs.end();) {
+            if (it->second.status != "pending") it = raw->jobs.erase(it); else ++it;
+          }
+        }
+        id = std::to_string(++raw->sequence);
+        raw->jobs[id] = {"pending", 0};
+      }
+      try {
+        std::thread([raw, id, printer, data = *bytes]() {
+          WindowsRawSpooler spooler;
+          const auto outcome = SendRaw(spooler, printer, data);
+          std::lock_guard<std::mutex> lock(raw->mutex);
+          raw->jobs[id] = outcome;
+        }).detach();
+      } catch (...) {
+        std::lock_guard<std::mutex> lock(raw->mutex);
+        raw->jobs.erase(id);
+        result->Error("raw_not_sent", "Impression indisponible."); return;
+      }
+      result->Success(flutter::EncodableValue(id)); return;
+    }
+    if (call.method_name() == "rawPrintStatus") {
+      const auto* id = call.arguments() ? std::get_if<std::string>(call.arguments()) : nullptr;
+      std::lock_guard<std::mutex> lock(raw->mutex);
+      const auto found = id ? raw->jobs.find(*id) : raw->jobs.end();
+      if (found == raw->jobs.end()) { result->Success(flutter::EncodableValue("unknown")); return; }
+      result->Success(flutter::EncodableValue(found->second.status)); return;
+    }
     if (call.method_name() == "displayMonitors") {
       flutter::EncodableList list;
       const auto monitors = CustomerDisplay::Monitors();

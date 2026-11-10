@@ -4,6 +4,15 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:shopikaiss_terminal/src/windows/platform/receipt_pdf.dart';
 
 void main() {
+  test('A4 mode keeps A4 paper instead of roll dimensions', () async {
+    final receipt = await buildReceiptPdf(
+      ['TEST A4'],
+      font: pw.Font.helvetica(),
+      a4: true,
+    );
+    expect(receipt.format.width, PdfPageFormat.a4.width);
+    expect(receipt.format.height, PdfPageFormat.a4.height);
+  });
   test(
     'short roll receipt has measured height, not an A4-length sheet',
     () async {

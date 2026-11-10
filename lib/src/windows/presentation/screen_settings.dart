@@ -155,10 +155,18 @@ class ScreenSettingsPanel extends StatelessWidget {
             ),
           DropdownButtonFormField<String>(
             initialValue: settings.ticketMode,
-            decoration: const InputDecoration(labelText: 'Ticket après une vente'),
+            decoration: const InputDecoration(
+              labelText: 'Ticket après une vente',
+            ),
             items: const [
-              DropdownMenuItem(value: 'ask', child: Text('Demander avant d’imprimer')),
-              DropdownMenuItem(value: 'auto', child: Text('Impression automatique')),
+              DropdownMenuItem(
+                value: 'ask',
+                child: Text('Demander avant d’imprimer'),
+              ),
+              DropdownMenuItem(
+                value: 'auto',
+                child: Text('Impression automatique'),
+              ),
             ],
             onChanged: (value) {
               settings.ticketMode = value ?? 'ask';
@@ -188,6 +196,28 @@ class ScreenSettingsPanel extends StatelessWidget {
               }
             },
           ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.settings_outlined),
+            title: const Text('Mode d’impression : caisse ou A4'),
+            subtitle: const Text(
+              'ESC/POS brut par défaut ; PDF disponible en secours.',
+            ),
+            onTap: () async {
+              try {
+                await ReceiptPrinting.configure(context);
+              } catch (_) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Réglage imprimante indisponible.'),
+                    ),
+                  );
+                }
+              }
+            },
+          ),
+          const _TestReceiptButton(),
           const SizedBox(height: 16),
           const Text('Couleur principale'),
           Wrap(
@@ -332,5 +362,52 @@ class ScreenSettingsPanel extends StatelessWidget {
         ],
       ),
     ),
+  );
+}
+
+class _TestReceiptButton extends StatefulWidget {
+  const _TestReceiptButton();
+  @override
+  State<_TestReceiptButton> createState() => _TestReceiptButtonState();
+}
+
+class _TestReceiptButtonState extends State<_TestReceiptButton> {
+  bool busy = false;
+  String? message;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      OutlinedButton.icon(
+        icon: const Icon(Icons.receipt_long_outlined),
+        label: Text(
+          busy
+              ? 'Envoi du ticket…'
+              : 'Imprimer un ticket d’essai (aucune vente)',
+        ),
+        onPressed: busy
+            ? null
+            : () async {
+                setState(() {
+                  busy = true;
+                  message = null;
+                });
+                String result;
+                try {
+                  result = await ReceiptPrinting.testTicket();
+                } catch (_) {
+                  result =
+                      'Impression à vérifier. Aucun second envoi automatique.';
+                }
+                if (mounted) {
+                  setState(() {
+                    busy = false;
+                    message = result;
+                  });
+                }
+              },
+      ),
+      if (message != null) Text(message!),
+    ],
   );
 }

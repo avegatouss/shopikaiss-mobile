@@ -360,3 +360,11 @@ L'impression par pilote produit désormais des pages rouleau de hauteur mesurée
 
 Coordination : réponses C aux modèles ticket.modeles et aux questions R0 restaurant 4/11/12/13/16 déposées dans JOURNAL.md le 08/11. Les modèles et le restaurant ne sont pas annoncés comme disponibles dans cette version : schémas/fixtures serveur A et commandes moteur B restent à livrer. Le responsable a demandé leur implémentation ; le raccordement suivra ces contrats, sans type inventé par Windows.
 Validation : 112 tests Windows/adaptateur/moteur v2 réussis ; analyse ciblée sans anomalie. Régression de lecture des moyens sur panier vide corrigée avant validation finale. Pas de nouvelle vente réelle ni de recette papier.
+
+## 10 novembre — impression brute Windows
+
+ESC/POS via Winspool RAW devient le mode par défaut des imprimantes de caisse. Worker natif séparé de l'interface, suivi par identifiant local et état transmis/non envoyé/inconnu ; aucune relance automatique après écriture partielle, timeout ou résultat perdu. Les modes PDF rouleau et PDF A4 restent sélectionnables ; secours automatique configurable uniquement sur non-envoi certain. Configuration conservée dans printer.json, sans modifier l'imprimante par défaut Windows. Le mode compact est transmis depuis les tickets originaux et les réimpressions à l'encodeur commun B (avance 2 lignes, sinon 3).
+
+Réglages : sélection imprimante, mode d'impression et bouton ticket d'essai sans vente (désactivé durant l'envoi, résultat lisible dans le panneau). Aucun ajout de dépendance. Voir IMPRESSION-WINDOWS.md pour l'installation et les limites physiques.
+
+Validation : 88 tests Windows réussis, 3 tests natifs réussis (dont spooler simulé : succès, ouverture/démarrage refusés, écriture partielle/échouée, fin refusée), analyse ciblée sans anomalie. Aucun ticket physique envoyé ; POS-80 reste à tester lorsqu'elle sera connectée. Compilation et paquet tracés dans le journal partagé. Les capacités restaurant/ticket.modeles non livrées par A restent désactivées.

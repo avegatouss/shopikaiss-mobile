@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import 'cash_documents.dart';
 
 import '../ipc/protocol.dart';
@@ -9,10 +10,21 @@ import '../platform/receipt_printing.dart';
 Future<String> printOriginalTicket(WindowsHost host, String operation) async {
   final unavailable = await ReceiptPrinting.unavailableReason();
   if (unavailable != null) return unavailable;
-  final result = await host.call(HostCommand.printTicket, operationId: operation, arguments: {'operation_id': operation});
+  final result = await host.call(
+    HostCommand.printTicket,
+    operationId: operation,
+    arguments: {'operation_id': operation},
+  );
   final lines = result['lines'];
-  if (result['operation_id'] != operation || lines is! List || lines.any((v) => v is! String)) throw const FormatException();
-  return ReceiptPrinting.printLines(lines.cast<String>());
+  if (result['operation_id'] != operation ||
+      lines is! List ||
+      lines.any((v) => v is! String)) {
+    throw const FormatException();
+  }
+  return ReceiptPrinting.printLines(
+    lines.cast<String>(),
+    compact: result['compact'] == true,
+  );
 }
 
 /// Read-only access to persisted sales; never retries or submits a payment.
@@ -29,6 +41,7 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
   String? _error;
   List<Map<String, dynamic>> _sales = [];
   List<String>? _ticket;
+  bool _compact = false;
 
   Future<void> _printOriginal(String operation) async {
     setState(() {
@@ -80,6 +93,7 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
           throw const FormatException();
         }
         _ticket = lines.cast<String>();
+        _compact = result['compact'] == true;
       }
     } on HostFailure catch (error) {
       if (mounted) _error = error.message;
@@ -147,7 +161,15 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
             ),
     ),
     actions: [
-      TextButton(onPressed: _busy ? null : () => showDialog<void>(context: context, builder: (_) => CashDocumentsDialog(host: widget.host)), child: const Text('Bons de retour / Z')),
+      TextButton(
+        onPressed: _busy
+            ? null
+            : () => showDialog<void>(
+                context: context,
+                builder: (_) => CashDocumentsDialog(host: widget.host),
+              ),
+        child: const Text('Bons de retour / Z'),
+      ),
       if (_ticket != null)
         TextButton.icon(
           icon: const Icon(Icons.print_outlined),
@@ -157,7 +179,10 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
                   setState(() => _busy = true);
                   String message;
                   try {
-                    message = await ReceiptPrinting.printLines(_ticket!);
+                    message = await ReceiptPrinting.printLines(
+                      _ticket!,
+                      compact: _compact,
+                    );
                   } catch (_) {
                     message = 'Impression à vérifier. Aucun renvoi automatique ; vente conservée.';
                   }

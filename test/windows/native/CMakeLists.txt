@@ -1,6 +1,12 @@
 cmake_minimum_required(VERSION 3.14)
 project(shopikaiss_native_checks LANGUAGES CXX)
 enable_testing()
+add_executable(raw_print_checks raw_print_checks.cpp)
+target_include_directories(raw_print_checks PRIVATE ../../../windows/runner)
+target_compile_features(raw_print_checks PRIVATE cxx_std_17)
+target_compile_definitions(raw_print_checks PRIVATE NOMINMAX UNICODE _UNICODE)
+target_link_libraries(raw_print_checks PRIVATE winspool)
+add_test(NAME windows_raw_print COMMAND raw_print_checks)
 add_executable(native_checks native_checks.cpp
   ../../../windows/runner/secret_protection.cpp
   ../../../windows/runner/instance_lock.cpp)
