@@ -375,7 +375,7 @@ void main() {
       // Pied avant les paiements, client et adresse masqués, « document » et « operations » oubliés : remis à leur place.
       final model = TicketModel.tryParse({
         'uuid': 'm1', 'nom': 'Economique', 'titre': 'Ticket', 'compact': true, 'entete': null, 'pied': 'Merci, a bientot',
-        'blocs': {'haut': ['nom', 'adresse', 'vendeur', 'inconnu'], 'bas': ['pied', 'paiements']},
+        'haut': ['nom', 'adresse', 'vendeur', 'inconnu'], 'bas': ['pied', 'paiements'],
         'masques': ['adresse', 'document'],
       })!;
       expect(model.top, ['nom', 'document', 'vendeur'], reason: 'bloc inconnu ignoré, masque d’un bloc obligatoire sans effet');
@@ -387,7 +387,7 @@ void main() {
       expect(render(model).length, lessThan(origin.length), reason: 'compact : une ligne par article');
 
       // Modèle illisible : disposition d'origine, un ticket sort toujours.
-      expect(TicketModel.tryParse({'blocs': 'x'}), isNull);
+      expect(TicketModel.tryParse({'haut': 'x', 'bas': []}), isNull);
       expect(TicketModel.tryParse(null), isNull);
 
       // Le modèle connu à la vente suit la réimpression.

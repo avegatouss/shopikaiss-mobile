@@ -443,16 +443,22 @@ abstract class CaisseEngine extends EngineNotifier {
     return until.difference(now);
   }
 
-  /// Garde le modèle de ticket en vigueur avec la vente : sa réimpression suit le modèle connu à la vente.
-  Future<void> rememberTicketModel(OfflineOperation sale) async {
+  /// Garde le modèle de ticket en vigueur avec la vente [saleUuid], avant son enregistrement : une vente enregistrée a
+  /// toujours son modèle (une vente refusée laisse au plus une entrée sans effet). Sa réimpression suit ce modèle.
+  Future<void> rememberTicketModel(String saleUuid) async {
     final model = snapshot?.ticketModel;
-    if (model != null) await store.write('ticket.modele.${sale.uuid}', jsonEncode(model.raw));
+    if (model != null) await store.write('ticket.modele.$saleUuid', jsonEncode(model.raw));
   }
 
-  /// Modèle de ticket connu à la vente, ou null (vente antérieure ou disposition d'origine).
+  /// Modèle de ticket connu à la vente, ou null (vente antérieure, disposition d'origine ou entrée illisible).
   Future<TicketModel?> ticketModelOf(OfflineOperation sale) async {
     final raw = await store.read('ticket.modele.${sale.uuid}');
-    return raw == null ? null : TicketModel.tryParse(jsonDecode(raw));
+    if (raw == null) return null;
+    try {
+      return TicketModel.tryParse(jsonDecode(raw));
+    } on FormatException {
+      return null;
+    }
   }
 
   /// Lignes et paiements d'une vente locale enregistrée, pour réimprimer son ticket : prix et quantités tels

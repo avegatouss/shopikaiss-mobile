@@ -307,6 +307,27 @@
             "fichier": "valides/donnees--lot.json",
             "schema": "donnees-2.1.json#/$defs/lot",
             "valide": true
+        },
+        {
+            "fichier": "valides/donnees--modele-ticket.json",
+            "schema": "donnees-2.1.json#/$defs/modele_ticket",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--ticket-terminal.json",
+            "schema": "donnees-2.1.json#/$defs/ticket_terminal",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--ticket-terminal-origine.json",
+            "schema": "donnees-2.1.json#/$defs/ticket_terminal",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--modele-ticket-sans-titre.json",
+            "schema": "donnees-2.1.json#/$defs/modele_ticket",
+            "valide": false,
+            "erreur_attendue": "titre : au moins 1"
         }
     ]
 }

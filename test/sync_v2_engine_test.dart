@@ -1174,6 +1174,13 @@ void main() {
     // Boutique en 2.1 : TVA 18 % ajoutée, pourcentages au franc inférieur, espèces arrondies à 25 F au plus proche.
     serve21(server, vatIncluded: false, rules: {'remise_pourcentage_arrondi': 'down', 'arrondi_especes': {'pas': 25, 'mode': 'nearest'}});
     server.cashRounding = (step: 25, mode: 'nearest');
+    // Lot 7 (ticket.modeles) : modèle résolu pour ce terminal, compact, client et vendeur masqués.
+    const modele = '0f000000-0000-4000-8000-0000000000c1';
+    server.put('modele_ticket', modele, {
+      'nom': 'Ticket économique', 'haut': TicketModel.originTop, 'bas': TicketModel.originBottom,
+      'masques': ['logo', 'adresse', 'vendeur', 'client', 'document'], 'titre': 'Reçu de vente', 'compact': true, 'entete': null, 'pied': 'Merci, à bientôt !',
+    });
+    server.put('ticket_terminal', fakeTerminal, {'modele_uuid': modele, 'modele_empreinte': null});
     final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows', newUuid: newUuid,
         pinVerifier: FakeV2Server.pinVerifier, declaredPayments: true, contract21: true);
     await e.load('https://boutique.exemple.ci');
@@ -1236,6 +1243,13 @@ void main() {
     // Ticket local : la monnaie est celle rendue sur le montant arrondi, pas sur le montant exact.
     final ticket = await adapter.execute('reprint', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1');
     expect((ticket['lines'] as List).join(' '), contains('525'));
+    // Totaux figés de la vente (remise globale, livraison) et note ; modèle du terminal gardé avec la vente.
+    final printed = (ticket['lines'] as List).cast<String>();
+    expect(printed, containsAll([contains('Remise globale'), contains('Livraison'), contains('Note : Livrer a Cocody')]));
+    expect(printed.firstWhere((l) => l.startsWith('TOTAL')), endsWith('2 487 F'));
+    expect(printed, containsAll([contains('RECU DE VENTE HORS LIGNE'), contains('Merci, a bientot !'), contains('Numero definitif')]));
+    expect(printed.any((l) => l.startsWith('Caissier')), isFalse, reason: 'bloc vendeur masqué');
+    expect(ticket['compact'], isTrue);
 
     // Le serveur (recoupement de CoherenceVente 4bb14454) l'intègre.
     await e.sync();
@@ -1251,6 +1265,16 @@ void main() {
     await e.sync();
     final caps = (await adapter.execute('status', {}, null))['capabilities'] as Map;
     expect(caps['global_discount']['reason'], 'Remise globale non autorisée hors ligne dans cette boutique.');
+
+    // Affectation retirée : disposition d'origine pour les ventes suivantes, la vente passée garde son modèle.
+    server.publish([
+      {'type': 'ticket_terminal', 'critique': false, 'cle': fakeTerminal, 'revision': '2', 'action': 'upsert', 'donnees': {'modele_uuid': null, 'modele_empreinte': null}},
+    ]);
+    await e.sync();
+    expect(e.snapshot!.ticketModel, isNull);
+    expect((await e.ticketModelOf((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!))!.compact, isTrue);
+    await e.store.write('ticket.modele.aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1', '{illisible');
+    expect(await e.ticketModelOf((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!), isNull, reason: 'entrée illisible : disposition d’origine');
     await adapter.close();
   });
 }

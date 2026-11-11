@@ -345,7 +345,8 @@ class Promotion {
       (from == null || from!.compareTo(day) <= 0) && to.compareTo(day) >= 0 && !exclusions.any((x) => x.$1.compareTo(day) <= 0 && x.$2.compareTo(day) >= 0);
 }
 
-/// Modèle de ticket du web (MODELES-TICKET.md) : blocs visibles dans l'ordre, titre, mode compact, textes propres.
+/// Modèle de ticket du web (contrat 2.1 lot 7, entité `modele_ticket`) : blocs dans l'ordre, masques, titre, compact,
+/// textes propres.
 ///
 /// Un bloc inconnu est ignoré ; un bloc obligatoire absent reprend sa place d'origine ; un modèle illisible donne null.
 class TicketModel {
@@ -358,7 +359,6 @@ class TicketModel {
   static TicketModel? tryParse(Object? raw) {
     try {
       if (raw is! Map) return null;
-      final blocks = raw['blocs'] as Map;
       final hidden = {...(raw['masques'] as List? ?? const []).cast<String>()}..removeAll(required);
       List<String> zone(List<String> origin, List listed) {
         final chosen = [for (final b in listed.cast<String>()) if (origin.contains(b) && !hidden.contains(b)) b];
@@ -376,8 +376,8 @@ class TicketModel {
       final title = text(raw['titre']);
       return TicketModel._(
         Map<String, dynamic>.from(raw),
-        zone(originTop, blocks['haut'] as List),
-        zone(originBottom, blocks['bas'] as List),
+        zone(originTop, raw['haut'] as List),
+        zone(originBottom, raw['bas'] as List),
         title == null ? null : (title.length > 40 ? title.substring(0, 40) : title).toUpperCase(),
         raw['compact'] == true,
         text(raw['entete']),
