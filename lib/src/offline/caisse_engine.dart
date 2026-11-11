@@ -447,7 +447,7 @@ abstract class CaisseEngine extends EngineNotifier {
   /// toujours son modèle (une vente refusée laisse au plus une entrée sans effet). Sa réimpression suit ce modèle.
   Future<void> rememberTicketModel(String saleUuid) async {
     final model = snapshot?.ticketModel;
-    if (model != null) await store.write('ticket.modele.$saleUuid', jsonEncode(model.raw));
+    await store.write('ticket.modele.$saleUuid', model == null ? null : jsonEncode(model.raw));
   }
 
   /// Modèle de ticket connu à la vente, ou null (vente antérieure, disposition d'origine ou entrée illisible).
@@ -489,7 +489,11 @@ abstract class CaisseEngine extends EngineNotifier {
       final method =
           s?.methods.where((x) => x.code == code).firstOrNull ?? PaymentMethodInfo({'code': code, 'nom': code, 'especes': code == 'especes'});
       final amount = (m['montant'] as num).toInt();
-      payments.add(CartPayment(method: method, amount: amount, received: (m['recu'] as num?)?.toInt(), cashDue: method.isCash ? cashDue(amount) : amount));
+      final received = (m['recu'] as num?)?.toInt();
+      final rounding = (m['ecart_arrondi'] as num?)?.toInt();
+      final change = (m['monnaie'] as num?)?.toInt();
+      final due = rounding != null ? amount + rounding : received != null && change != null ? received - change : cashDue(amount);
+      payments.add(CartPayment(method: method, amount: amount, received: received, cashDue: method.isCash ? due : amount));
     }
     return (lines, payments);
   }

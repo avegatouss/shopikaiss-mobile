@@ -1158,11 +1158,16 @@ class V2Engine extends CaisseEngine {
                 },
             ],
             'paiements': [
-              for (final p in (content['paiements'] as List).cast<Map>()) {'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu'], 'reference': p['reference']},
+              for (final p in (content['paiements'] as List).cast<Map>()) {
+                'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu'], 'reference': p['reference'],
+                if (p.containsKey('monnaie')) 'monnaie': p['monnaie'],
+                if (p.containsKey('ecart_arrondi')) 'ecart_arrondi': p['ecart_arrondi'],
+              },
             ],
             'total': (content['totaux'] as Map)['a_payer'],
             // Totaux figés à l'encaissement : le ticket et son duplicata les impriment tels quels.
             'totaux': content['totaux'],
+            'tva': content['tva'],
             'remise_globale': content['remise_globale'] ?? 0,
             'livraison': content['livraison'] ?? 0,
             if (content['note'] != null) 'note': content['note'],

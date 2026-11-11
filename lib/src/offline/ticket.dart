@@ -24,6 +24,9 @@ List<String> offlineTicketLines({
 }) {
   final cols = EscPos.columnsFor(paperWidth);
   final store = snapshot.store;
+  final frozenVat = operation.content['tva'] as Map?;
+  final vatRate = frozenVat?['taux'] as String? ?? store.vatRate;
+  final vatIncluded = frozenVat?['incluse'] as bool? ?? store.vatIncluded;
   final compact = model?.compact ?? false;
   final currency = store.currency == 'FCFA' ? 'F' : store.currency;
   String money(int amount) => formatFcfa(amount, currency);
@@ -113,16 +116,16 @@ List<String> offlineTicketLines({
   out.add('-' * cols);
   // Totaux figés de la vente (contrat v2 : remise globale et livraison comprises) ; sinon recalculés depuis les lignes.
   final frozen = operation.content['totaux'] as Map?;
-  final computed = saleTotals([for (final l in lines) l.total], store.vatRate, store.vatIncluded);
+  final computed = saleTotals([for (final l in lines) l.total], vatRate, vatIncluded);
   final baseHt = (frozen?['base_ht'] as int?) ?? computed.baseHt;
   final vat = (frozen?['tva'] as int?) ?? computed.vat;
   final payable = (frozen?['a_payer'] as int?) ?? computed.payable;
   if (operation.content['remise_globale'] case final int discount when discount > 0) out.add(pair('Remise globale', '-${money(discount)}'));
   if (operation.content['livraison'] case final int delivery when delivery > 0) out.add(pair('Livraison', money(delivery)));
-  if (store.hasVat && vat > 0) {
-    final rate = formatMicros(parseMicros(store.vatRate) ?? BigInt.zero);
-    if (!store.vatIncluded) out.add(pair('Total HT', money(baseHt)));
-    out.add(pair(store.vatIncluded ? 'dont TVA $rate %' : 'TVA $rate %', money(vat)));
+  if (vat > 0) {
+    final rate = formatMicros(parseMicros(vatRate) ?? BigInt.zero);
+    if (!vatIncluded) out.add(pair('Total HT', money(baseHt)));
+    out.add(pair(vatIncluded ? 'dont TVA $rate %' : 'TVA $rate %', money(vat)));
   }
   out.add(pair('TOTAL', money(payable)));
   for (final block in model?.bottom ?? TicketModel.originBottom) {

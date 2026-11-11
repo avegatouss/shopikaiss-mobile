@@ -53,6 +53,30 @@ void main() {
 
   CartPayment cash(V2Engine e, int amount) => CartPayment(method: e.snapshot!.methods.single, amount: amount, received: amount);
 
+  test('ticket.modeles : activation sur un poste existant reprend un instantane une seule fois', () async {
+    serve21(server);
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows',
+        newUuid: newUuid, pinVerifier: FakeV2Server.pinVerifier, contract21: true);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    await e.sync();
+    expect(await e.v2.read(V2Keys.cursor), isNotNull);
+    final before = server.snapshotReasons.length;
+    const model = '0f000000-0000-4000-8000-0000000000c2';
+    server.capabilities = [...server.capabilities, 'ticket.modeles'];
+    server.put('modele_ticket', model, {
+      'nom': 'Compact', 'haut': TicketModel.originTop, 'bas': TicketModel.originBottom,
+      'masques': <String>[], 'titre': 'Reçu', 'compact': true, 'entete': null, 'pied': null,
+    });
+    server.put('ticket_terminal', fakeTerminal, {'modele_uuid': model, 'modele_empreinte': null});
+    await e.sync();
+    expect(e.blockReason, isNull);
+    expect(e.snapshot!.ticketModel!.compact, isTrue);
+    expect(await e.v2.read(V2Keys.contractRevision), contains('+tickets'));
+    await e.sync();
+    expect(server.snapshotReasons.skip(before), ['reparation']);
+  });
+
   test('appairage : catalogue de la projection présenté aux écrans (entiers locaux stables, stock, règles, session)', () async {
     final e = await paired();
     final s = e.snapshot!;
@@ -1255,6 +1279,22 @@ void main() {
     await e.sync();
     expect((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!.serverStatus, 'integree');
 
+    // Modifier TVA/arrondi de la boutique ne modifie pas une vente deja encaissee.
+    final shop = (await e.v2.entities('boutique'))[fakeShop]!;
+    server.publish([{
+      'type': 'boutique', 'critique': true, 'cle': fakeShop, 'revision': '2', 'action': 'upsert',
+      'donnees': {...shop, 'tva_taux': '0.000000', 'tva_incluse': true,
+        'regles': {...(shop['regles'] as Map), 'arrondi_especes': null}},
+    }]);
+    await e.sync();
+    expect(e.snapshot!.store.hasVat, isFalse);
+    expect(e.cashDue(2487), 2487);
+    final duplicate = (await adapter.execute('reprint', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))['lines'] as List;
+    for (final prefix in ['Total HT', 'TVA 18 %', 'Monnaie rendue', 'TOTAL']) {
+      expect(duplicate.where((l) => (l as String).startsWith(prefix)).toList(),
+          printed.where((l) => l.startsWith(prefix)).toList(), reason: '$prefix doit rester fige');
+    }
+
     // Politique remises.globale_max_pourcent ramenée à 0 : remise globale grisée avec le motif de A.
     server.publish([
       {
@@ -1272,6 +1312,10 @@ void main() {
     ]);
     await e.sync();
     expect(e.snapshot!.ticketModel, isNull);
+    await e.store.write('ticket.modele.tentative-refusee', jsonEncode({'compact': true}));
+    await e.rememberTicketModel('tentative-refusee');
+    expect(await e.store.read('ticket.modele.tentative-refusee'), isNull,
+        reason: 'sans modele, une tentative non enregistree ne conserve pas un ancien modele');
     expect((await e.ticketModelOf((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!))!.compact, isTrue);
     await e.store.write('ticket.modele.aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1', '{illisible');
     expect(await e.ticketModelOf((await e.saleStatus('aaaaaaaa-bbbb-4ccc-8ddd-0000000000f1'))!), isNull, reason: 'entrée illisible : disposition d’origine');
