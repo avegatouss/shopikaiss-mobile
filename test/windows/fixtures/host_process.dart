@@ -3,6 +3,14 @@ import 'dart:convert';
 import 'dart:io';
 
 Future<void> main(List<String> args) async {
+  // Let the transport test measure shutdown, not cold Dart compilation time.
+  final readiness = args
+      .where((a) => a.startsWith('--ready-file='))
+      .firstOrNull;
+  if (readiness != null) {
+    await File(readiness.substring('--ready-file='.length))
+        .writeAsString('ready', flush: true);
+  }
   await for (final line
       in stdin.transform(utf8.decoder).transform(const LineSplitter())) {
     final request = jsonDecode(line) as Map;

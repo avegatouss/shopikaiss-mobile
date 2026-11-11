@@ -97,12 +97,30 @@ void main() {
     'repeated close never reports success while child is still alive',
     () async {
       expect(dart, isNotNull);
+      final directory = await Directory.systemTemp.createTemp(
+        'shopikaiss-host-ready-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final ready = File('${directory.path}/ready');
       final host = await ProcessWindowsHost.start(
         dart!,
-        arguments: ['test/windows/fixtures/host_process.dart', 'slow-shutdown'],
+        arguments: [
+          'test/windows/fixtures/host_process.dart',
+          'slow-shutdown',
+          '--ready-file=${ready.path}',
+        ],
         timeout: const Duration(seconds: 3),
       );
       addTearDown(host.close);
+      final deadline = DateTime.now().add(const Duration(seconds: 30));
+      while (!await ready.exists() && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      expect(
+        await ready.exists(),
+        isTrue,
+        reason: 'The test child must be ready before timing shutdown.',
+      );
       await host.call(HostCommand.status);
       await expectLater(host.close(), throwsA(isA<TimeoutException>()));
       await expectLater(host.close(), throwsA(isA<TimeoutException>()));

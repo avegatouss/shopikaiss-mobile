@@ -18,13 +18,14 @@ class _Host implements WindowsHost {
     Map<String, dynamic> arguments = const {},
     String? operationId,
   }) async {
-    if (command == HostCommand.imageSettings)
+    if (command == HostCommand.imageSettings) {
       return {
         'start': '23:00',
         'end': '05:00',
         'images_cached': 12,
         'images_total': 20,
       };
+    }
     if (refuse) throw const HostFailure('reglage_refuse', 'Heures invalides');
     saved = arguments;
     return arguments;
