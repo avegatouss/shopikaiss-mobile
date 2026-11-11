@@ -173,6 +173,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.sharedCartCapability,
           CaisseV2Client.returnCapability,
           CaisseV2Client.lotsCapability,
+          CaisseV2Client.ticketModelsCapability,
         ],
       ],
     );
@@ -1030,6 +1031,7 @@ class V2Engine extends CaisseEngine {
         // (le second encaissement du même panier reste refusé).
         final draft = draftUuid == null ? null : (CaisseEngine.uuidPattern.hasMatch(draftUuid) ? draftUuid : const Uuid().v5(Namespace.url.value, 'brouillon:$draftUuid'));
         final epoch = _device['epoque'];
+        await rememberTicketModel(uuid);
         final operation = await _record(
           uuid,
           'vente',
@@ -1060,7 +1062,6 @@ class V2Engine extends CaisseEngine {
         if (extras.sharedCart == _heldCart?.$1) _heldCart = null;
         // Reste par lot : la vente suivante ne doit pas puiser dans ce qui vient de partir.
         if (allocation.isNotEmpty) await _rebuild();
-        await rememberTicketModel(operation);
         await _afterWrite();
         return operation;
       });
@@ -1160,6 +1161,11 @@ class V2Engine extends CaisseEngine {
               for (final p in (content['paiements'] as List).cast<Map>()) {'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu'], 'reference': p['reference']},
             ],
             'total': (content['totaux'] as Map)['a_payer'],
+            // Totaux figés à l'encaissement : le ticket et son duplicata les impriment tels quels.
+            'totaux': content['totaux'],
+            'remise_globale': content['remise_globale'] ?? 0,
+            'livraison': content['livraison'] ?? 0,
+            if (content['note'] != null) 'note': content['note'],
             if (content['client_nom'] != null) 'client_nom': content['client_nom'],
             if (content['tarif'] != null) 'tarif': content['tarif'],
           }
@@ -1286,8 +1292,8 @@ class V2Engine extends CaisseEngine {
       'moyens': methods,
       'caissiers': operators,
       'categories': [for (final c in orderedCategories) c['nom']],
-      // Modèle résolu par le serveur pour ce terminal ; entité ignorée tant que ce client ne connaît pas le type.
-      'modele_ticket': (await v2.entities('modele_ticket')).values.where((m) => m['uuid'] == (_state?['ticket'] as Map?)?['modele_uuid']).firstOrNull,
+      // Modèle résolu par le serveur pour ce terminal (capacité ticket.modeles) ; null : disposition d'origine.
+      'modele_ticket': (await v2.entities('modele_ticket'))[(await v2.entities('ticket_terminal'))[_device['terminal_uuid']]?['modele_uuid']],
       'produits': [
         for (final e in products.entries)
           if (e.value['actif'] == true && e.value['vente_locale'] == true)

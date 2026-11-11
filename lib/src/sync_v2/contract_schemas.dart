@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 6, lots.vente) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 7, ticket.modeles) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -1479,6 +1479,125 @@ const contractV2Schemas = <String, String>{
                 },
                 "actif": {
                     "type": "boolean"
+                }
+            }
+        },
+        "modele_ticket": {
+            "description": "Capacité ticket.modeles : modèle de ticket de la boutique (Paramètres › Modèles de ticket et de facture). Les articles et les totaux sont fixes, entre haut et bas. Bloc inconnu du terminal : ignoré. Bloc obligatoire (document, operations, fne) absent ou masqué : imprimé à sa place d’origine. Modèle illisible : disposition d’origine ; un ticket sort toujours.",
+            "type": "object",
+            "required": [
+                "nom",
+                "haut",
+                "bas",
+                "masques",
+                "titre",
+                "compact",
+                "entete",
+                "pied"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                },
+                "haut": {
+                    "description": "Blocs avant les articles, dans l’ordre d’impression (masqués compris). Origine : logo, nom, adresse, telephone, ncc, entete, document, vendeur, client, restaurant, note.",
+                    "type": "array",
+                    "maxItems": 30,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/code"
+                    }
+                },
+                "bas": {
+                    "description": "Blocs après les totaux, dans l’ordre d’impression (masqués compris). Origine : avantages, remises, paiements, operations, fne, qr, pied.",
+                    "type": "array",
+                    "maxItems": 30,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/code"
+                    }
+                },
+                "masques": {
+                    "description": "Blocs à ne pas imprimer. Jamais document, lignes, totaux, operations ni fne.",
+                    "type": "array",
+                    "maxItems": 30,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/code"
+                    }
+                },
+                "titre": {
+                    "description": "Titre du document (ex. « Reçu de vente »), imprimé en majuscules en ESC/POS.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                },
+                "compact": {
+                    "description": "Une ligne par article (sans la ligne prix × quantité), avance réduite avant la coupe.",
+                    "type": "boolean"
+                },
+                "entete": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 600
+                        }
+                    ],
+                    "description": "Texte d’en-tête du modèle ; null : boutique.ticket.entete."
+                },
+                "pied": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 600
+                        }
+                    ],
+                    "description": "Texte de pied du modèle ; null : boutique.ticket.pied."
+                }
+            }
+        },
+        "ticket_terminal": {
+            "description": "Capacité ticket.modeles : modèle de ticket résolu pour le terminal de clé (son uuid) — terminal, puis sa caisse, puis le modèle en usage de la boutique. La révision change quand l’affectation OU le contenu du modèle change (modele_empreinte). Le terminal ne lit que la clé de son propre uuid.",
+            "type": "object",
+            "required": [
+                "modele_uuid",
+                "modele_empreinte"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "modele_uuid": {
+                    "description": "Clé d’un modele_ticket, ou null : disposition d’origine.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "modele_empreinte": {
+                    "description": "SHA-256 SK-JCS-1 des données du modele_ticket résolu, ou null.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                        }
+                    ]
                 }
             }
         }

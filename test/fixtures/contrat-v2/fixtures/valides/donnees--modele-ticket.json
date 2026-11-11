@@ -1,0 +1,38 @@
+{
+    "nom": "Ticket économique",
+    "haut": [
+        "logo",
+        "nom",
+        "adresse",
+        "telephone",
+        "ncc",
+        "entete",
+        "document",
+        "vendeur",
+        "client",
+        "restaurant",
+        "note"
+    ],
+    "bas": [
+        "avantages",
+        "remises",
+        "paiements",
+        "operations",
+        "fne",
+        "qr",
+        "pied"
+    ],
+    "masques": [
+        "logo",
+        "adresse",
+        "ncc",
+        "vendeur",
+        "client",
+        "qr",
+        "avantages"
+    ],
+    "titre": "Reçu de vente",
+    "compact": true,
+    "entete": null,
+    "pied": "Merci, à bientôt !"
+}

@@ -80,6 +80,9 @@ List<String> offlineTicketLines({
     'client': () {
       if (operation.content['client_nom'] case final String customer when customer.isNotEmpty) out.add(pair('Client', customer));
     },
+    'note': () {
+      if (operation.content['note'] case final String note when note.trim().isNotEmpty) wrap('Note : $note', centered: false);
+    },
     'paiements': () {
       for (final payment in payments) {
         out.add(pair(payment.method.name, money(payment.method.isCash ? (payment.received ?? payment.amount) : payment.amount)));
@@ -108,13 +111,20 @@ List<String> offlineTicketLines({
     if (line.discount > 0) out.add(pair('  Remise', '-${money(line.discount)}'));
   }
   out.add('-' * cols);
-  final totals = saleTotals([for (final l in lines) l.total], store.vatRate, store.vatIncluded);
-  if (store.hasVat) {
+  // Totaux figés de la vente (contrat v2 : remise globale et livraison comprises) ; sinon recalculés depuis les lignes.
+  final frozen = operation.content['totaux'] as Map?;
+  final computed = saleTotals([for (final l in lines) l.total], store.vatRate, store.vatIncluded);
+  final baseHt = (frozen?['base_ht'] as int?) ?? computed.baseHt;
+  final vat = (frozen?['tva'] as int?) ?? computed.vat;
+  final payable = (frozen?['a_payer'] as int?) ?? computed.payable;
+  if (operation.content['remise_globale'] case final int discount when discount > 0) out.add(pair('Remise globale', '-${money(discount)}'));
+  if (operation.content['livraison'] case final int delivery when delivery > 0) out.add(pair('Livraison', money(delivery)));
+  if (store.hasVat && vat > 0) {
     final rate = formatMicros(parseMicros(store.vatRate) ?? BigInt.zero);
-    if (!store.vatIncluded) out.add(pair('Total HT', money(totals.baseHt)));
-    out.add(pair(store.vatIncluded ? 'dont TVA $rate %' : 'TVA $rate %', money(totals.vat)));
+    if (!store.vatIncluded) out.add(pair('Total HT', money(baseHt)));
+    out.add(pair(store.vatIncluded ? 'dont TVA $rate %' : 'TVA $rate %', money(vat)));
   }
-  out.add(pair('TOTAL', money(totals.payable)));
+  out.add(pair('TOTAL', money(payable)));
   for (final block in model?.bottom ?? TicketModel.originBottom) {
     blocks[block]?.call();
   }

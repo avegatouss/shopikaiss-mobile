@@ -1,0 +1,15 @@
+{
+    "nom": "Sans titre",
+    "haut": [
+        "document"
+    ],
+    "bas": [
+        "operations",
+        "fne"
+    ],
+    "masques": [],
+    "titre": "",
+    "compact": false,
+    "entete": null,
+    "pied": null
+}

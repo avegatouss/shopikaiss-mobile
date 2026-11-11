@@ -110,6 +110,9 @@ class CaisseV2Client {
   /// Vente des produits à lots (2.1 lot 6).
   static const lotsCapability = 'lots.vente';
 
+  /// Modèles de ticket (2.1 lot 7) : types `modele_ticket` et `ticket_terminal`.
+  static const ticketModelsCapability = 'ticket.modeles';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;
