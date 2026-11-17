@@ -44,6 +44,11 @@
       "type": "string",
       "pattern": "^(0|[1-9][0-9]{0,2})\\.[0-9]{6}$"
     },
+    "jour": {
+      "description": "Date civile AAAA-MM-JJ, sans heure ni fuseau (jour civil de la boutique, dans son fuseau publié).",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
+    },
     "curseur": {
       "description": "Curseur opaque du journal de changements. Le client le conserve et le renvoie tel quel ; il ne l'interprète jamais.",
       "type": "string",

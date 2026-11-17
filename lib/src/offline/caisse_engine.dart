@@ -4,6 +4,7 @@ import 'dart:isolate';
 
 import 'package:bcrypt/bcrypt.dart';
 
+import '../passes/pass_rules.dart';
 import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -233,6 +234,18 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Pourquoi [operator] ne peut pas faire de retour hors ligne, ou null s'il le peut.
   String? returnBlocker(Operator operator) => 'Retours hors ligne non disponibles sur ce terminal.';
+
+  /// Passes événement (capacité `passes.evenement`) : réglages du module quand il est ouvert à ce terminal, sinon null.
+  PassSettings? get passSettings => null;
+
+  /// « Scanner le pass » : module ouvert et droit `pass_encaisser` de l'opérateur.
+  bool canPayByPass(Operator operator) => false;
+
+  /// Vérifie le code d'un pass pour ce panier : en ligne d'abord (`POST /passes/verifier`), sinon par les règles locales
+  /// quand l'événement l'autorise hors connexion. [already] : passes déjà retenus pour la vente. Refus : [OfflineRefusal]
+  /// avec le message d'ECAS.
+  Future<PassCheck> verifyPass(Operator operator, String code, List<CartLine> lines, SaleExtras extras, {List<PassCheck> already = const []}) =>
+      throw const OfflineRefusal('Passes événement non disponibles sur ce terminal.');
 
   /// Contrôles de règle de la vente faits avant l'encaissement (tarif gros, cumul avec une remise) : [OfflineRefusal] sinon.
   void checkSaleRules(Operator operator, List<CartLine> lines, SaleExtras extras) {}
@@ -487,7 +500,8 @@ abstract class CaisseEngine extends EngineNotifier {
       final m = Map<String, dynamic>.from(raw as Map);
       final code = '${m['moyen']}';
       final method =
-          s?.methods.where((x) => x.code == code).firstOrNull ?? PaymentMethodInfo({'code': code, 'nom': code, 'especes': code == 'especes'});
+          s?.methods.where((x) => x.code == code).firstOrNull ??
+          PaymentMethodInfo({'code': code, 'nom': code == PassRules.method ? 'Pass événement' : code, 'especes': code == 'especes'});
       final amount = (m['montant'] as num).toInt();
       final received = (m['recu'] as num?)?.toInt();
       final rounding = (m['ecart_arrondi'] as num?)?.toInt();
@@ -543,7 +557,7 @@ abstract class CaisseEngine extends EngineNotifier {
     if (s.rules.maxSaleAmount != null && totals.payable > s.rules.maxSaleAmount!) {
       throw OfflineRefusal('Vente au-dessus du montant maximal hors ligne (${formatFcfa(s.rules.maxSaleAmount!)}).');
     }
-    final allowed = {for (final m in s.methods) m.code};
+    final allowed = {for (final m in s.methods) m.code, if (extras.passes.isNotEmpty) PassRules.method};
     var paid = 0;
     for (final payment in payments) {
       if (!allowed.contains(payment.method.code)) throw OfflineRefusal('« ${payment.method.name} » n’est pas autorisé hors ligne.');

@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 7, ticket.modeles) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 8, passes.evenement) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -178,6 +178,11 @@ const contractV2Schemas = <String, String>{
       "description": "Taux en pourcentage, chaîne à six décimales (18 % : \"18.000000\").",
       "type": "string",
       "pattern": "^(0|[1-9][0-9]{0,2})\\.[0-9]{6}$"
+    },
+    "jour": {
+      "description": "Date civile AAAA-MM-JJ, sans heure ni fuseau (jour civil de la boutique, dans son fuseau publié).",
+      "type": "string",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])$"
     },
     "curseur": {
       "description": "Curseur opaque du journal de changements. Le client le conserve et le renvoie tel quel ; il ne l'interprète jamais.",
@@ -1600,6 +1605,325 @@ const contractV2Schemas = <String, String>{
                     ]
                 }
             }
+        },
+        "pass_reglages": {
+            "description": "Capacité passes.evenement : réglages du module pour la boutique de clé (son uuid). actifs = false : aucun paiement par pass.",
+            "type": "object",
+            "required": [
+                "actifs",
+                "en_service_table",
+                "plusieurs_pass_par_vente",
+                "saisie_manuelle",
+                "hors_ligne"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "actifs": {
+                    "type": "boolean"
+                },
+                "en_service_table": {
+                    "description": "Paiement par pass permis au Service de table.",
+                    "type": "boolean"
+                },
+                "plusieurs_pass_par_vente": {
+                    "type": "boolean"
+                },
+                "saisie_manuelle": {
+                    "description": "false : masquer la saisie volontaire du code (douchette ou caméra seulement).",
+                    "type": "boolean"
+                },
+                "hors_ligne": {
+                    "description": "Sans réseau : refuser (« Vérification impossible sans connexion pour cet événement. ») ou autoriser (décision locale avec compteurs + passages locaux en attente).",
+                    "enum": [
+                        "refuser",
+                        "autoriser"
+                    ]
+                }
+            }
+        },
+        "pass_evenement": {
+            "description": "Capacité passes.evenement : événement de clé (son uuid). Le service est résolu par le serveur en uuid de produits (catégories, fournisseurs, marques et produits marqués ; une variante entre par son parent).",
+            "type": "object",
+            "required": [
+                "nom",
+                "debut",
+                "fin",
+                "actif",
+                "tous_produits",
+                "produits",
+                "hors_ligne"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "debut": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Premier jour inclus ; null = ouvert."
+                },
+                "fin": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Dernier jour inclus ; null = ouvert."
+                },
+                "actif": {
+                    "description": "false : « L'événement de ce pass est clos ou désactivé. »",
+                    "type": "boolean"
+                },
+                "tous_produits": {
+                    "description": "Vrai : tout produit est du service (produits est alors vide).",
+                    "type": "boolean"
+                },
+                "produits": {
+                    "description": "Produits du service, triés. Vide et tous_produits = false : rien ne passe (« L'événement n'a aucun produit dans son service… »).",
+                    "type": "array",
+                    "maxItems": 20000,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "hors_ligne": {
+                    "description": "Sans réseau : refuser (« Vérification impossible sans connexion pour cet événement. ») ou autoriser (décision locale avec compteurs + passages locaux en attente).",
+                    "enum": [
+                        "refuser",
+                        "autoriser"
+                    ]
+                }
+            }
+        },
+        "pass": {
+            "description": "Capacité passes.evenement : pass de clé (son uuid), révoqué compris (statut revoque, refusé avec le message ECAS). Le code n'est jamais publié : le terminal normalise le code lu (bords et retours retirés, majuscules), calcule son SHA-256 et le cherche parmi les code_empreinte.",
+            "type": "object",
+            "required": [
+                "evenement_uuid",
+                "code_empreinte",
+                "type",
+                "porteur",
+                "statut",
+                "debut",
+                "fin",
+                "max_total",
+                "plafond_par_passage",
+                "regles",
+                "menus_produits",
+                "compteurs"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "evenement_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "code_empreinte": {
+                    "description": "SHA-256 hexadécimal minuscule du code normalisé (UTF-8).",
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                },
+                "type": {
+                    "enum": [
+                        "qr",
+                        "code_barre"
+                    ]
+                },
+                "porteur": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 160
+                },
+                "statut": {
+                    "enum": [
+                        "actif",
+                        "revoque"
+                    ]
+                },
+                "debut": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Validité propre du pass, premier jour inclus ; null = ouverte."
+                },
+                "fin": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Dernier jour inclus ; null = ouverte."
+                },
+                "max_total": {
+                    "description": "Passages au total ; null = illimité.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 1000000
+                },
+                "plafond_par_passage": {
+                    "description": "Montant maximal d'un passage (FCFA) ; null = libre.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ]
+                },
+                "regles": {
+                    "description": "Quotas par jour : une règle datée l'emporte sur le jour de semaine ; sans règle, tous les jours de la fenêtre sans limite par jour ; avec des règles, seulement les jours couverts ; 0 interdit le jour.",
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                        "$ref": "#/$defs/pass_regle"
+                    }
+                },
+                "menus_produits": {
+                    "description": "Produits des menus liés au pass (produits nommés et catégories des menus), triés ; null = pas de contrainte de menu.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "array",
+                            "maxItems": 20000,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            }
+                        }
+                    ]
+                },
+                "compteurs": {
+                    "$ref": "#/$defs/pass_compteurs"
+                }
+            }
+        },
+        "pass_regle": {
+            "description": "Une règle porte soit un jour de semaine (1 = lundi … 7 = dimanche), soit une date.",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": [
+                        "jour_semaine",
+                        "date",
+                        "max_passages"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "jour_semaine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 7
+                        },
+                        "date": {
+                            "type": "null"
+                        },
+                        "max_passages": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000
+                        }
+                    }
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "jour_semaine",
+                        "date",
+                        "max_passages"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "jour_semaine": {
+                            "type": "null"
+                        },
+                        "date": {
+                            "$ref": "commun.json#/$defs/jour"
+                        },
+                        "max_passages": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000
+                        }
+                    }
+                }
+            ]
+        },
+        "pass_compteurs": {
+            "description": "Passages validés au serveur, tous terminaux confondus. Le terminal ajoute SEULEMENT ses passages locaux dont l'uuid n'est pas dans passages : jamais de double compte, même si la révision arrive avant l'accusé de la vente.",
+            "type": "object",
+            "required": [
+                "total",
+                "jours",
+                "passages"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                },
+                "jours": {
+                    "description": "Passages par jour civil sur les 7 derniers jours de la boutique, aujourd'hui compris, triés par jour ; jours sans passage absents. Liste plutôt que carte {AAAA-MM-JJ: n} : le profil SK-SCHEMA-1 n'a que des objets fermés.",
+                    "type": "array",
+                    "maxItems": 7,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "jour",
+                            "passages"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "jour": {
+                                "$ref": "commun.json#/$defs/jour"
+                            },
+                            "passages": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1000000
+                            }
+                        }
+                    }
+                },
+                "passages": {
+                    "description": "uuid des passages comptés dans jours (même fenêtre), triés.",
+                    "type": "array",
+                    "maxItems": 10000,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                }
+            }
         }
     }
 }
@@ -2252,6 +2576,15 @@ const contractV2Schemas = <String, String>{
                             "$ref": "commun.json#/$defs/uuid"
                         }
                     ]
+                },
+                "passages": {
+                    "description": "Capacité passes.evenement (2.1 lot 8) : un passage par pass, obligatoire dès qu'un paiement est de moyen pass_evenement (aucun autre moyen dans la même vente) ; Σ montant = totaux.a_payer. hors_chiffre_affaires n'est pas envoyé : le serveur l'applique selon pass_reglages. Pass inconnu, produit hors du service ou des menus, paiement pass sans passages : a_arbitrer. Règle non conforme au serveur (quota pris par un autre terminal, révoqué entre-temps, hors fenêtre) : vente intégrée, passage en écart.",
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                        "$ref": "#/$defs/passage"
+                    }
                 }
             }
         },
@@ -2415,6 +2748,64 @@ const contractV2Schemas = <String, String>{
                     "minimum": -1000000,
                     "maximum": 1000000,
                     "description": "Révision 2.1 : arrondi de caisse des espèces = montant encaissé au tiroir − montant (exact). montant reste la part exacte de la vente ; écart = arrondi_especes appliqué au montant − montant."
+                }
+            }
+        },
+        "passage": {
+            "description": "Passage débité sur un pass (capacité passes.evenement). Idempotent par uuid : l'uuid du terminal devient celui du passage au serveur.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "pass_uuid",
+                "jour",
+                "montant",
+                "point_passage",
+                "point_consommation",
+                "table_uuid",
+                "verifie_en_ligne"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "pass_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Clé de l'entité pass publiée. Jamais le code en clair."
+                },
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Jour civil du passage dans le fuseau publié de la boutique (même règle que date_metier)."
+                },
+                "montant": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "point_passage": {
+                    "description": "Poste de scan ; vide : réglage de la boutique, sinon « Caisse ».",
+                    "type": "string",
+                    "maxLength": 60
+                },
+                "point_consommation": {
+                    "description": "Nom de la table, sinon le point de passage ; null : le serveur reprend la table ou le point de passage.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 160
+                },
+                "table_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "verifie_en_ligne": {
+                    "description": "Vrai si POST /passes/verifier a autorisé ce passage juste avant (information, sans effet sur l'autorité du serveur).",
+                    "type": "boolean"
                 }
             }
         },
@@ -3303,6 +3694,154 @@ const contractV2Schemas = <String, String>{
                 },
                 "contenu": {
                     "$ref": "donnees-2.1.json#/$defs/contenu_panier"
+                }
+            }
+        }
+    }
+}
+''',
+  'passes.json': r'''{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "passes.json",
+    "title": "Capacité passes.evenement (2.1 lot 8) : vérification en ligne d'un pass avant passage (POST /passes/verifier). C'est le seul endroit où le code en clair transite ; il n'est ni journalisé ni renvoyé dans une erreur.",
+    "$defs": {
+        "demande": {
+            "type": "object",
+            "required": [
+                "code",
+                "jour",
+                "lignes",
+                "montant",
+                "point_passage",
+                "table_uuid"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "description": "Code scanné ou saisi, tel que lu ; le serveur le normalise (bords et retours retirés, majuscules).",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Jour civil du passage dans le fuseau publié de la boutique (boutique.regles.fuseau), pas l'horloge brute du terminal."
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/ligne"
+                    }
+                },
+                "montant": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Part de ce pass dans le total à payer (répartition au franc près, reste au premier)."
+                },
+                "point_passage": {
+                    "description": "Nom du poste de scan ; null ou vide : réglage de la boutique, sinon « Caisse ».",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 60
+                },
+                "table_uuid": {
+                    "description": "Table du Service de table, ou null.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                }
+            }
+        },
+        "ligne": {
+            "type": "object",
+            "required": [
+                "produit_uuid",
+                "quantite",
+                "montant"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "quantite": {
+                    "$ref": "commun.json#/$defs/quantite"
+                },
+                "montant": {
+                    "$ref": "commun.json#/$defs/montant"
+                }
+            }
+        },
+        "reponse": {
+            "description": "Verdict sans réservation : l'autorité finale est l'intégration de la vente (un second terminal peut être vu en écart). Motifs : textes d'ECAS (ReglesPassage.kt), mot pour mot.",
+            "type": "object",
+            "required": [
+                "verdict",
+                "motif",
+                "pass_uuid",
+                "porteur",
+                "restant_jour",
+                "restant_total"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "verdict": {
+                    "enum": [
+                        "autorise",
+                        "refuse"
+                    ]
+                },
+                "motif": {
+                    "description": "null si autorisé ; sinon le refus lisible par le caissier.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "pass_uuid": {
+                    "description": "Clé de l'entité pass reconnue (y compris refusée), null si le code est inconnu.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "porteur": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 160
+                },
+                "restant_jour": {
+                    "description": "Passages restants aujourd'hui APRÈS ce passage ; null = sans limite du jour, ou refus.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 1000000
+                },
+                "restant_total": {
+                    "description": "Passages restants au total APRÈS ce passage ; null = illimité, ou refus.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 1000000
                 }
             }
         }

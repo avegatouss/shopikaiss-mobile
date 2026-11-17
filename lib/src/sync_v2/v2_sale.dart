@@ -76,6 +76,7 @@ class V2SaleBuilder {
     ({int step, String mode})? cashRounding,
     bool revision21 = false,
     SaleApproval? approval,
+    List<Map<String, dynamic>> passages = const [],
   }) {
     if (!revision21 && !extras.isEmpty) throw const V2SaleInvalid('Remise globale, livraison et note : contrat 2.1 requis.');
     if (cart.isEmpty) throw const V2SaleInvalid('Panier vide.');
@@ -177,6 +178,7 @@ class V2SaleBuilder {
       if (extras.sharedCart != null) 'panier_uuid': extras.sharedCart,
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[if (approval != null) approval.toJson()],
+      if (passages.isNotEmpty) 'passages': passages,
     };
   }
 

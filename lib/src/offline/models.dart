@@ -595,7 +595,17 @@ class CartTier {
 }
 
 class SaleExtras {
-  const SaleExtras({this.globalDiscount = 0, this.globalEntry, this.delivery = 0, this.note, this.approval, this.customer, this.sharedCart, this.wholesale = false});
+  const SaleExtras({
+    this.globalDiscount = 0,
+    this.globalEntry,
+    this.delivery = 0,
+    this.note,
+    this.approval,
+    this.customer,
+    this.sharedCart,
+    this.wholesale = false,
+    this.passes = const [],
+  });
 
   final int globalDiscount;
   final DiscountEntry? globalEntry;
@@ -614,8 +624,52 @@ class SaleExtras {
   /// Panier entier au tarif gros.
   final bool wholesale;
 
+  /// Passes vérifiés qui paient la vente (capacité `passes.evenement`) : aucun autre moyen de paiement.
+  final List<PassCheck> passes;
+
   bool get isEmpty =>
-      globalDiscount == 0 && delivery == 0 && (note == null || note!.isEmpty) && approval == null && customer == null && sharedCart == null && !wholesale;
+      globalDiscount == 0 &&
+      delivery == 0 &&
+      (note == null || note!.isEmpty) &&
+      approval == null &&
+      customer == null &&
+      sharedCart == null &&
+      !wholesale &&
+      passes.isEmpty;
+}
+
+/// Réglages du module Passes événement pour la boutique (entité `pass_reglages`).
+class PassSettings {
+  PassSettings(Map m)
+    : active = m['actifs'] == true,
+      tableService = m['en_service_table'] == true,
+      severalPerSale = m['plusieurs_pass_par_vente'] == true,
+      manualEntry = m['saisie_manuelle'] == true;
+
+  final bool active;
+  final bool tableService;
+  final bool severalPerSale;
+
+  /// false : pas de saisie volontaire du code (douchette ou caméra seulement).
+  final bool manualEntry;
+}
+
+/// Pass autorisé pour la vente en cours : jamais le code, seulement la clé du pass publiée par le serveur.
+class PassCheck {
+  const PassCheck({required this.passUuid, this.holder, this.leftToday, this.leftTotal, required this.online, required this.amount});
+
+  final String passUuid;
+  final String? holder;
+
+  /// Passages restants APRÈS celui-ci ; null = sans limite.
+  final int? leftToday;
+  final int? leftTotal;
+
+  /// Autorisé par `POST /passes/verifier` (sinon décision locale, hors connexion).
+  final bool online;
+
+  /// Part de la vente débitée sur ce pass au moment de la vérification.
+  final int amount;
 }
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.

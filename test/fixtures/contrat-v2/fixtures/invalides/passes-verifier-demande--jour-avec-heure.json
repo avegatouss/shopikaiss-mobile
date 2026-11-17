@@ -1,0 +1,14 @@
+{
+    "code": "EVT-7K3M9QX2",
+    "jour": "2026-11-16T10:00:00Z",
+    "lignes": [
+        {
+            "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+            "quantite": "1.000000",
+            "montant": 1500
+        }
+    ],
+    "montant": 1500,
+    "point_passage": "Entrée",
+    "table_uuid": null
+}

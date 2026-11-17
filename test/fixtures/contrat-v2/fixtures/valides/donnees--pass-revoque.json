@@ -1,0 +1,20 @@
+{
+    "statut": "revoque",
+    "porteur": null,
+    "type": "code_barre",
+    "max_total": null,
+    "plafond_par_passage": null,
+    "regles": [],
+    "menus_produits": [
+        "c0000000-0000-4000-8000-000000000001"
+    ],
+    "compteurs": {
+        "total": 0,
+        "jours": [],
+        "passages": []
+    },
+    "evenement_uuid": "e7e00000-0000-4000-8000-000000000001",
+    "code_empreinte": "d2b428d351e939de4f55c9b1e7157482e97d03eb69a4431ec79023b500f05ee3",
+    "debut": null,
+    "fin": "2026-11-16"
+}

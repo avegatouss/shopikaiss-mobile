@@ -1379,6 +1379,325 @@
                     ]
                 }
             }
+        },
+        "pass_reglages": {
+            "description": "Capacité passes.evenement : réglages du module pour la boutique de clé (son uuid). actifs = false : aucun paiement par pass.",
+            "type": "object",
+            "required": [
+                "actifs",
+                "en_service_table",
+                "plusieurs_pass_par_vente",
+                "saisie_manuelle",
+                "hors_ligne"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "actifs": {
+                    "type": "boolean"
+                },
+                "en_service_table": {
+                    "description": "Paiement par pass permis au Service de table.",
+                    "type": "boolean"
+                },
+                "plusieurs_pass_par_vente": {
+                    "type": "boolean"
+                },
+                "saisie_manuelle": {
+                    "description": "false : masquer la saisie volontaire du code (douchette ou caméra seulement).",
+                    "type": "boolean"
+                },
+                "hors_ligne": {
+                    "description": "Sans réseau : refuser (« Vérification impossible sans connexion pour cet événement. ») ou autoriser (décision locale avec compteurs + passages locaux en attente).",
+                    "enum": [
+                        "refuser",
+                        "autoriser"
+                    ]
+                }
+            }
+        },
+        "pass_evenement": {
+            "description": "Capacité passes.evenement : événement de clé (son uuid). Le service est résolu par le serveur en uuid de produits (catégories, fournisseurs, marques et produits marqués ; une variante entre par son parent).",
+            "type": "object",
+            "required": [
+                "nom",
+                "debut",
+                "fin",
+                "actif",
+                "tous_produits",
+                "produits",
+                "hors_ligne"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "debut": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Premier jour inclus ; null = ouvert."
+                },
+                "fin": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Dernier jour inclus ; null = ouvert."
+                },
+                "actif": {
+                    "description": "false : « L'événement de ce pass est clos ou désactivé. »",
+                    "type": "boolean"
+                },
+                "tous_produits": {
+                    "description": "Vrai : tout produit est du service (produits est alors vide).",
+                    "type": "boolean"
+                },
+                "produits": {
+                    "description": "Produits du service, triés. Vide et tous_produits = false : rien ne passe (« L'événement n'a aucun produit dans son service… »).",
+                    "type": "array",
+                    "maxItems": 20000,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "hors_ligne": {
+                    "description": "Sans réseau : refuser (« Vérification impossible sans connexion pour cet événement. ») ou autoriser (décision locale avec compteurs + passages locaux en attente).",
+                    "enum": [
+                        "refuser",
+                        "autoriser"
+                    ]
+                }
+            }
+        },
+        "pass": {
+            "description": "Capacité passes.evenement : pass de clé (son uuid), révoqué compris (statut revoque, refusé avec le message ECAS). Le code n'est jamais publié : le terminal normalise le code lu (bords et retours retirés, majuscules), calcule son SHA-256 et le cherche parmi les code_empreinte.",
+            "type": "object",
+            "required": [
+                "evenement_uuid",
+                "code_empreinte",
+                "type",
+                "porteur",
+                "statut",
+                "debut",
+                "fin",
+                "max_total",
+                "plafond_par_passage",
+                "regles",
+                "menus_produits",
+                "compteurs"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "evenement_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "code_empreinte": {
+                    "description": "SHA-256 hexadécimal minuscule du code normalisé (UTF-8).",
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$"
+                },
+                "type": {
+                    "enum": [
+                        "qr",
+                        "code_barre"
+                    ]
+                },
+                "porteur": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 160
+                },
+                "statut": {
+                    "enum": [
+                        "actif",
+                        "revoque"
+                    ]
+                },
+                "debut": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Validité propre du pass, premier jour inclus ; null = ouverte."
+                },
+                "fin": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ],
+                    "description": "Dernier jour inclus ; null = ouverte."
+                },
+                "max_total": {
+                    "description": "Passages au total ; null = illimité.",
+                    "type": [
+                        "integer",
+                        "null"
+                    ],
+                    "minimum": 1,
+                    "maximum": 1000000
+                },
+                "plafond_par_passage": {
+                    "description": "Montant maximal d'un passage (FCFA) ; null = libre.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ]
+                },
+                "regles": {
+                    "description": "Quotas par jour : une règle datée l'emporte sur le jour de semaine ; sans règle, tous les jours de la fenêtre sans limite par jour ; avec des règles, seulement les jours couverts ; 0 interdit le jour.",
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                        "$ref": "#/$defs/pass_regle"
+                    }
+                },
+                "menus_produits": {
+                    "description": "Produits des menus liés au pass (produits nommés et catégories des menus), triés ; null = pas de contrainte de menu.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "array",
+                            "maxItems": 20000,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            }
+                        }
+                    ]
+                },
+                "compteurs": {
+                    "$ref": "#/$defs/pass_compteurs"
+                }
+            }
+        },
+        "pass_regle": {
+            "description": "Une règle porte soit un jour de semaine (1 = lundi … 7 = dimanche), soit une date.",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": [
+                        "jour_semaine",
+                        "date",
+                        "max_passages"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "jour_semaine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 7
+                        },
+                        "date": {
+                            "type": "null"
+                        },
+                        "max_passages": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000
+                        }
+                    }
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "jour_semaine",
+                        "date",
+                        "max_passages"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "jour_semaine": {
+                            "type": "null"
+                        },
+                        "date": {
+                            "$ref": "commun.json#/$defs/jour"
+                        },
+                        "max_passages": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000
+                        }
+                    }
+                }
+            ]
+        },
+        "pass_compteurs": {
+            "description": "Passages validés au serveur, tous terminaux confondus. Le terminal ajoute SEULEMENT ses passages locaux dont l'uuid n'est pas dans passages : jamais de double compte, même si la révision arrive avant l'accusé de la vente.",
+            "type": "object",
+            "required": [
+                "total",
+                "jours",
+                "passages"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "total": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1000000
+                },
+                "jours": {
+                    "description": "Passages par jour civil sur les 7 derniers jours de la boutique, aujourd'hui compris, triés par jour ; jours sans passage absents. Liste plutôt que carte {AAAA-MM-JJ: n} : le profil SK-SCHEMA-1 n'a que des objets fermés.",
+                    "type": "array",
+                    "maxItems": 7,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "jour",
+                            "passages"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "jour": {
+                                "$ref": "commun.json#/$defs/jour"
+                            },
+                            "passages": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1000000
+                            }
+                        }
+                    }
+                },
+                "passages": {
+                    "description": "uuid des passages comptés dans jours (même fenêtre), triés.",
+                    "type": "array",
+                    "maxItems": 10000,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                }
+            }
         }
     }
 }

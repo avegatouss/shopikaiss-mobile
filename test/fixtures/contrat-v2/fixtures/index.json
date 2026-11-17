@@ -328,6 +328,70 @@
             "schema": "donnees-2.1.json#/$defs/modele_ticket",
             "valide": false,
             "erreur_attendue": "titre : au moins 1"
+        },
+        {
+            "fichier": "valides/donnees--pass-reglages.json",
+            "schema": "donnees-2.1.json#/$defs/pass_reglages",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--pass-evenement.json",
+            "schema": "donnees-2.1.json#/$defs/pass_evenement",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--pass.json",
+            "schema": "donnees-2.1.json#/$defs/pass",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--pass-revoque.json",
+            "schema": "donnees-2.1.json#/$defs/pass",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--pass-code-en-clair.json",
+            "schema": "donnees-2.1.json#/$defs/pass",
+            "valide": false,
+            "erreur_attendue": "code : propriété inconnue"
+        },
+        {
+            "fichier": "invalides/donnees--pass-regle-jour-et-date.json",
+            "schema": "donnees-2.1.json#/$defs/pass",
+            "valide": false,
+            "erreur_attendue": "exactement une variante"
+        },
+        {
+            "fichier": "valides/operation--vente-pass.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--vente-passage-sans-pass-uuid.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "pass_uuid : obligatoire"
+        },
+        {
+            "fichier": "valides/passes-verifier-demande--nominal.json",
+            "schema": "passes.json#/$defs/demande",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/passes-verifier-demande--jour-avec-heure.json",
+            "schema": "passes.json#/$defs/demande",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "valides/passes-verifier-reponse--autorise.json",
+            "schema": "passes.json#/$defs/reponse",
+            "valide": true
+        },
+        {
+            "fichier": "valides/passes-verifier-reponse--refuse.json",
+            "schema": "passes.json#/$defs/reponse",
+            "valide": true
         }
     ]
 }

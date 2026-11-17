@@ -113,6 +113,10 @@ class CaisseV2Client {
   /// Modèles de ticket (2.1 lot 7) : types `modele_ticket` et `ticket_terminal`.
   static const ticketModelsCapability = 'ticket.modeles';
 
+  /// Passes événement (2.1 lot 8) : types `pass_reglages`, `pass_evenement`, `pass`, `POST /passes/verifier`,
+  /// `vente.passages[]`, droit `pass_encaisser`.
+  static const passesCapability = 'passes.evenement';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;
@@ -231,6 +235,14 @@ class CaisseV2Client {
       }
     }
     return response.body;
+  }
+
+  /// Vérification d'un pass avant passage (passes.json) : verdict sans réservation. Seul envoi du code en clair.
+  Future<Map<String, dynamic>> verifyPass(Map<String, dynamic> request) async {
+    _requireValid(request, 'passes.json#/\$defs/demande');
+    return Map<String, dynamic>.from(
+      await _call('POST', '/passes/verifier', body: request, schema: 'passes.json#/\$defs/reponse', timeout: const Duration(seconds: 10)) as Map,
+    );
   }
 
   /// Reprise exclusive d'un panier partagé, ou renouvellement par son détenteur.

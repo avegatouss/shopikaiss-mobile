@@ -16,6 +16,7 @@ import '../windows/presentation/searchable_choice.dart';
 import 'engine.dart';
 import 'models.dart';
 import 'money.dart';
+import 'pass_sheet.dart';
 import 'pending_operations_page.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
@@ -1149,6 +1150,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (_passButton(snapshot, totals.payable) case final pass?) ...[pass, const SizedBox(width: 8)],
                 FilledButton(
                   style: FilledButton.styleFrom(backgroundColor: _brand, minimumSize: const Size(0, 48)),
                   onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
@@ -1709,6 +1711,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 children: [
                   OutlinedButton(onPressed: _cart.isEmpty ? null : _confirmClear, child: const Text('Vider le panier')),
                   const SizedBox(width: 8),
+                  if (_passButton(snapshot, totals.payable) case final pass?) ...[pass, const SizedBox(width: 8)],
                   Expanded(
                     child: FilledButton.icon(
                       style: FilledButton.styleFrom(padding: const EdgeInsets.all(14)),
@@ -1851,7 +1854,46 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     );
   }
 
-  Future<void> _checkout(Snapshot snapshot, int payable) async {
+  /// Paiement par pass événement : feuille de scan, puis encaissement sans autre moyen de paiement.
+  Future<void> _payByPass(Snapshot snapshot, int payable) async {
+    final settings = _engine.passSettings;
+    final operator = _operator;
+    if (settings == null || operator == null) return;
+    try {
+      allocateLots(snapshot, _cart);
+    } on OfflineRefusal catch (e) {
+      return _refuse(e.message, title: 'Lot à vérifier');
+    }
+    final totals = _totals(snapshot);
+    final extras = SaleExtras(wholesale: _tier.cart, globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, customer: _customer, sharedCart: _shared?.uuid);
+    final lines = List.of(_cart);
+    Widget sheet(bool fullScreen) => PassSheet(
+      payable: payable,
+      settings: settings,
+      brand: _brand,
+      fullScreen: fullScreen,
+      verify: (code, already) => _engine.verifyPass(operator, code, lines, extras, already: already),
+    );
+    final passes = _compact
+        ? await Navigator.of(context).push<List<PassCheck>>(MaterialPageRoute(fullscreenDialog: true, builder: (_) => sheet(true)))
+        : await showDialog<List<PassCheck>>(context: context, barrierDismissible: false, builder: (_) => sheet(false));
+    if (passes == null || passes.isEmpty || !mounted) return;
+    await _checkout(snapshot, payable, passes: passes);
+  }
+
+  Widget? _passButton(Snapshot snapshot, int payable) {
+    final operator = _operator;
+    if (operator == null || !_engine.canPayByPass(operator)) return null;
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48), foregroundColor: _brand),
+      onPressed: _cart.isEmpty ? null : () => _payByPass(snapshot, payable),
+      icon: const Icon(Icons.qr_code_scanner),
+      label: const Text('Pass'),
+    );
+  }
+
+  /// [passes] : vente payée par pass (vérifiés dans la feuille de scan), sans fenêtre de paiement.
+  Future<void> _checkout(Snapshot snapshot, int payable, {List<PassCheck>? passes}) async {
     try {
       allocateLots(snapshot, _cart);
     } on OfflineRefusal catch (e) {
@@ -1868,7 +1910,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       approval = await _askApproval(globalDiscount);
       if (approval == null || !mounted) return;
     }
-    final payments = _compact
+    final payments = passes != null
+        ? const <CartPayment>[]
+        : _compact
         ? await Navigator.of(context).push<List<CartPayment>>(
             MaterialPageRoute(
               fullscreenDialog: true,
@@ -1889,7 +1933,17 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         payments,
         _operator!,
         draftUuid: _draftUuid,
-        extras: SaleExtras(wholesale: _tier.cart, globalDiscount: totals.globalDiscount, globalEntry: _globalEntry, delivery: _delivery, note: _note, approval: approval, customer: _customer, sharedCart: _shared?.uuid),
+        extras: SaleExtras(
+          wholesale: _tier.cart,
+          globalDiscount: totals.globalDiscount,
+          globalEntry: _globalEntry,
+          delivery: _delivery,
+          note: _note,
+          approval: approval,
+          customer: _customer,
+          sharedCart: _shared?.uuid,
+          passes: passes ?? const [],
+        ),
       );
     } on OfflineRefusal catch (e) {
       return _refuse(e.message, title: 'Encaissement refusé');
@@ -1912,6 +1966,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       return;
     }
     final lines = List.of(_cart);
+    // Vente par pass : les paiements sont ceux que le moteur a répartis entre les passes.
+    final paid = passes == null ? payments : _engine.ticketParts(operation).$2;
     setState(() {
       _clearCart();
       _draftUuid = const Uuid().v4();
@@ -1919,10 +1975,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     unawaited(_refreshSold());
     // Le tiroir s'ouvre pour les espèces, que le ticket soit imprimé ou non.
     final session = widget.session;
-    if (session.hasPrinter && payments.any((p) => p.method.isCash)) unawaited(session.channel.openDrawer());
+    if (session.hasPrinter && paid.any((p) => p.method.isCash)) unawaited(session.channel.openDrawer());
     var printed = _look.ticketMode == 'auto';
-    if (printed) await _print(snapshot, operation, lines, payments);
-    final change = payments.fold<int>(0, (sum, p) => sum + p.change);
+    if (printed) await _print(snapshot, operation, lines, paid);
+    final change = paid.fold<int>(0, (sum, p) => sum + p.change);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -1931,13 +1987,17 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           icon: Icon(Icons.check_circle, color: _brand, size: 48),
           title: Text('Vente ${operation.number}'),
           content: Text(
-            change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : 'Vente enregistrée sur le terminal.',
+            change > 0
+                ? 'Monnaie à rendre : ${formatFcfa(change)}'
+                : passes != null
+                ? 'Payée par pass${passes.length > 1 ? ' (${passes.length} passes)' : ''}.'
+                : 'Vente enregistrée sur le terminal.',
             style: const TextStyle(fontSize: 20),
           ),
           actions: [
             TextButton(
               onPressed: () async {
-                await _print(snapshot, operation, lines, payments, duplicate: printed);
+                await _print(snapshot, operation, lines, paid, duplicate: printed);
                 setDialog(() => printed = true);
               },
               child: Text(printed ? 'Réimprimer' : 'Imprimer le ticket'),
