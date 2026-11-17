@@ -53,6 +53,22 @@ void main() {
       );
     },
   );
+  test('screen keeps all rows and separates quantity name and amount', () {
+    final frame = customerFrame({
+      'lines': List.generate(
+        15,
+        (i) => {
+          'name': 'Article $i',
+          'quantity_label': '2',
+          'total_label': '500 F',
+        },
+      ),
+      'totals': {'payable_label': '7 500 F'},
+    });
+    expect(frame['screen'], contains('2\tArticle 14\t500 F'));
+    expect(frame['screen'], contains('2\tArticle 0\t500 F'));
+    expect(frame['screen'], contains('TOTAL : 7 500 F'));
+  });
   test('empty basket clears previous amount with welcome message', () {
     final frame = customerFrame({});
     expect(frame['screen'], contains('Bienvenue'));

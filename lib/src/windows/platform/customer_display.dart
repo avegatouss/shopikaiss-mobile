@@ -17,7 +17,7 @@ Map<String, String> customerFrame(Map<String, dynamic> view) {
   final total = displayText(totals['payable_label'] ?? view['total_label']);
   final screen = lines.isEmpty
       ? 'SHOPIKAISS\n\nBienvenue'
-      : 'SHOPIKAISS\n\n${lines.take(10).map((l) => '${displayText(l['quantity_label'], 20)}  ${displayText(l['name'], 65)}   ${displayText(l['total_label'], 30)}').join('\n')}\n\nTOTAL : $total';
+      : 'SHOPIKAISS\n\n${lines.map((l) => '${displayText(l['quantity_label'], 20)}\t${displayText(l['name'], 65)}\t${displayText(l['total_label'], 30)}').join('\n')}\n\nTOTAL : $total';
   String ascii(String text) {
     const accented = 'àâäéèêëîïôöùûüçÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ';
     const plain = 'aaaeeeeiioouuucAAAEEEEIIOOUUUC';

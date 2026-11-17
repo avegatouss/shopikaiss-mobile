@@ -40,6 +40,30 @@ class PaymentHost implements WindowsHost {
 }
 
 void main() {
+  testWidgets('desktop payment fields share one row', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 800));
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final c = WindowsRegisterController(PaymentHost())..ready = true;
+    await c.command(HostCommand.preparePayment, {});
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: MultiplePayments(controller: c)),
+      ),
+    );
+    final method = find.byType(DropdownButtonFormField<String>);
+    final fields = find.byType(TextFormField);
+    expect(fields, findsNWidgets(2));
+    final y = tester.getTopLeft(method).dy;
+    expect(tester.getTopLeft(fields.at(0)).dy, closeTo(y, 1));
+    expect(tester.getTopLeft(fields.at(1)).dy, closeTo(y, 1));
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
   testWidgets(
     'remaining is proposed for next payment and feedback stays in dialog',
     (tester) async {
