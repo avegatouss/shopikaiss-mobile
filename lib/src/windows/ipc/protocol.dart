@@ -30,6 +30,8 @@ enum HostCommand {
   resumeDraft,
   deleteDraft,
   setPayments,
+  verifyPass,
+  removePass,
   addProduct,
   clear,
   status,

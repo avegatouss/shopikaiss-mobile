@@ -27,8 +27,8 @@ class PassScanVerdict {
   bool get selectable => allowed && passId != null && passId!.isNotEmpty;
 }
 
-/// Not connected to production until B delivers the shared engine commands.
-/// Returns the selected preview only; never submits or retries a sale.
+/// Never submits or retries a sale. With selectsDraft, the engine verification
+/// retains the pass immediately; returning always leads to the selected list.
 class PassScanDialog extends StatefulWidget {
   const PassScanDialog({
     super.key,
@@ -36,12 +36,14 @@ class PassScanDialog extends StatefulWidget {
     required this.manualEntryAllowed,
     required this.verify,
     this.verificationTimeout = const Duration(seconds: 20),
+    this.selectsDraft = false,
   });
 
   final String totalLabel;
   final bool manualEntryAllowed;
   final Future<PassScanVerdict> Function(String code) verify;
   final Duration verificationTimeout;
+  final bool selectsDraft;
 
   @override
   State<PassScanDialog> createState() => _PassScanDialogState();
@@ -317,7 +319,7 @@ class _PassScanDialogState extends State<PassScanDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('Annuler'),
+          child: Text(widget.selectsDraft ? 'Retour aux passes retenus' : 'Annuler'),
         ),
         if (widget.manualEntryAllowed)
           OutlinedButton.icon(
@@ -330,7 +332,7 @@ class _PassScanDialogState extends State<PassScanDialog> {
               ? () => Navigator.pop(context, verdict)
               : null,
           icon: const Icon(Icons.check),
-          label: const Text('Utiliser ce pass'),
+          label: Text(widget.selectsDraft ? 'Pass retenu · Continuer' : 'Utiliser ce pass'),
         ),
       ],
     );

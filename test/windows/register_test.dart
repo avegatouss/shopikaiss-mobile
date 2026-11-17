@@ -591,7 +591,7 @@ void main() {
       await tester.tap(find.text('Wave').last);
       await tester.pumpAndSettle();
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Montant affecté (F CFA)'),
+        find.widgetWithText(TextFormField, 'Montant (F CFA)'),
         '2000',
       );
       await tester.enterText(
@@ -622,7 +622,7 @@ void main() {
         isNotNull,
       );
       await tester.enterText(
-        find.widgetWithText(TextFormField, 'Montant affecté (F CFA)'),
+        find.widgetWithText(TextFormField, 'Montant (F CFA)'),
         '1000',
       );
       await tester.pump();

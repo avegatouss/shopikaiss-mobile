@@ -26,6 +26,7 @@ import 'customer_picker.dart';
 import 'payment_message.dart';
 import 'cash_operations.dart';
 import 'product_badges.dart';
+import 'pass_payment.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -427,6 +428,14 @@ class _RegisterState extends State<_Register> {
 
   Future<void> _payment() async {
     if (!c.canPay) return;
+    if (_allowed('pass')) {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PassPaymentDialog(controller: c),
+      );
+      return;
+    }
     final prepared = await c.command(HostCommand.preparePayment, {});
     if (!mounted) return;
     if (prepared == null) {
@@ -1472,7 +1481,7 @@ class _RegisterState extends State<_Register> {
                     padding: const EdgeInsets.all(12),
                   ),
                   icon: const Icon(Icons.payments_outlined),
-                  label: const Text('Payer (F4)'),
+                  label: Text(_allowed('pass') ? 'Scanner le pass (F4)' : 'Payer (F4)'),
                 ),
               ),
             ],
