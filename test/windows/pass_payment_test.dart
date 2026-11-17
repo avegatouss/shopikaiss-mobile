@@ -38,12 +38,13 @@ class PassHost implements WindowsHost {
     String? operationId,
   }) async {
     calls.add(command);
-    if (command == HostCommand.status)
+    if (command == HostCommand.status) {
       return {
         'capabilities': {
           'pass': {'allowed': true, 'several_per_sale': false},
         },
       };
+    }
     if (command == HostCommand.removePass) {
       expect(arguments['pass_uuid'], 'pass-1');
       state['passes'] = [];

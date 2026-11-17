@@ -134,8 +134,9 @@ class PassPaymentDialog extends StatelessWidget {
                 onPressed: c.canPay && passes.isNotEmpty
                     ? () async {
                         if (!await commitWithApproval(context, c)) return;
-                        if (context.mounted && c.lines.isEmpty)
+                        if (context.mounted && c.lines.isEmpty) {
                           Navigator.pop(context);
+                        }
                       }
                     : null,
                 child: const Text('Valider la vente'),
