@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
 import '../offline/money.dart';
+import '../passes/pass_rules.dart';
 import '../offline/web_rules.dart';
 
 import '../offline/api.dart';
@@ -174,6 +175,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.returnCapability,
           CaisseV2Client.lotsCapability,
           CaisseV2Client.ticketModelsCapability,
+          CaisseV2Client.passesCapability,
         ],
       ],
     );
@@ -962,6 +964,200 @@ class V2Engine extends CaisseEngine {
   @override
   int? get newBadgeDays => _shopRules?['nouveau_jours'] as int?;
 
+  // ---------------------------------------------------------------- passes événement (2.1 lot 8)
+
+  /// Réglages `pass_reglages` de la boutique, relus à chaque reconstruction.
+  PassSettings? _passSettings;
+
+  @override
+  PassSettings? get passSettings =>
+      saleExtrasSupported && _serverOffers(CaisseV2Client.passesCapability) && (_passSettings?.active ?? false) ? _passSettings : null;
+
+  @override
+  bool canPayByPass(Operator operator) => passSettings != null && hasRight(operator, 'pass_encaisser');
+
+  /// Jour civil du passage, dans le fuseau publié de la boutique.
+  String get _passDay => PassDay.of(now, _shopRules?['fuseau'] as String?);
+
+  static final _passMethod = PaymentMethodInfo({'code': PassRules.method, 'nom': 'Pass événement', 'especes': false, 'reference': 'aucune'});
+
+  int _payableOf(Snapshot s, List<CartLine> lines, SaleExtras extras) {
+    try {
+      return webTotals(
+        lineBases: [for (final l in lines) l.base],
+        lineDiscounts: [for (final l in lines) l.discount],
+        globalDiscount: extras.globalDiscount,
+        vatRate: s.store.vatRate,
+        vatIncluded: s.store.vatIncluded,
+        delivery: extras.delivery,
+      ).payable;
+    } on WebRuleRefusal catch (e) {
+      throw OfflineRefusal(e.message);
+    }
+  }
+
+  /// Passages de ce terminal pour [passUuid] que le serveur ne compte pas encore (absents de `compteurs.passages`),
+  /// sur la même fenêtre de 7 jours : (aujourd'hui, au total). Une vente rejetée ne compte pas.
+  Future<(int, int)> _uncountedPassages(String passUuid, Set<String> counted, String day) async {
+    final from = DateTime.utc(int.parse(day.substring(0, 4)), int.parse(day.substring(5, 7)), int.parse(day.substring(8, 10)))
+        .subtract(const Duration(days: 6))
+        .toIso8601String()
+        .substring(0, 10);
+    var today = 0;
+    var total = 0;
+    for (final row in await v2.operationRows()) {
+      final operation = row['operation'] as Map;
+      if (operation['type'] != 'vente' || row['etat'] == V2OperationState.rejected) continue;
+      for (final passage in ((operation['contenu'] as Map)['passages'] as List? ?? const []).cast<Map>()) {
+        final jour = passage['jour'] as String;
+        if (passage['pass_uuid'] != passUuid || counted.contains(passage['uuid']) || jour.compareTo(from) < 0) continue;
+        total++;
+        if (jour == day) today++;
+      }
+    }
+    return (today, total);
+  }
+
+  /// Décision locale d'ECAS sur les compteurs du serveur et les passages locaux non encore comptés.
+  Future<PassDecision> _decideLocally(String passUuid, Map pass, Map event, String day, int amount) async {
+    final counters = pass['compteurs'] as Map;
+    final (localToday, localTotal) = await _uncountedPassages(passUuid, {...(counters['passages'] as List).cast<String>()}, day);
+    final serverToday = (counters['jours'] as List).cast<Map>().where((j) => j['jour'] == day).map((j) => j['passages'] as int).firstOrNull ?? 0;
+    final definition = PassDefinition(
+      revoked: pass['statut'] != 'actif',
+      start: pass['debut'] as String?,
+      end: pass['fin'] as String?,
+      maxTotal: pass['max_total'] as int?,
+      rules: [for (final r in (pass['regles'] as List).cast<Map>()) PassDayRule.fromJson(r)],
+      capPerPassage: pass['plafond_par_passage'] as int?,
+      eventActive: event['actif'] == true,
+      eventStart: event['debut'] as String?,
+      eventEnd: event['fin'] as String?,
+    );
+    return PassRules.decide(definition, day, serverToday + localToday, (counters['total'] as int) + localTotal, amount);
+  }
+
+  String? _basketRefusal(Map pass, Map event, List<CartLine> lines) => PassRules.basketRefusal(
+    [for (final l in lines) (_productUuids[l.product.id] ?? '', l.label)],
+    allProducts: event['tous_produits'] == true,
+    eventProducts: {...(event['produits'] as List).cast<String>()},
+    menuProducts: pass['menus_produits'] == null ? null : {...(pass['menus_produits'] as List).cast<String>()},
+  );
+
+  @override
+  Future<PassCheck> verifyPass(Operator operator, String code, List<CartLine> lines, SaleExtras extras, {List<PassCheck> already = const []}) async {
+    final settings = passSettings;
+    if (settings == null) throw const OfflineRefusal('Les passes événement sont désactivés (Réglages › Passes événement).');
+    if (!hasRight(operator, 'pass_encaisser')) throw const OfflineRefusal('Permission refusée : encaisser par pass.');
+    final normalized = PassRules.normalize(code);
+    if (normalized.isEmpty) throw const OfflineRefusal('Scannez ou saisissez le code du pass.');
+    if (already.isNotEmpty && !settings.severalPerSale) throw const OfflineRefusal('Un seul pass par vente : retirez le premier pour en scanner un autre.');
+    final s = _requireSelling();
+    if (lines.isEmpty) throw const OfflineRefusal('Le panier est vide.');
+    final amount = PassRules.split(_payableOf(s, lines, extras), already.length + 1).last;
+    final day = _passDay;
+    final client = _client;
+    if (client == null) return _verifyPassOffline(normalized, lines, already, day, amount);
+    final Map<String, dynamic> verdict;
+    try {
+      verdict = await client.verifyPass({
+        'code': normalized.length > 120 ? normalized.substring(0, 120) : normalized,
+        'jour': day,
+        'lignes': [
+          for (final l in lines) {'produit_uuid': _productUuids[l.product.id], 'quantite': Decimal6.format(l.quantity.toInt()), 'montant': l.base - l.discount},
+        ],
+        'montant': amount,
+        'point_passage': null,
+        'table_uuid': null,
+      });
+    } on V2Failure catch (failure) {
+      if (failure.kind != V2FailureKind.unavailable) {
+        throw OfflineRefusal(failure.status == 429 ? 'Trop de vérifications de pass : réessayez dans un instant.' : failure.message);
+      }
+      return _verifyPassOffline(normalized, lines, already, day, amount);
+    }
+    final passUuid = verdict['pass_uuid'] as String?;
+    if (passUuid != null && already.any((p) => p.passUuid == passUuid)) throw const OfflineRefusal('Ce pass est déjà sur la vente.');
+    if (verdict['verdict'] != 'autorise' || passUuid == null) throw OfflineRefusal(verdict['motif'] as String? ?? 'Pass refusé.');
+    return PassCheck(
+      passUuid: passUuid,
+      holder: verdict['porteur'] as String?,
+      leftToday: verdict['restant_jour'] as int?,
+      leftTotal: verdict['restant_total'] as int?,
+      online: true,
+      amount: amount,
+    );
+  }
+
+  /// Sans réseau : seulement si l'événement l'autorise (`hors_ligne`), par les règles d'ECAS sur les données publiées.
+  Future<PassCheck> _verifyPassOffline(String normalized, List<CartLine> lines, List<PassCheck> already, String day, int amount) async {
+    final fingerprint = PassRules.fingerprint(normalized);
+    final entry = (await v2.entities('pass')).entries.where((e) => e.value['code_empreinte'] == fingerprint).firstOrNull;
+    if (entry == null) throw OfflineRefusal("Code inconnu : $normalized. Ce n'est pas un pass enregistré.");
+    if (already.any((p) => p.passUuid == entry.key)) throw const OfflineRefusal('Ce pass est déjà sur la vente.');
+    final event = (await v2.entities('pass_evenement'))[entry.value['evenement_uuid']];
+    if (event == null) throw const OfflineRefusal('Événement du pass introuvable.');
+    if (event['hors_ligne'] != 'autoriser') throw const OfflineRefusal('Vérification impossible sans connexion pour cet événement.');
+    final decision = await _decideLocally(entry.key, entry.value, event, day, amount);
+    if (!decision.allowed) throw OfflineRefusal(decision.refusal!);
+    final basket = _basketRefusal(entry.value, event, lines);
+    if (basket != null) throw OfflineRefusal(basket);
+    return PassCheck(
+      passUuid: entry.key,
+      holder: entry.value['porteur'] as String?,
+      leftToday: decision.leftToday,
+      leftTotal: decision.leftTotal,
+      online: false,
+      amount: amount,
+    );
+  }
+
+  /// Paiements et passages d'une vente payée par pass, revérifiés sur le panier final (il a pu changer depuis le
+  /// scan) : service et menus pour tous, règles complètes pour une décision prise hors connexion.
+  Future<(List<CartPayment>, List<Map<String, dynamic>>)> _passPayment(Snapshot s, Operator operator, List<CartLine> lines, SaleExtras extras) async {
+    final settings = passSettings;
+    if (settings == null) throw const OfflineRefusal('Les passes événement sont désactivés (Réglages › Passes événement).');
+    if (!hasRight(operator, 'pass_encaisser')) throw const OfflineRefusal('Permission refusée : encaisser par pass.');
+    final uuids = [for (final p in extras.passes) p.passUuid];
+    if (uuids.toSet().length != uuids.length) throw const OfflineRefusal('Le même pass est scanné deux fois sur cette vente.');
+    if (uuids.length > 1 && !settings.severalPerSale) throw const OfflineRefusal('Un seul pass par vente (réglage « plusieurs passes par vente » éteint).');
+    final parts = PassRules.split(_payableOf(s, lines, extras), uuids.length);
+    final passes = await v2.entities('pass');
+    final events = await v2.entities('pass_evenement');
+    final day = _passDay;
+    for (var i = 0; i < uuids.length; i++) {
+      final pass = passes[uuids[i]];
+      final event = pass == null ? null : events[pass['evenement_uuid']];
+      if (pass == null || event == null) {
+        // Pas encore reçu par ce terminal : le serveur, qui l'a autorisé en ligne, tranche à l'intégration.
+        if (extras.passes[i].online) continue;
+        throw const OfflineRefusal('Pass introuvable sur ce terminal : scannez-le de nouveau.');
+      }
+      final basket = _basketRefusal(pass, event, lines);
+      if (basket != null) throw OfflineRefusal(basket);
+      if (!extras.passes[i].online) {
+        final decision = await _decideLocally(uuids[i], pass, event, day, parts[i]);
+        if (!decision.allowed) throw OfflineRefusal(decision.refusal!);
+      }
+    }
+    return (
+      [for (final part in parts) if (part > 0) CartPayment(method: _passMethod, amount: part)],
+      [
+        for (var i = 0; i < uuids.length; i++)
+          {
+            'uuid': _newUuid(),
+            'pass_uuid': uuids[i],
+            'jour': day,
+            'montant': parts[i],
+            'point_passage': '',
+            'point_consommation': null,
+            'table_uuid': null,
+            'verifie_en_ligne': extras.passes[i].online,
+          },
+      ],
+    );
+  }
+
   @override
   Future<OfflineOperation> recordSale(
     List<CartLine> lines,
@@ -978,6 +1174,11 @@ class V2Engine extends CaisseEngine {
         }
         final s = _requireSelling();
         if (!extras.isEmpty && !saleExtrasSupported) throw const OfflineRefusal('Remise globale, livraison et note : disponibles avec le contrat 2.1.');
+        var passages = const <Map<String, dynamic>>[];
+        if (extras.passes.isNotEmpty) {
+          if (payments.isNotEmpty) throw const OfflineRefusal('Une vente payée par pass ne prend aucun autre moyen de paiement.');
+          (payments, passages) = await _passPayment(s, operator, lines, extras);
+        }
         if (extras.customer != null) {
           final uuid = extras.customer!.uuid;
           final known = customersSupported && ((await _loadCustomers()).any((c) => c.uuid == uuid) || _ownCustomers.contains(uuid));
@@ -1055,6 +1256,7 @@ class V2Engine extends CaisseEngine {
             cashRounding: cashRounding,
             revision21: revision21,
             approval: overLimit ? extras.approval : null,
+            passages: passages,
           ),
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
@@ -1228,6 +1430,8 @@ class V2Engine extends CaisseEngine {
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
     _shopRules = (shop?['regles'] as Map?)?.cast<String, dynamic>();
+    final passSettings = (await v2.entities('pass_reglages'))[_device['boutique_uuid']];
+    _passSettings = passSettings == null ? null : PassSettings(passSettings);
     final categories = await v2.entities('categorie');
     String? categoryOf(Map<String, dynamic> product) {
       final category = categories[product['categorie_uuid']];

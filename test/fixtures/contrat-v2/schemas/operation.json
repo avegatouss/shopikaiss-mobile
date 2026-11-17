@@ -306,6 +306,15 @@
                             "$ref": "commun.json#/$defs/uuid"
                         }
                     ]
+                },
+                "passages": {
+                    "description": "Capacité passes.evenement (2.1 lot 8) : un passage par pass, obligatoire dès qu'un paiement est de moyen pass_evenement (aucun autre moyen dans la même vente) ; Σ montant = totaux.a_payer. hors_chiffre_affaires n'est pas envoyé : le serveur l'applique selon pass_reglages. Pass inconnu, produit hors du service ou des menus, paiement pass sans passages : a_arbitrer. Règle non conforme au serveur (quota pris par un autre terminal, révoqué entre-temps, hors fenêtre) : vente intégrée, passage en écart.",
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 20,
+                    "items": {
+                        "$ref": "#/$defs/passage"
+                    }
                 }
             }
         },
@@ -469,6 +478,64 @@
                     "minimum": -1000000,
                     "maximum": 1000000,
                     "description": "Révision 2.1 : arrondi de caisse des espèces = montant encaissé au tiroir − montant (exact). montant reste la part exacte de la vente ; écart = arrondi_especes appliqué au montant − montant."
+                }
+            }
+        },
+        "passage": {
+            "description": "Passage débité sur un pass (capacité passes.evenement). Idempotent par uuid : l'uuid du terminal devient celui du passage au serveur.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "pass_uuid",
+                "jour",
+                "montant",
+                "point_passage",
+                "point_consommation",
+                "table_uuid",
+                "verifie_en_ligne"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "pass_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Clé de l'entité pass publiée. Jamais le code en clair."
+                },
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Jour civil du passage dans le fuseau publié de la boutique (même règle que date_metier)."
+                },
+                "montant": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "point_passage": {
+                    "description": "Poste de scan ; vide : réglage de la boutique, sinon « Caisse ».",
+                    "type": "string",
+                    "maxLength": 60
+                },
+                "point_consommation": {
+                    "description": "Nom de la table, sinon le point de passage ; null : le serveur reprend la table ou le point de passage.",
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 160
+                },
+                "table_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "verifie_en_ligne": {
+                    "description": "Vrai si POST /passes/verifier a autorisé ce passage juste avant (information, sans effet sur l'autorité du serveur).",
+                    "type": "boolean"
                 }
             }
         },

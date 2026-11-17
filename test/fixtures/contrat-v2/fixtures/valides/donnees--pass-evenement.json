@@ -1,0 +1,12 @@
+{
+    "nom": "Festival des saveurs",
+    "debut": "2026-11-13",
+    "fin": "2026-11-16",
+    "actif": true,
+    "tous_produits": false,
+    "produits": [
+        "c0000000-0000-4000-8000-000000000001",
+        "c0000000-0000-4000-8000-000000000002"
+    ],
+    "hors_ligne": "autoriser"
+}

@@ -1,0 +1,37 @@
+{
+    "evenement_uuid": "e7e00000-0000-4000-8000-000000000001",
+    "code_empreinte": "d2b428d351e939de4f55c9b1e7157482e97d03eb69a4431ec79023b500f05ee3",
+    "type": "qr",
+    "porteur": "Awa Koné",
+    "statut": "actif",
+    "debut": null,
+    "fin": "2026-11-16",
+    "max_total": 6,
+    "plafond_par_passage": 5000,
+    "regles": [
+        {
+            "jour_semaine": 6,
+            "date": "2026-11-14",
+            "max_passages": 2
+        }
+    ],
+    "menus_produits": null,
+    "compteurs": {
+        "total": 3,
+        "jours": [
+            {
+                "jour": "2026-11-14",
+                "passages": 2
+            },
+            {
+                "jour": "2026-11-15",
+                "passages": 1
+            }
+        ],
+        "passages": [
+            "9a55a9e0-0000-4000-8000-000000000001",
+            "9a55a9e0-0000-4000-8000-000000000002",
+            "9a55a9e0-0000-4000-8000-000000000003"
+        ]
+    }
+}

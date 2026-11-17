@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
+import 'package:shopikaiss_terminal/src/passes/pass_rules.dart';
 import 'package:shopikaiss_terminal/src/offline/web_rules.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
@@ -52,6 +53,90 @@ void main() {
       CartLine(product: e.snapshot!.byCode('6190000000011')!.$1, quantity: BigInt.from(units * 1000000));
 
   CartPayment cash(V2Engine e, int amount) => CartPayment(method: e.snapshot!.methods.single, amount: amount, received: amount);
+
+  test('passes.evenement : vérification en ligne, repli hors ligne sans double compte, vente payée par pass, refus d’ECAS', () async {
+    Matcher refused(String text) => throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains(text)));
+    const event = 'e7e00000-0000-4000-8000-000000000001';
+    const pass = '9a550000-0000-4000-8000-000000000001';
+    const counted = '9a55a9e0-0000-4000-8000-000000000001';
+    Map<String, dynamic> passData({int maxTotal = 2, int total = 1, List<String> passages = const [counted]}) => {
+      'evenement_uuid': event, 'code_empreinte': PassRules.fingerprint('EVT-7K3M9QX2'), 'type': 'qr', 'porteur': 'Awa Koné', 'statut': 'actif',
+      'debut': null, 'fin': null, 'max_total': maxTotal, 'plafond_par_passage': 5000, 'regles': <Map<String, dynamic>>[], 'menus_produits': null,
+      'compteurs': {'total': total, 'jours': <Map<String, dynamic>>[], 'passages': passages},
+    };
+    Map<String, dynamic> eventData(String offline) => {
+      'nom': 'Festival des saveurs', 'debut': null, 'fin': null, 'actif': true, 'tous_produits': false, 'produits': [fakeSavon], 'hors_ligne': offline,
+    };
+    serve21(server);
+    server
+      ..capabilities = [...server.capabilities, 'passes.evenement']
+      ..put('operateur', 'operateur:7', {
+        'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['ouverture_session', 'pass_encaisser', 'remise', 'vente'],
+        'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+      }, critical: true)
+      ..put('pass_reglages', fakeShop, {'actifs': true, 'en_service_table': true, 'plusieurs_pass_par_vente': false, 'saisie_manuelle': true, 'hors_ligne': 'refuser'})
+      ..put('pass_evenement', event, eventData('autoriser'))
+      ..put('pass', pass, passData());
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows',
+        newUuid: newUuid, pinVerifier: FakeV2Server.pinVerifier, contract21: true);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    await e.sync();
+    expect(e.blockReason, isNull);
+    expect(await e.v2.read(V2Keys.contractRevision), contains('+passes'));
+    final awa = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.canPayByPass(awa), isTrue);
+    expect(e.passSettings!.severalPerSale, isFalse);
+    final lines = [savon(e)];
+
+    // En ligne : le code part tel que normalisé, le verdict du serveur fait foi.
+    Map? asked;
+    server.passVerdict = (request) {
+      asked = request;
+      return {'verdict': 'autorise', 'motif': null, 'pass_uuid': pass, 'porteur': 'Awa Koné', 'restant_jour': null, 'restant_total': 0};
+    };
+    final check = await e.verifyPass(awa, ' evt-7k3m9qx2\n', lines, const SaleExtras());
+    expect([check.online, check.holder, check.leftTotal, check.amount], [true, 'Awa Koné', 0, 500]);
+    expect([asked!['code'], asked!['jour'], asked!['montant'], (asked!['lignes'] as List).single['produit_uuid']], ['EVT-7K3M9QX2', isNotEmpty, 500, fakeSavon]);
+    await expectLater(e.verifyPass(awa, 'EVT-7K3M9QX2', lines, const SaleExtras(), already: [check]), refused('Un seul pass par vente'));
+    server.passVerdict = (_) => {
+      'verdict': 'refuse', 'motif': 'Ce pass a été révoqué : il ne passe plus.', 'pass_uuid': pass, 'porteur': 'Awa Koné', 'restant_jour': null, 'restant_total': null,
+    };
+    await expectLater(e.verifyPass(awa, 'EVT-7K3M9QX2', lines, const SaleExtras()), refused('Ce pass a été révoqué : il ne passe plus.'));
+
+    // Vente payée par pass : aucun autre moyen, paiement pass_evenement et un passage, intégrée par le serveur.
+    await expectLater(e.recordSale(lines, [cash(e, 500)], awa, extras: SaleExtras(passes: [check])), refused('aucun autre moyen de paiement'));
+    final sale = await e.recordSale(lines, const [], awa, extras: SaleExtras(passes: [check]));
+    final content = (await e.v2.operation(sale.uuid))!['operation']['contenu'] as Map;
+    expect([(content['paiements'] as List).single['moyen'], (content['paiements'] as List).single['montant']], ['pass_evenement', 500]);
+    final passage = (content['passages'] as List).single as Map;
+    expect([passage['pass_uuid'], passage['montant'], passage['verifie_en_ligne'], passage['point_passage']], [pass, 500, true, '']);
+    expect(content.containsKey('hors_chiffre_affaires'), isFalse);
+    await e.sync();
+    expect((await e.saleStatus(sale.uuid))!.serverStatus, 'integree');
+    expect(e.ticketParts(sale).$2.single.method.name, 'Pass événement');
+
+    // Hors ligne : 1 compté par le serveur + ce passage local non couvert = 2 = max_total.
+    server.passesUnreachable = true;
+    await expectLater(e.verifyPass(awa, 'EVT-7K3M9QX2', lines, const SaleExtras()), refused('Ce pass a déjà utilisé ses 2 passages.'));
+    // Couverture : le serveur compte désormais le passage local ; il ne s'ajoute pas une seconde fois.
+    server.publish([
+      {'type': 'pass', 'critique': false, 'cle': pass, 'revision': '2', 'action': 'upsert', 'donnees': passData(maxTotal: 3, total: 2, passages: [counted, passage['uuid'] as String])},
+    ]);
+    await e.sync();
+    final offline = await e.verifyPass(awa, 'evt-7k3m9qx2', lines, const SaleExtras());
+    expect([offline.online, offline.leftTotal], [false, 0]);
+    await expectLater(e.verifyPass(awa, 'INCONNU', lines, const SaleExtras()), refused("Code inconnu : INCONNU. Ce n'est pas un pass enregistré."));
+    await expectLater(
+      e.verifyPass(awa, 'EVT-7K3M9QX2', [savon(e), CartLine(product: e.snapshot!.products.firstWhere((p) => p.name == 'Emballage'), quantity: BigInt.from(1000000))], const SaleExtras()),
+      refused("Hors du service de l'événement : Emballage."),
+    );
+    server.publish([
+      {'type': 'pass_evenement', 'critique': false, 'cle': event, 'revision': '2', 'action': 'upsert', 'donnees': eventData('refuser')},
+    ]);
+    await e.sync();
+    await expectLater(e.verifyPass(awa, 'EVT-7K3M9QX2', lines, const SaleExtras()), refused('Vérification impossible sans connexion pour cet événement.'));
+  });
 
   test('ticket.modeles : activation sur un poste existant reprend un instantane une seule fois', () async {
     serve21(server);

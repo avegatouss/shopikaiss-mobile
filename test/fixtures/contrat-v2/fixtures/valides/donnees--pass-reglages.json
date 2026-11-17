@@ -1,0 +1,7 @@
+{
+    "actifs": true,
+    "en_service_table": true,
+    "plusieurs_pass_par_vente": false,
+    "saisie_manuelle": true,
+    "hors_ligne": "refuser"
+}

@@ -212,6 +212,10 @@ class LocalRegisterAdapter {
         return _createCustomer(args, operationId);
       case 'setCustomer':
         return _setCustomer(args);
+      case 'verifyPass':
+        return _verifyPass(_text(args, 'code', max: 120));
+      case 'removePass':
+        return _removePass(_text(args, 'pass_uuid', max: 36));
       case 'commitSale':
         return _commit(_requireOperationId(operationId), args);
       case 'saleStatus':
@@ -285,6 +289,17 @@ class LocalRegisterAdapter {
       'note': cap(_extrasRefusal()),
       'wholesale': cap(_wholesaleRefusal()),
       'suspend': cap(_draft.lines.isEmpty ? 'Le panier est vide.' : null),
+      'pass': {
+        ...cap(_operator == null
+            ? 'Identifiez le caissier.'
+            : engine.passSettings == null
+            ? 'Passes événement non disponibles sur ce terminal.'
+            : engine.canPayByPass(_operator!)
+            ? null
+            : 'Permission refusée : encaisser par pass.'),
+        'manual_entry': engine.passSettings?.manualEntry ?? false,
+        'several_per_sale': engine.passSettings?.severalPerSale ?? false,
+      },
     };
   }
 
@@ -433,6 +448,7 @@ class LocalRegisterAdapter {
       'delivery': _draft.delivery,
       'note': _draft.note,
       'wholesale': _draft.wholesale,
+      'passes': [for (final p in _draft.passes) _passJson(p, snapshot?.store.currency ?? 'FCFA')],
       'query': _query,
       'category': _category,
       'categories': snapshot?.categories ?? const <String>[],
@@ -1124,6 +1140,7 @@ class LocalRegisterAdapter {
     }
     error ??= _paymentsError(snapshot, payments, payable);
     final before = _draft.copy();
+    _draft.passes.clear();
     _draft.payments
       ..clear()
       ..addAll(error == null ? payments : const []);
@@ -1166,8 +1183,9 @@ class LocalRegisterAdapter {
       throw const AdapterFailure('panier_invalide', 'Panier vide ou article retiré du catalogue : corrigez le panier.');
     }
     final payments = _draft.payments;
-    if (payments.isEmpty) throw const AdapterFailure('paiement_requis', 'Préparez le paiement avant d’encaisser.');
-    final error = _paymentsError(snapshot, payments, _payable(snapshot));
+    final byPass = _draft.passes.isNotEmpty;
+    if (payments.isEmpty && !byPass) throw const AdapterFailure('paiement_requis', 'Préparez le paiement avant d’encaisser.');
+    final error = byPass ? null : _paymentsError(snapshot, payments, _payable(snapshot));
     if (error != null) throw AdapterFailure('paiement_invalide', error);
     final approval = await _approval(lines.cast<CartLine>(), operator, args);
     final OfflineOperation sale;
@@ -1175,7 +1193,7 @@ class LocalRegisterAdapter {
       sale = await engine.recordSale(
         lines.cast<CartLine>(),
         [
-          for (final p in payments)
+          for (final p in byPass ? const <_DraftPayment>[] : payments)
             CartPayment(
               method: snapshot.methods.firstWhere((m) => m.code == p.methodCode),
               amount: p.amount,
@@ -1187,7 +1205,7 @@ class LocalRegisterAdapter {
         operator,
         draftUuid: _draft.uuid,
         operationUuid: operationId,
-        extras: SaleExtras(wholesale: _draft.wholesale, globalDiscount: _draft.globalDiscount, globalEntry: _draft.globalEntry, delivery: _draft.delivery, note: _draft.note, approval: approval, customer: _draft.customer, sharedCart: _draft.sharedCart?.uuid),
+        extras: _extras(approval: approval, passes: _draft.passes),
       );
     } on OfflineRefusal catch (e) {
       // Refus d'une règle, levé avant toute écriture : la vente n'existe pas, le panier reste.
@@ -1197,6 +1215,55 @@ class LocalRegisterAdapter {
     _emit('vente');
     return _committed(sale);
   }
+
+  SaleExtras _extras({SaleApproval? approval, List<PassCheck> passes = const []}) => SaleExtras(
+    wholesale: _draft.wholesale,
+    globalDiscount: _draft.globalDiscount,
+    globalEntry: _draft.globalEntry,
+    delivery: _draft.delivery,
+    note: _draft.note,
+    approval: approval,
+    customer: _draft.customer,
+    sharedCart: _draft.sharedCart?.uuid,
+    passes: passes,
+  );
+
+  /// Pass scanné ou saisi : vérifié par le moteur (en ligne, sinon hors connexion si l'événement l'autorise), puis
+  /// retenu pour payer la vente. Les paiements préparés sont retirés : un pass ne se combine à aucun autre moyen.
+  Future<Map<String, dynamic>> _verifyPass(String code) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.');
+    final snapshot = _snapshot();
+    final lines = [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))];
+    if (lines.any((l) => l == null)) throw const AdapterFailure('panier_invalide', 'Article retiré du catalogue : corrigez le panier.');
+    final PassCheck check;
+    try {
+      check = await engine.verifyPass(operator, code, lines.cast<CartLine>(), _extras(), already: _draft.passes);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('pass_refuse', e.message);
+    }
+    final before = _draft.copy();
+    _draft.payments.clear();
+    _draft.passes.add(check);
+    await _save(before);
+    _emit('paiement');
+    return {...await _view(), 'pass': _passJson(check, snapshot.store.currency)};
+  }
+
+  Future<Map<String, dynamic>> _removePass(String passUuid) async {
+    _draft.passes.removeWhere((p) => p.passUuid == passUuid);
+    _emit('paiement');
+    return _view();
+  }
+
+  Map<String, dynamic> _passJson(PassCheck p, String currency) => {
+    'pass_uuid': p.passUuid,
+    'holder': p.holder,
+    'left_today': p.leftToday,
+    'left_total': p.leftTotal,
+    'online': p.online,
+    'amount_label': formatFcfa(p.amount, currency),
+  };
 
   Map<String, dynamic> _customerJson(Customer c) => {'uuid': c.uuid, 'name': c.name, 'phone': c.phone, 'pending': c.pending};
 
@@ -1426,6 +1493,9 @@ class _Draft {
   final List<_DraftLine> lines = [];
   final List<_DraftPayment> payments = [];
 
+  /// Passes vérifiés pour payer la vente (jamais conservés avec le panier : un panier repris se rescanne).
+  final List<PassCheck> passes = [];
+
   /// Panier en attente (suspendu) : conservé, hors du panier courant.
   bool suspended = false;
 
@@ -1447,6 +1517,7 @@ class _Draft {
         _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, lotUuid: l.lotUuid, quantity: l.quantity, discount: l.discount, entry: l.entry, price: l.price),
     ])
     ..payments.addAll(payments)
+    ..passes.addAll(passes)
     ..suspended = suspended
     ..globalDiscount = globalDiscount
     ..globalEntry = globalEntry

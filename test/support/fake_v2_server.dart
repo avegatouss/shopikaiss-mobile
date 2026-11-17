@@ -48,6 +48,10 @@ class FakeV2Server implements V2Transport {
   String percentRounding = 'down';
   ({int step, String mode})? cashRounding;
 
+  /// Verdict de `POST /passes/verifier` (null : 404) ; [passesUnreachable] coupe le réseau pour cette route seulement.
+  Map<String, dynamic> Function(Map request)? passVerdict;
+  bool passesUnreachable = false;
+
   /// Capacités rendues à l'appairage et par `/etat`.
   List<String> capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes'];
 
@@ -222,6 +226,11 @@ class FakeV2Server implements V2Transport {
       case ('POST', '/operations/etats'):
         _requireBody(payload, 'operations.json#/\$defs/demande_etats');
         return _ok({'etats': [for (final u in ((payload as Map)['uuids'] as List).cast<String>()) _result(u)]}, 'operations.json#/\$defs/reponse_etats');
+      case ('POST', '/passes/verifier'):
+        _requireBody(payload, 'passes.json#/\$defs/demande');
+        if (passesUnreachable) return const V2Response(0, null);
+        if (passVerdict == null) return _error(404, 'requete_invalide');
+        return _ok(passVerdict!(payload as Map), 'passes.json#/\$defs/reponse');
       case ('POST', '/accuses'):
         _requireBody(payload, 'accuses.json#/\$defs/demande');
         lastAck = Map<String, dynamic>.from(payload as Map);

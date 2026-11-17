@@ -50,6 +50,8 @@ dependencies:
   crypto: ^3.0.7
   # API SQLite sans Flutter : le moteur de caisse tourne aussi dans un hôte Dart pur (Windows). Déjà verrouillé en 2.5.14.
   sqflite_common: ^2.5.14
+  # Caméra de la feuille « Scanner le pass » (Android) ; Windows lit les passes à la douchette.
+  mobile_scanner: ^7.4.2
 
 dev_dependencies:
   flutter_test:

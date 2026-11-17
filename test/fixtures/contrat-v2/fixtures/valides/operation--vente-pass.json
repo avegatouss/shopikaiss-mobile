@@ -1,0 +1,81 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000008",
+    "type": "vente",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 48,
+    "cree_le": "2026-10-29T10:15:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "cfa986b03b009ea5c4d51190c22e342493201e2711d5bf0aca74ce52ae11aed4",
+    "contenu": {
+        "numero_local": "HL-001-000048",
+        "brouillon_uuid": "b0000000-0000-4000-8000-000000000008",
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+        "client_uuid": null,
+        "tva": {
+            "taux": "18.000000",
+            "incluse": true
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "e0000000-0000-4000-8000-000000000001",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "conditionnement_uuid": null,
+                "libelle": "Riz parfumé 1 kg",
+                "quantite": "2.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "2.000000",
+                "prix_unitaire": 1000,
+                "remise": 0,
+                "total": 2000,
+                "revision_prix": "3"
+            }
+        ],
+        "remise_globale": 0,
+        "livraison": 0,
+        "totaux": {
+            "brut": 2000,
+            "remises": 0,
+            "base_ht": 1695,
+            "tva": 305,
+            "a_payer": 2000
+        },
+        "paiements": [
+            {
+                "tentative_uuid": "7a000000-0000-4000-8000-000000000008",
+                "moyen": "pass_evenement",
+                "montant": 2000,
+                "recu": null,
+                "reference": null
+            }
+        ],
+        "mouvements": [
+            {
+                "mouvement_uuid": "f0000000-0000-4000-8000-000000000001",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "lot_uuid": null,
+                "variation": "-2.000000"
+            }
+        ],
+        "autorisations": [],
+        "passages": [
+            {
+                "uuid": "9a55a9e0-0000-4000-8000-000000000004",
+                "pass_uuid": "9a550000-0000-4000-8000-000000000001",
+                "jour": "2026-11-15",
+                "montant": 2000,
+                "point_passage": "Entrée",
+                "point_consommation": "Entrée",
+                "table_uuid": null,
+                "verifie_en_ligne": true
+            }
+        ]
+    }
+}
