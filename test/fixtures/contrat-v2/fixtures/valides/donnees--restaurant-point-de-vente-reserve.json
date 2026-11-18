@@ -1,0 +1,19 @@
+{
+    "code": "PAT",
+    "nom": "Pâtisserie",
+    "profil": "PRODUCTION",
+    "actif": true,
+    "terminaux": [
+        "11111111-2222-4333-8444-555555555555",
+        "11111111-2222-4333-8444-555555555556"
+    ],
+    "membres": [
+        "7",
+        "12"
+    ],
+    "reglages_vente": {
+        "changement_client_paiement": true,
+        "reference_plateforme_avant_envoi": false,
+        "verrouillage_minutes": 0
+    }
+}

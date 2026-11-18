@@ -1,0 +1,68 @@
+{
+    "heure_serveur": "2026-10-29T10:00:00Z",
+    "protocole": {
+        "courant": 2,
+        "minimum": 2,
+        "maximum": 2
+    },
+    "capacites_serveur": [
+        "vente.especes",
+        "stock.couverture",
+        "instantane.v1",
+        "contrat.2_1",
+        "session.cloture",
+        "restaurant.v1"
+    ],
+    "fonctions_restreintes": [
+        {
+            "fonction": "retour",
+            "raison": {
+                "code": "fonction.en_ligne",
+                "message": "Les retours se font en ligne au lancement.",
+                "details": null
+            }
+        },
+        {
+            "fonction": "restaurant.promotions",
+            "raison": {
+                "code": "fonction.en_ligne",
+                "message": "Promotions et happy hour : en ligne seulement.",
+                "details": null
+            }
+        },
+        {
+            "fonction": "restaurant.commande",
+            "raison": {
+                "code": "restaurant.caisse_non_maitresse",
+                "message": "Cette caisse n’est pas la caisse maîtresse de son point de vente : commandes, envoi en cuisine et registre se font sur la caisse maîtresse.",
+                "details": null
+            }
+        }
+    ],
+    "autorisation": {
+        "vente_locale": true,
+        "version": "5",
+        "expire_le": "2026-11-01T10:00:00Z",
+        "raison": null
+    },
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "schema_instantane": "1"
+    },
+    "delais": {
+        "changements_secondes": 10,
+        "reprise_max_secondes": 60
+    },
+    "notifications": {
+        "mode": "sondage",
+        "url": null
+    },
+    "restaurant": {
+        "point_de_vente_uuid": "b1000000-0000-4000-8000-000000000001",
+        "profil": "TABLE_SERVICE",
+        "maitre": false,
+        "generation": "0",
+        "derniers_numeros": null
+    }
+}

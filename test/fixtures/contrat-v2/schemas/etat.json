@@ -78,6 +78,60 @@
         "mode": { "enum": ["sondage", "sse"] },
         "url": { "type": ["string", "null"], "maxLength": 300 }
       }
+    },
+    "restaurant": { "$ref": "#/$defs/restaurant" }
+  },
+  "$defs": {
+    "restaurant": {
+      "description": "Révision restaurant-1 (RESTAURANT-1 §2.3) : rendu SEULEMENT aux terminaux à qui restaurant.v1 est accordée. Double l’entité restaurant.maitre pour un refus rapide ; en cas de désaccord, la caisse retient le plus restrictif (non maîtresse).",
+      "type": "object",
+      "required": ["point_de_vente_uuid", "profil", "maitre", "generation", "derniers_numeros"],
+      "additionalProperties": false,
+      "properties": {
+        "point_de_vente_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+        "profil": { "enum": [null, "TABLE_SERVICE", "PRODUCTION"] },
+        "maitre": { "type": "boolean", "description": "Vrai si cet appareil ET cette époque sont la caisse maîtresse désignée de son point de vente." },
+        "generation": { "$ref": "commun.json#/$defs/version" },
+        "derniers_numeros": {
+          "description": "Rendu seulement à l’appareil maître : derniers numéros reçus de lui (relecture B, Q1). Toujours null avant le lot R-2.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["commande", "bons"],
+              "additionalProperties": false,
+              "properties": {
+                "commande": { "oneOf": [{ "type": "null" }, { "type": "string", "maxLength": 40 }] },
+                "bons": {
+                  "description": "Dernier numero_jour reçu par poste. Liste et non carte : le profil SK-SCHEMA-1 n’a que des objets fermés.",
+                  "type": "array",
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "required": ["poste_uuid", "numero_jour"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "poste_uuid": { "$ref": "commun.json#/$defs/uuid" },
+                      "numero_jour": { "type": "string", "maxLength": 30 }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "reprise": {
+      "description": "Déclaration de reprise d’une caisse restaurée (RESTAURANT-1 §2.3) : en-tête X-Caisse-Reprise de GET /etat, en JSON compact ou en base64url de ce JSON. Appareil et époque d’origine de la sauvegarde, dernière séquence qu’elle contient.",
+      "type": "object",
+      "required": ["appareil_uuid", "epoque", "derniere_sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "appareil_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "epoque": { "type": "integer", "minimum": 1 },
+        "derniere_sequence": { "type": "integer", "minimum": 0 }
+      }
     }
   }
 }

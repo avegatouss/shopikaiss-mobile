@@ -1,0 +1,9 @@
+{
+    "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+    "salle_uuid": "5a1e0000-0000-4000-8000-000000000002",
+    "nom": "Table E1",
+    "code": "E1",
+    "capacite": 4,
+    "ordre": 0,
+    "actif": true
+}

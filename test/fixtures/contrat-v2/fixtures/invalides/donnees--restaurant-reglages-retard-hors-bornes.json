@@ -1,0 +1,24 @@
+{
+    "point_de_vente_uuid": "b1000000-0000-4000-8000-000000000001",
+    "envoi_production": true,
+    "plusieurs_commandes_par_table": false,
+    "prefixe_commande": "PF",
+    "motif_annulation_commande": true,
+    "registre_obligatoire": true,
+    "prefacture_a_la_demande": true,
+    "retard_production_minutes": 0,
+    "sections_z": [
+        "summary",
+        "payments",
+        "cancellations"
+    ],
+    "fuseau": "Africa/Abidjan",
+    "impression_mode": "register",
+    "repli_premier_poste_actif": false,
+    "assistant": {
+        "max_operations_par_jour": 20,
+        "max_montant_par_operation": 20000,
+        "max_montant_par_jour": 100000,
+        "max_remise_pourcent": 20
+    }
+}

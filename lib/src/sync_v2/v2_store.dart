@@ -91,6 +91,13 @@ const knownV2Types = {
 /// Types ajoutés par la révision 2.1 (donnees-2.1.json), connus seulement quand la forme 2.1 est active.
 const knownV2Types21 = {'categorie', 'client', 'panier', 'lot', 'modele_ticket', 'ticket_terminal', 'pass_reglages', 'pass_evenement', 'pass'};
 
+/// Types de la révision restaurant-1 (donnees-restaurant-1.json, lots R-1 et R-2), connus quand `restaurant.v1` est
+/// accordée. Postes et routage (R-3) restent inconnus : non critiques, ignorés.
+const knownRestaurantTypes = {
+  'restaurant.point_de_vente', 'restaurant.maitre', 'restaurant.reglages', //
+  'restaurant.salle', 'restaurant.table', 'restaurant.menu', 'restaurant.categorie',
+};
+
 /// Résultat de l'application d'une page du journal.
 class V2ApplyResult {
   const V2ApplyResult(this.groups, {this.blockedBy});
@@ -131,7 +138,10 @@ class V2Store {
   /// Forme 2.1 active (capacité `contrat.2_1` annoncée et rendue) : données validées par donnees-2.1.json.
   bool contract21 = false;
 
-  Set<String> get knownTypes => contract21 ? {...knownV2Types, ...knownV2Types21} : knownV2Types;
+  /// Capacité `restaurant.v1` accordée (avec la forme 2.1) : types `restaurant.*` du R-1 et du R-2.
+  bool restaurant = false;
+
+  Set<String> get knownTypes => contract21 ? {...knownV2Types, ...knownV2Types21, if (restaurant) ...knownRestaurantTypes} : knownV2Types;
 
   static String _now() => DateTime.now().toUtc().toIso8601String();
 
@@ -231,7 +241,8 @@ class V2Store {
     final type = change['type'] as String;
     if (!knownTypes.contains(type)) return null;
     if (change['action'] == 'suppression') return null;
-    final errors = validator.validate(change['donnees'], '${contract21 ? 'donnees-2.1.json' : 'donnees.json'}#/\$defs/$type');
+    final file = type.startsWith('restaurant.') ? 'donnees-restaurant-1.json' : (contract21 ? 'donnees-2.1.json' : 'donnees.json');
+    final errors = validator.validate(change['donnees'], '$file#/\$defs/$type');
     return errors.isEmpty ? null : '$type ${change['cle']} : ${errors.first}';
   }
 
@@ -459,6 +470,8 @@ class V2Store {
     final known = row['etat'] as String;
     if (!V2OperationState.unsent.contains(known) && BigInt.parse(version) < BigInt.parse(row['version_etat'] as String)) return;
     final sale = r['vente'] as Map?;
+    // Numéro serveur d'une commande restaurant (`details.commande`, version intégrée).
+    final order = (r['details'] as Map?)?['commande'] as Map?;
     final cursor = (r['couverture'] as Map?)?['curseur'] as String?;
     final z = (r['details'] as Map?)?['z'];
     if (z != null) await write('${V2Keys.zPrefix}$uuid', jsonEncode(z), txn);
@@ -469,6 +482,7 @@ class V2Store {
         'version_etat': version,
         'raison': r['raison'] == null ? null : jsonEncode(r['raison']),
         if (sale != null) 'numero_serveur': sale['numero'],
+        if (order != null) 'numero_serveur': order['numero'],
         'couverture_curseur': ?cursor,
         'envoyee_le': row['envoyee_le'] ?? now,
         'maj_le': now,
@@ -481,6 +495,12 @@ class V2Store {
     if (state == V2OperationState.resolved) {
       await txn.update('v2_mouvements', {'couvert_le': now}, where: 'operation_uuid = ? AND couvert_le IS NULL', whereArgs: [uuid]);
     }
+  }
+
+  /// Opérations d'un type (opération figée, état, raison, numéro serveur), dans l'ordre des séquences.
+  Future<List<Map<String, dynamic>>> operationsOfType(String type) async {
+    final rows = await db.query('v2_operations', where: 'type = ?', whereArgs: [type], orderBy: 'epoque, sequence');
+    return [for (final r in rows) _operationRow(r)];
   }
 
   Future<Map<String, dynamic>?> operation(String uuid) async {

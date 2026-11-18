@@ -605,6 +605,7 @@ class SaleExtras {
     this.sharedCart,
     this.wholesale = false,
     this.passes = const [],
+    this.order,
   });
 
   final int globalDiscount;
@@ -627,6 +628,9 @@ class SaleExtras {
   /// Passes vérifiés qui paient la vente (capacité `passes.evenement`) : aucun autre moyen de paiement.
   final List<PassCheck> passes;
 
+  /// Commande restaurant réglée par la vente (capacité `restaurant.v1`) ; posée par le moteur, jamais par un écran.
+  final OrderSettlement? order;
+
   bool get isEmpty =>
       globalDiscount == 0 &&
       delivery == 0 &&
@@ -635,7 +639,19 @@ class SaleExtras {
       customer == null &&
       sharedCart == null &&
       !wholesale &&
-      passes.isEmpty;
+      passes.isEmpty &&
+      order == null;
+}
+
+/// Règlement complet d'une commande restaurant par une vente : chaque ligne du panier règle une ligne de la commande.
+class OrderSettlement {
+  OrderSettlement({required this.orderUuid, required this.settlementUuid, required Map<CartLine, String> lineOf}) : lineOf = Map.identity()..addAll(lineOf);
+
+  final String orderUuid;
+  final String settlementUuid;
+
+  /// Ligne de commande de chaque ligne du panier (par identité).
+  final Map<CartLine, String> lineOf;
 }
 
 /// Réglages du module Passes événement pour la boutique (entité `pass_reglages`).

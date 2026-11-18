@@ -86,7 +86,7 @@ void main() {
       String lf(String? s) => (s ?? '').replaceAll('\r\n', '\n');
       expect(lf(contractV2Schemas[p.basename(f.path)]), lf(f.readAsStringSync()), reason: p.basename(f.path));
     }
-    expect(contractV2Schemas, hasLength(13), reason: 'révision 2.1 : donnees-2.1.json et passes.json en plus');
+    expect(contractV2Schemas, hasLength(14), reason: 'révision 2.1 : donnees-2.1.json et passes.json ; restaurant-1 : donnees-restaurant-1.json');
   });
 
   test('Decimal6 : format du contrat, arrondi demi supérieur comme Brick\\Math', () {

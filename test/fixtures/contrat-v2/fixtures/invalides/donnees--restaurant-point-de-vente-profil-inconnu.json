@@ -1,0 +1,16 @@
+{
+    "code": "SALLE",
+    "nom": "Salle",
+    "profil": "KITCHEN",
+    "actif": true,
+    "terminaux": [
+        "11111111-2222-4333-8444-555555555555",
+        "11111111-2222-4333-8444-555555555556"
+    ],
+    "membres": null,
+    "reglages_vente": {
+        "changement_client_paiement": false,
+        "reference_plateforme_avant_envoi": true,
+        "verrouillage_minutes": 5
+    }
+}

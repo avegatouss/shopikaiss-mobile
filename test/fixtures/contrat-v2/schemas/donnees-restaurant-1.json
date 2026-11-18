@@ -1,0 +1,440 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "donnees-restaurant-1.json",
+    "title": "Données des changements restaurant.* (révision restaurant-1, lots R-1 et R-2 ; RESTAURANT-1 §3). Rendues aux seuls clients à qui restaurant.v1 est accordée. R-1 : critiques ; R-2 (salle, table, menu, categorie) : non critiques.",
+    "$defs": {
+        "restaurant.point_de_vente": {
+            "description": "Point de vente de la boutique (clé = son uuid). Le mode du terminal en dépend : Boutique, Service de table ou Restaurant.",
+            "type": "object",
+            "required": [
+                "code",
+                "nom",
+                "profil",
+                "actif",
+                "terminaux",
+                "membres",
+                "reglages_vente"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "profil": {
+                    "enum": [
+                        null,
+                        "TABLE_SERVICE",
+                        "PRODUCTION"
+                    ]
+                },
+                "actif": {
+                    "type": "boolean"
+                },
+                "terminaux": {
+                    "description": "Terminaux actifs qui travaillent dans ce point de vente (rattachés, plus ceux sans rattachement pour le point de vente principal).",
+                    "type": "array",
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "membres": {
+                    "description": "null : toute affiliation de la boutique y travaille ; sinon les seuls opérateurs admis (operateur_id).",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "array",
+                            "maxItems": 2000,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/identifiant_serveur"
+                            }
+                        }
+                    ]
+                },
+                "reglages_vente": {
+                    "type": "object",
+                    "required": [
+                        "changement_client_paiement",
+                        "reference_plateforme_avant_envoi",
+                        "verrouillage_minutes"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Valeurs résolues : surcharge du point de vente, sinon valeur de la boutique.",
+                    "properties": {
+                        "changement_client_paiement": {
+                            "type": "boolean"
+                        },
+                        "reference_plateforme_avant_envoi": {
+                            "type": "boolean"
+                        },
+                        "verrouillage_minutes": {
+                            "description": "0 = verrouillage désactivé.",
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 1440
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "restaurant.maitre": {
+            "description": "Caisse maîtresse du point de vente (clé = maitre:<uuid du point de vente>). Je suis maître si appareil_uuid est mon appareil ET epoque mon époque d’appairage. terminal_uuid null : aucune caisse maîtresse, le web a la main.",
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "generation",
+                "terminal_uuid",
+                "appareil_uuid",
+                "epoque",
+                "designe_le"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Croît à chaque désignation, changement ou retrait ; 0 = jamais désigné."
+                },
+                "terminal_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "appareil_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "epoque": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    ]
+                },
+                "designe_le": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                }
+            }
+        },
+        "restaurant.reglages": {
+            "description": "Réglages restaurant résolus pour le point de vente (clé = reglages:<uuid du point de vente>) : valeur de la boutique, profil du point de vente.",
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "envoi_production",
+                "plusieurs_commandes_par_table",
+                "prefixe_commande",
+                "motif_annulation_commande",
+                "registre_obligatoire",
+                "prefacture_a_la_demande",
+                "retard_production_minutes",
+                "sections_z",
+                "fuseau",
+                "impression_mode",
+                "repli_premier_poste_actif",
+                "assistant"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "envoi_production": {
+                    "type": "boolean",
+                    "description": "restaurant.table_service_send_to_production (Service de table) ou restaurant.production_send_to_stations (Restaurant) ; faux sans profil. Éteint : « Envoyer » devient « Valider », aucun bon."
+                },
+                "plusieurs_commandes_par_table": {
+                    "type": "boolean"
+                },
+                "prefixe_commande": {
+                    "type": "string",
+                    "maxLength": 30,
+                    "description": "Préfixe du numéro local, à normaliser par la caisse (majuscules, caractères admis)."
+                },
+                "motif_annulation_commande": {
+                    "type": "boolean"
+                },
+                "registre_obligatoire": {
+                    "type": "boolean"
+                },
+                "prefacture_a_la_demande": {
+                    "type": "boolean"
+                },
+                "retard_production_minutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 240
+                },
+                "sections_z": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/code"
+                    }
+                },
+                "fuseau": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "Fuseau de la journée métier (restaurant.timezone, sinon celui de la boutique)."
+                },
+                "impression_mode": {
+                    "enum": [
+                        "register",
+                        "station"
+                    ],
+                    "description": "Indicatif : hors ligne, chaque bon part à toutes les cibles de son poste (plan §2)."
+                },
+                "repli_premier_poste_actif": {
+                    "type": "boolean",
+                    "description": "Paramètre à créer (plan §2 bis), absent du web : toujours faux en R-1."
+                },
+                "assistant": {
+                    "type": "object",
+                    "required": [
+                        "max_operations_par_jour",
+                        "max_montant_par_operation",
+                        "max_montant_par_jour",
+                        "max_remise_pourcent"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Plafonds d’une autorisation par un assistant manager (approval.assistant.*) ; 0 = illimité, sauf la remise.",
+                    "properties": {
+                        "max_operations_par_jour": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000
+                        },
+                        "max_montant_par_operation": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "max_montant_par_jour": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "max_remise_pourcent": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                        }
+                    }
+                }
+            }
+        },
+        "restaurant.salle": {
+            "description": "Salle de la boutique (clé = uuid de restaurant_spaces). Par boutique, sans point de vente.",
+            "type": "object",
+            "required": [
+                "code",
+                "nom",
+                "ordre",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "restaurant.table": {
+            "description": "Table (clé = uuid de restaurant_tables). L'occupation n'est pas publiée : elle appartient à la caisse maîtresse.",
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "salle_uuid",
+                "nom",
+                "code",
+                "capacite",
+                "ordre",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "salle_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "code": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 40
+                },
+                "capacite": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "integer",
+                            "minimum": 0
+                        }
+                    ]
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "restaurant.menu": {
+            "description": "Menu du Service de table (clé = uuid de restaurant_menus) : produits et catégories qu'il propose.",
+            "type": "object",
+            "required": [
+                "nom",
+                "actif",
+                "produits",
+                "categories"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "actif": {
+                    "type": "boolean"
+                },
+                "produits": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "categories": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                }
+            }
+        },
+        "restaurant.categorie": {
+            "description": "Réglages restaurant d'une catégorie (clé = uuid de la catégorie ; réponse de B à Q16) : onglets de la caisse. Publié pour chaque catégorie qui a des réglages restaurant ; sans entité, la catégorie est visible, sans parent ni poste. `poste_uuid` sert au routage à partir de R-3 (postes publiés avec R-3).",
+            "type": "object",
+            "required": [
+                "parent_uuid",
+                "poste_uuid",
+                "ordre",
+                "visible"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "parent_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "poste_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "visible": {
+                    "type": "boolean"
+                }
+            }
+        }
+    }
+}

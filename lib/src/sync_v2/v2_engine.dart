@@ -8,6 +8,8 @@ import 'package:uuid/uuid.dart';
 import '../offline/money.dart';
 import '../passes/pass_rules.dart';
 import '../offline/web_rules.dart';
+import '../restaurant/resto_context.dart';
+import '../restaurant/resto_engine.dart';
 
 import '../offline/api.dart';
 import '../offline/engine.dart';
@@ -21,6 +23,8 @@ import 'v2_sale.dart';
 import 'v2_store.dart';
 import 'v2_sync.dart';
 import 'v2_transport.dart';
+
+part 'v2_restaurant.dart';
 
 /// Caisse locale du terminal sur le protocole v2 (décision du 2026-10-29 : clients v2 seulement).
 ///
@@ -47,8 +51,19 @@ class V2Engine extends CaisseEngine {
     super.pinVerifier,
     this.declaredPayments = false,
     this.contract21 = false,
+    this.announceRestaurant = false,
     this.imageDirectory,
   }) : _newUuid = newUuid ?? (() => const Uuid().v4());
+
+  /// Annonce `restaurant.v1` (avec `contrat.2_1`) : seulement sur un client qui a l'écran de salle. Sans effet si le
+  /// serveur ne l'accorde pas (drapeau `CAISSE_V2_RESTAURANT`, démo seulement au lancement).
+  final bool announceRestaurant;
+
+  /// Restaurant du point de vente, reconstruit à chaque synchronisation ; null hors `restaurant.v1`.
+  RestoContext? _resto;
+
+  /// Lignes des paniers de règlement rendus par [restoCart] : commande et ligne de commande de chacune (par identité).
+  final Map<CartLine, (String, String)> _restoCartLines = Map.identity();
 
   /// Dossier du cache d'images (fichiers nommés par empreinte) ; null : aucune image téléchargée.
   final String? imageDirectory;
@@ -111,6 +126,7 @@ class V2Engine extends CaisseEngine {
     Future<bool> Function(String pin, String hash)? pinVerifier,
     bool declaredPayments = false,
     bool contract21 = false,
+    bool announceRestaurant = false,
     String? imageDirectory,
   }) => V2Engine(
     store: store,
@@ -124,6 +140,7 @@ class V2Engine extends CaisseEngine {
     pinVerifier: pinVerifier,
     declaredPayments: declaredPayments,
     contract21: contract21,
+    announceRestaurant: announceRestaurant,
     imageDirectory: imageDirectory,
   );
 
@@ -176,6 +193,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.lotsCapability,
           CaisseV2Client.ticketModelsCapability,
           CaisseV2Client.passesCapability,
+          if (announceRestaurant) CaisseV2Client.restaurantCapability,
         ],
       ],
     );
@@ -190,7 +208,9 @@ class V2Engine extends CaisseEngine {
     final state = await v2.read(V2Keys.serverState);
     _state = state == null ? null : Map<String, dynamic>.from(jsonDecode(state) as Map);
     // Forme des données relue ici : un redémarrage hors connexion garde les fonctions du contrat 2.1.
-    v2.contract21 = contract21 && (await v2.read(V2Keys.contractRevision) ?? '').startsWith('2.1');
+    final revision = await v2.read(V2Keys.contractRevision) ?? '';
+    v2.contract21 = contract21 && revision.startsWith('2.1');
+    v2.restaurant = v2.contract21 && announceRestaurant && revision.contains('+restaurant');
     await _rebuild();
     await _count();
     notifyListeners();
@@ -416,6 +436,58 @@ class V2Engine extends CaisseEngine {
     final rules = (_shopRules?['gros'] as Map?)?.cast<String, dynamic>();
     return saleExtrasSupported && rules?['actif'] == true ? WholesaleRules(rules!) : null;
   }
+
+  // ---------------------------------------------------------------- restaurant (v2_restaurant.dart)
+
+  @override
+  RestoContext? get restaurant => _resto;
+
+  @override
+  String? restaurantBlocker(Operator operator) => _restaurantBlocker(operator);
+
+  @override
+  Future<List<RestoOrderView>> restaurantOrders({bool all = false}) => _restaurantOrders(all: all);
+
+  @override
+  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers}) => _restoOpen(operator, tableUuid, covers: covers);
+
+  @override
+  Future<RestoOrderView> restoEditLines(
+    Operator operator,
+    String orderUuid, {
+    List<(CartLine, String?)> added = const [],
+    Map<String, int> quantities = const {},
+    Map<String, String?> comments = const {},
+    Set<String> removed = const {},
+  }) {
+    // Lu au catalogue AVANT la file : un article retiré refuse la validation entière, rien n'est enregistré.
+    final items = [for (final (line, comment) in added) _restoNewLine(line, comment)];
+    return _restoAct(operator, orderUuid, (engine, order) => engine.editLines(order, added: items, quantities: quantities, comments: comments, removed: removed));
+  }
+
+  @override
+  Future<RestoOrderView> restoPrebill(Operator operator, String orderUuid) => _restoAct(operator, orderUuid, (engine, order) => engine.prebill(order));
+
+  @override
+  Future<RestoOrderView> restoTransfer(Operator operator, String orderUuid, String tableUuid) {
+    final ctx = _resto;
+    if (ctx == null || ctx.table(tableUuid) == null) throw const OfflineRefusal('Table inconnue de ce point de vente.');
+    return _restoAct(operator, orderUuid, (engine, order) => engine.transfer(order, tableUuid));
+  }
+
+  @override
+  Future<RestoOrderView> restoCancel(Operator operator, String orderUuid, String? reason) =>
+      _restoAct(operator, orderUuid, (engine, order) => engine.cancelOrder(order, reason));
+
+  @override
+  Future<List<CartLine>> restoCart(String orderUuid) => _restoCart(orderUuid);
+
+  @override
+  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) =>
+      _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid);
+
+  @override
+  Future<RestoOrderView> restoClose(Operator operator, String orderUuid) => _restoCloseNow(operator, orderUuid);
 
   /// Contrôles de la caisse web sur le tarif gros (`SaleService`, `HeldCartService`).
   void _checkWholesale(Operator operator, List<CartLine> lines, SaleExtras extras) {
@@ -1222,8 +1294,9 @@ class V2Engine extends CaisseEngine {
         if (payments.where((p) => p.method.isCash).length > 1) throw const OfflineRefusal('Une seule ligne d’espèces par vente.');
         _checkWholesale(operator, lines, extras);
         final allocation = allocateLots(s, lines);
+        final order = extras.order;
         final cart = [
-          for (final l in lines) ..._cartLines(l, allocation[l]),
+          for (final l in lines) ..._cartLines(l, allocation[l], orderLineUuid: order?.lineOf[l]),
         ];
         final revision21 = v2.contract21;
         final builder = V2SaleBuilder(products: _products, packagings: _packagings, revisions: _revisions, newUuid: _newUuid);
@@ -1257,6 +1330,7 @@ class V2Engine extends CaisseEngine {
             revision21: revision21,
             approval: overLimit ? extras.approval : null,
             passages: passages,
+            order: order == null ? null : (orderUuid: order.orderUuid, settlementUuid: order.settlementUuid),
           ),
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
@@ -1432,6 +1506,7 @@ class V2Engine extends CaisseEngine {
     _shopRules = (shop?['regles'] as Map?)?.cast<String, dynamic>();
     final passSettings = (await v2.entities('pass_reglages'))[_device['boutique_uuid']];
     _passSettings = passSettings == null ? null : PassSettings(passSettings);
+    _resto = await _loadRestaurant();
     final categories = await v2.entities('categorie');
     String? categoryOf(Map<String, dynamic> product) {
       final category = categories[product['categorie_uuid']];
@@ -1551,7 +1626,7 @@ class V2Engine extends CaisseEngine {
   }
 
   /// Ligne(s) de vente d'une ligne du panier : une par lot pour un produit à lots, remise répartie au prorata.
-  List<V2CartLine> _cartLines(CartLine l, List<LotSegment>? segments) {
+  List<V2CartLine> _cartLines(CartLine l, List<LotSegment>? segments, {String? orderLineUuid}) {
     final productUuid = _productUuids[l.product.id] ?? (throw OfflineRefusal('« ${l.product.name} » n’est plus au catalogue local.'));
     final packagingUuid = l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.')));
     if (segments == null || segments.length == 1) {
@@ -1565,6 +1640,7 @@ class V2Engine extends CaisseEngine {
           fixedPrice: segments != null || l.wholesale ? l.unitPrice : l.fixedPrice,
           lotUuid: segments?.single.lot.uuid,
           wholesale: l.wholesale,
+          orderLineUuid: orderLineUuid,
         ),
       ];
     }
@@ -1590,6 +1666,7 @@ class V2Engine extends CaisseEngine {
         fixedPrice: l.unitPrice,
         lotUuid: x.lot.uuid,
         wholesale: l.wholesale,
+        orderLineUuid: orderLineUuid,
       ));
     }
     if (bases != l.base) throw refusal;

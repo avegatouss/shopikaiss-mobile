@@ -138,6 +138,121 @@ void main() {
     await expectLater(e.verifyPass(awa, 'EVT-7K3M9QX2', lines, const SaleExtras()), refused('Vérification impossible sans connexion pour cet événement.'));
   });
 
+  test('restaurant.v1 (R-1, R-2) : caisse maîtresse, commande versionnée sans trou, règlement full puis clôture, lecture seule sinon', () async {
+    Matcher refused(String text) => throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains(text)));
+    const pdv = 'b1000000-0000-4000-8000-000000000001';
+    const salle = 'b3000000-0000-4000-8000-000000000001';
+    const t1 = 'b4000000-0000-4000-8000-000000000001';
+    const t2 = 'b4000000-0000-4000-8000-000000000002';
+    final moment = DateTime.utc(2026, 11, 17, 19, 30);
+    Map<String, dynamic> block({bool master = true, String generation = '2'}) => {
+      'point_de_vente_uuid': pdv, 'profil': 'TABLE_SERVICE', 'maitre': master, 'generation': generation,
+      'derniers_numeros': {'commande': 'PF-20261117-L0011', 'bons': <Map<String, dynamic>>[]},
+    };
+    serve21(server);
+    server
+      ..capabilities = [...server.capabilities, 'session.cloture', 'restaurant.v1']
+      ..authorizationExpires = '2026-11-20T00:00:00Z'
+      ..restaurant = block()
+      ..put('operateur', 'operateur:7', {
+        'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['caisse_service_table', 'caisse_table', 'ouverture_session', 'vente'],
+        'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+      }, critical: true)
+      ..put('restaurant.point_de_vente', pdv, {
+        'code': 'SALLE', 'nom': 'Salle principale', 'profil': 'TABLE_SERVICE', 'actif': true, 'terminaux': [fakeTerminal], 'membres': null,
+        'reglages_vente': {'changement_client_paiement': true, 'reference_plateforme_avant_envoi': false, 'verrouillage_minutes': null},
+      }, critical: true)
+      ..put('restaurant.maitre', 'maitre:$pdv', {
+        'point_de_vente_uuid': pdv, 'generation': '2', 'terminal_uuid': fakeTerminal, 'appareil_uuid': fakeDevice, 'epoque': 3, 'designe_le': '2026-11-17T09:30:00Z',
+      }, critical: true)
+      ..put('restaurant.reglages', 'reglages:$pdv', {
+        'point_de_vente_uuid': pdv, 'envoi_production': false, 'plusieurs_commandes_par_table': false, 'prefixe_commande': 'pf_', 'motif_annulation_commande': true,
+        'registre_obligatoire': false, 'prefacture_a_la_demande': true, 'retard_production_minutes': 15, 'sections_z': <String>[], 'fuseau': 'Africa/Abidjan',
+        'impression_mode': 'register', 'repli_premier_poste_actif': false,
+        'assistant': {'max_operations_par_jour': 0, 'max_montant_par_operation': 0, 'max_montant_par_jour': 0, 'max_remise_pourcent': 0},
+      }, critical: true)
+      ..put('restaurant.salle', salle, {'code': 'TERRASSE', 'nom': 'Terrasse', 'ordre': 1, 'actif': true})
+      ..put('restaurant.table', t1, {'point_de_vente_uuid': pdv, 'salle_uuid': salle, 'nom': 'T1', 'code': 'T1', 'capacite': 4, 'ordre': 1, 'actif': true})
+      ..put('restaurant.table', t2, {'point_de_vente_uuid': pdv, 'salle_uuid': salle, 'nom': 'T2', 'code': 'T2', 'capacite': 2, 'ordre': 2, 'actif': true});
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android',
+        newUuid: newUuid, pinVerifier: FakeV2Server.pinVerifier, contract21: true, announceRestaurant: true, clock: () => moment);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    await e.sync();
+    expect(server.requests.lastWhere((r) => r.path == '/etat').headers['X-Caisse-Capacites'], contains('restaurant.v1'));
+    expect(await e.v2.read(V2Keys.contractRevision), contains('+restaurant'));
+    final ctx = e.restaurant!;
+    expect([ctx.master, ctx.tableService, ctx.pointOfSaleName, ctx.generation, [for (final t in ctx.tables) t.name], ctx.rooms.single.name],
+        [true, true, 'Salle principale', '2', ['T1', 'T2'], 'Terrasse']);
+    final awa = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    expect(e.restaurantBlocker(awa), isNull);
+
+    // Ouverture : numéro local repris après le dernier reçu par le serveur, table occupée.
+    var view = await e.restoOpen(awa, t1, covers: 2);
+    final order = view.order.uuid;
+    expect([view.order.localNumber, view.order.version, view.order.stage, view.order.covers, view.order.serverId], ['PF-20261117-L0012', 1, 'waiting', 2, '7']);
+    await expectLater(e.restoOpen(awa, t1), refused('déjà une commande ouverte (PF-20261117-L0012)'));
+    // Une validation = une version.
+    view = await e.restoEditLines(awa, order, added: [(savon(e, units: 2), 'Bien emballé'), (savon(e), null)]);
+    final lines = view.order.lines;
+    expect([view.order.version, lines.length, lines.first.comment, view.payable], [2, 2, 'Bien emballé', 1500]);
+    view = await e.restoPrebill(awa, order);
+    expect([view.order.version, view.order.stage, view.order.prebills], [3, 'bill_printed', 1]);
+    view = await e.restoEditLines(awa, order, removed: {lines.last.uuid});
+    expect([view.order.version, view.order.stage, view.order.activeLines.length, view.order.lines.length, view.payable], [4, 'amended', 1, 2, 1000]);
+    view = await e.restoTransfer(awa, order, t2);
+    expect([view.order.version, view.order.tableUuid, view.pendingVersions], [5, t2, 5]);
+
+    // Règlement complet : vente v2 avec `commande` full, puis la clôture (version 6) ; rien d'autre ne se modifie.
+    final cart = await e.restoCart(order);
+    await expectLater(e.restoSettle(awa, order, [savon(e, units: 2)], [cash(e, 1000)]), refused('Panier différent de la commande'));
+    final sale = await e.restoSettle(awa, order, cart, [cash(e, 1000)]);
+    expect(await e.restaurantOrders(), isEmpty);
+    final closed = (await e.restaurantOrders(all: true)).single;
+    expect([closed.order.status, closed.order.version, closed.order.activeLines.single.settled, closed.paid], ['settled', 6, 2000000, false]);
+    await expectLater(e.restoPrebill(awa, order), refused('déjà réglée'));
+    final link = ((await e.v2.operation(sale.uuid))!['operation']['contenu'] as Map)['commande'] as Map;
+    expect([link['commande_uuid'], link['type'], (link['lignes'] as List).single['ligne_commande_uuid'], (link['lignes'] as List).single['quantite']],
+        [order, 'full', lines.first.uuid, '2.000000']);
+
+    // Remontée : toutes conformes au contrat, dans l'ordre (versions 1 à 5, la vente, puis la clôture), intégrées.
+    server.resultDetails = (op) => op['type'] == 'resto_commande'
+        ? {'commande': {'commande_uuid': (op['contenu'] as Map)['commande_uuid'], 'numero': 'PF-20261117-0003', 'version': (op['contenu'] as Map)['version']}}
+        : null;
+    await e.sync();
+    final sent = [
+      for (final r in server.requests.where((r) => r.path == '/operations'))
+        for (final op in ((r.body as Map)['operations'] as List).cast<Map>()) op['type'] == 'vente' ? 'vente' : '${(op['contenu'] as Map)['action']}:${(op['contenu'] as Map)['version']}',
+    ];
+    expect(sent, ['ouverture:1', 'lignes:2', 'prefacture:3', 'lignes:4', 'transfert_table:5', 'vente', 'cloture:6']);
+    expect(server.received.values.every((r) => r['etat'] == 'integree'), isTrue);
+    final settledView = (await e.restaurantOrders(all: true)).single;
+    expect([settledView.pendingVersions, settledView.serverNumber], [0, 'PF-20261117-0003']);
+    expect(((server.received.values.first['operation'] as Map)['contenu'] as Map)['maitre_generation'], '2');
+
+    // Version en attente de la précédente : rien à faire, la commande l'affiche ; version à arbitrer : commande bloquée.
+    view = await e.restoOpen(awa, t1);
+    final second = view.order.uuid;
+    expect(view.order.localNumber, 'PF-20261117-L0013');
+    await expectLater(e.restoCancel(awa, second, ' '), refused('motif'));
+    server
+      ..verdict = ((op) => op['type'] == 'resto_commande' ? 'a_arbitrer' : 'integree')
+      ..reasonFor = ((op) => {'code': 'restaurant.hors_lot', 'message': 'Fait pris en charge par un lot suivant.', 'details': {'lot': 'R-4'}});
+    await e.sync();
+    final blocked = (await e.restaurantOrders()).single;
+    expect(blocked.serverMessage, 'Fait pris en charge par un lot suivant.');
+    await expectLater(e.restoPrebill(awa, second), refused('attend un arbitrage de la boutique'));
+
+    // Désignation retirée : la caisse n'est plus maîtresse, plus aucun fait restaurant.
+    server.restaurant = block(master: false, generation: '3');
+    await e.sync();
+    expect(e.restaurant!.master, isFalse);
+    expect(e.restaurantBlocker(awa), contains('lecture seule'));
+    await expectLater(e.restoOpen(awa, t2), refused('lecture seule'));
+    // Un terminal qui n'annonce pas la capacité ne reçoit rien du restaurant.
+    expect(V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows').restaurant, isNull);
+  });
+
   test('ticket.modeles : activation sur un poste existant reprend un instantane une seule fois', () async {
     serve21(server);
     final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'windows',

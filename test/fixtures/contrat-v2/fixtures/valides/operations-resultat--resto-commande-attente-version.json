@@ -1,0 +1,19 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000104",
+    "etat": "recue",
+    "version_etat": "1763406600001",
+    "raison": {
+        "code": "restaurant.attente_version",
+        "message": "Version 4 reçue avant la version 3 : elle sera intégrée dès que la précédente le sera.",
+        "details": {
+            "commande_uuid": "c0aa0000-0000-4000-8000-000000000012",
+            "version": 4,
+            "version_serveur": 2
+        }
+    },
+    "vente": null,
+    "mouvements": [],
+    "couverture": {
+        "curseur": null
+    }
+}

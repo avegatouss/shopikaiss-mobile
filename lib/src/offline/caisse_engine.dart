@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:bcrypt/bcrypt.dart';
 
 import '../passes/pass_rules.dart';
+import '../restaurant/resto_context.dart';
 import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -246,6 +247,49 @@ abstract class CaisseEngine extends EngineNotifier {
   /// avec le message d'ECAS.
   Future<PassCheck> verifyPass(Operator operator, String code, List<CartLine> lines, SaleExtras extras, {List<PassCheck> already = const []}) =>
       throw const OfflineRefusal('Passes événement non disponibles sur ce terminal.');
+
+  // ---------------------------------------------------------------- restaurant (capacité restaurant.v1)
+
+  /// Restaurant du point de vente du terminal (profil, caisse maîtresse, salles, tables) ; null hors restaurant.
+  RestoContext? get restaurant => null;
+
+  /// Pourquoi [operator] ne peut pas prendre de commande sur ce terminal, ou null s'il le peut (caisse maîtresse, profil
+  /// Service de table, droit `caisse_table`).
+  String? restaurantBlocker(Operator operator) => 'Restaurant non disponible sur ce terminal.';
+
+  /// Commandes de la caisse maîtresse (dernière version de chacune) ; [all] : closes et annulées comprises.
+  Future<List<RestoOrderView>> restaurantOrders({bool all = false}) async => const [];
+
+  /// Ouvre une commande à [tableUuid] (version 1, vide, en attente).
+  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Une validation de l'opérateur = une version : articles ajoutés ([added], prix du catalogue figés), quantités ou
+  /// commentaires changés, articles retirés.
+  Future<RestoOrderView> restoEditLines(
+    Operator operator,
+    String orderUuid, {
+    List<(CartLine, String?)> added = const [],
+    Map<String, int> quantities = const {},
+    Map<String, String?> comments = const {},
+    Set<String> removed = const {},
+  }) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  Future<RestoOrderView> restoPrebill(Operator operator, String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  Future<RestoOrderView> restoTransfer(Operator operator, String orderUuid, String tableUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  Future<RestoOrderView> restoCancel(Operator operator, String orderUuid, String? reason) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Panier de règlement d'une commande : une ligne par article actif, au prix figé de la commande.
+  Future<List<CartLine>> restoCart(String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Encaisse toute la commande (vente v2 avec `commande` de type `full`), puis la clôt. [lines] : panier rendu par
+  /// [restoCart], inchangé.
+  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Clôt une commande déjà réglée par une vente de ce terminal (clôture interrompue).
+  Future<RestoOrderView> restoClose(Operator operator, String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Contrôles de règle de la vente faits avant l'encaissement (tarif gros, cumul avec une remise) : [OfflineRefusal] sinon.
   void checkSaleRules(Operator operator, List<CartLine> lines, SaleExtras extras) {}

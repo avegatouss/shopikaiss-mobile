@@ -117,6 +117,10 @@ class CaisseV2Client {
   /// `vente.passages[]`, droit `pass_encaisser`.
   static const passesCapability = 'passes.evenement';
 
+  /// Restaurant hors connexion (révision restaurant-1, lots R-1 et R-2) : caisse maîtresse, salles, tables, menus,
+  /// `resto_commande` et vente avec `commande`. Accordée seulement avec `contrat.2_1` et `session.cloture`.
+  static const restaurantCapability = 'restaurant.v1';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;

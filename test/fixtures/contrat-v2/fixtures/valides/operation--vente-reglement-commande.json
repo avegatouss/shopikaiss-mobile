@@ -1,0 +1,101 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000105",
+    "type": "vente",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 344,
+    "cree_le": "2026-11-17T19:34:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "numero_local": "HL-SALLE-000344",
+        "brouillon_uuid": "b0000000-0000-4000-8000-000000000105",
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000041",
+        "client_uuid": null,
+        "tva": {
+            "taux": "0.000000",
+            "incluse": false
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "f1000000-0000-4000-8000-000000000001",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000101",
+                "conditionnement_uuid": null,
+                "libelle": "Pizza margherita",
+                "quantite": "1.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "1.000000",
+                "prix_unitaire": 5000,
+                "remise": 0,
+                "total": 5000,
+                "revision_prix": "9"
+            },
+            {
+                "ligne_uuid": "f1000000-0000-4000-8000-000000000002",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000102",
+                "conditionnement_uuid": null,
+                "libelle": "Bière 33 cl",
+                "quantite": "2.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "2.000000",
+                "prix_unitaire": 1500,
+                "remise": 0,
+                "total": 3000,
+                "revision_prix": "9"
+            }
+        ],
+        "remise_globale": 0,
+        "livraison": 0,
+        "totaux": {
+            "brut": 8000,
+            "remises": 0,
+            "base_ht": 8000,
+            "tva": 0,
+            "a_payer": 8000
+        },
+        "paiements": [
+            {
+                "tentative_uuid": "7a000000-0000-4000-8000-000000000105",
+                "moyen": "especes",
+                "montant": 8000,
+                "recu": 10000,
+                "reference": null
+            }
+        ],
+        "mouvements": [
+            {
+                "mouvement_uuid": "f0000000-0000-4000-8000-000000000105",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000102",
+                "lot_uuid": null,
+                "variation": "-2.000000"
+            }
+        ],
+        "autorisations": [],
+        "commande": {
+            "commande_uuid": "c0aa0000-0000-4000-8000-000000000012",
+            "reglement_uuid": "ae000000-0000-4000-8000-000000000105",
+            "type": "full",
+            "lignes": [
+                {
+                    "ligne_commande_uuid": "e1000000-0000-4000-8000-000000000001",
+                    "ligne_vente_uuid": "f1000000-0000-4000-8000-000000000001",
+                    "quantite": "1.000000"
+                },
+                {
+                    "ligne_commande_uuid": "e1000000-0000-4000-8000-000000000002",
+                    "ligne_vente_uuid": "f1000000-0000-4000-8000-000000000002",
+                    "quantite": "2.000000"
+                }
+            ],
+            "parts": null,
+            "libelle": null
+        }
+    },
+    "empreinte": "62182cd6c8853b18e39c21662890a80a7bbc9362b28b95309f425441abe8b462"
+}

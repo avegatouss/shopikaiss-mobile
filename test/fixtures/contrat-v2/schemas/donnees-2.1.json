@@ -955,6 +955,30 @@
                                     ]
                                 }
                             }
+                        },
+                        "commande": {
+                            "description": "Capacité restaurant.v1 : sur une resto_commande intégrée, la commande et sa version (numéro = numéro serveur).",
+                            "type": "object",
+                            "required": [
+                                "commande_uuid",
+                                "numero",
+                                "version"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "commande_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "numero": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                },
+                                "version": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                }
+                            }
                         }
                     }
                 }

@@ -392,6 +392,188 @@
             "fichier": "valides/passes-verifier-reponse--refuse.json",
             "schema": "passes.json#/$defs/reponse",
             "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-point-de-vente.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.point_de_vente",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-point-de-vente-reserve.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.point_de_vente",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-point-de-vente-profil-inconnu.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.point_de_vente",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "valides/donnees--restaurant-maitre.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.maitre",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-maitre-retire.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.maitre",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-maitre-generation-nombre.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.maitre",
+            "valide": false,
+            "erreur_attendue": "type attendu string"
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-maitre-epoque-zero.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.maitre",
+            "valide": false,
+            "erreur_attendue": "exactement une variante"
+        },
+        {
+            "fichier": "valides/donnees--restaurant-reglages.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.reglages",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-reglages-ip-imprimante.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.reglages",
+            "valide": false,
+            "erreur_attendue": "propriété inconnue"
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-reglages-retard-hors-bornes.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.reglages",
+            "valide": false,
+            "erreur_attendue": "minimum 1"
+        },
+        {
+            "fichier": "valides/etat--restaurant-non-maitre.json",
+            "schema": "etat.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/etat--restaurant-maitre.json",
+            "schema": "etat.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/etat--restaurant-derniers-numeros.json",
+            "schema": "etat.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/etat--restaurant-sans-derniers-numeros.json",
+            "schema": "etat.json",
+            "valide": false,
+            "erreur_attendue": "derniers_numeros : obligatoire"
+        },
+        {
+            "fichier": "invalides/etat--restaurant-bons-en-carte.json",
+            "schema": "etat.json",
+            "valide": false,
+            "erreur_attendue": "exactement une variante"
+        },
+        {
+            "fichier": "valides/etat-reprise--nominal.json",
+            "schema": "etat.json#/$defs/reprise",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/etat-reprise--sequence-texte.json",
+            "schema": "etat.json#/$defs/reprise",
+            "valide": false,
+            "erreur_attendue": "type attendu integer"
+        },
+        {
+            "fichier": "valides/operation--resto-commande-ouverture.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-lignes.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-prefacture.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-transfert-table.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--vente-reglement-commande.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-cloture.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-annulation.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-resultat--resto-commande.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-resultat--resto-commande-attente-version.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-salle.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.salle",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-table.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.table",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-menu.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.menu",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-categorie.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.categorie",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--resto-commande-numero-local-minuscules.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "numero_local : format invalide"
+        },
+        {
+            "fichier": "invalides/operation--resto-commande-action-hors-lot.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "action : valeur attendue"
+        },
+        {
+            "fichier": "invalides/operation--vente-commande-sans-reglement-uuid.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "reglement_uuid : obligatoire"
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-table-occupation.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.table",
+            "valide": false,
+            "erreur_attendue": "$.occupation : propriété inconnue"
         }
     ]
 }

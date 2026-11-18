@@ -1,10 +1,12 @@
 import '../sync_v2/canonical_json.dart';
+import '../offline/web_rules.dart';
 import '../sync_v2/decimal6.dart';
 
 /// Moteur partagé du restaurant hors connexion (plan PLAN-RESTAURANT-HORS-LIGNE.md, proposition RESTAURANT-1 de A) :
 /// commandes, lignes, routage vers les postes, bons de production par différence, annulations, et planification de la
-/// livraison des bons sans doublon. Pur et déterministe (horloge et uuid injectés) : la caisse maîtresse (Windows ou
-/// Android) le persiste et l'affiche ; rien n'est envoyé au serveur tant que `restaurant.v1` n'est pas validé.
+/// livraison des bons sans doublon. Pur et déterministe (horloge et uuid injectés) : chaque fait rend la version suivante
+/// de la commande, au format `resto_commande` (RESTAURANT-1 validé, lots R-1 et R-2), que la caisse maîtresse enregistre
+/// dans sa file v2. Envoi et annulation de ligne avec bons : lot R-3, pas encore émis.
 ///
 /// Quantités en millionièmes (comme le contrat v2), montants en francs entiers.
 class RestoRefusal implements Exception {
@@ -62,36 +64,47 @@ class RestoRouting {
 
 enum RestoLineStatus { pending, sent, cancelled }
 
+/// Ligne de commande (`ligne_commande`, RESTAURANT-1 §4.3) : produit, libellé, prix et coefficient figés à l'ajout.
 class RestoLine {
   RestoLine({
     required this.uuid,
     required this.productUuid,
     this.packagingUuid,
-    required this.label,
+    this.lotUuid,
+    required String label,
     required this.quantity,
+    this.coefficient = Decimal6.scale,
     required this.unitPrice,
     this.discount = 0,
     this.comment,
     this.stationUuid,
+    this.parentLineUuid,
     this.free = false,
     this.status = RestoLineStatus.pending,
     this.sent = 0,
     this.settled = 0,
-  });
+  }) : label = label.length > 160 ? label.substring(0, 160) : label;
 
   final String uuid;
   final String productUuid;
   final String? packagingUuid;
+  final String? lotUuid;
+
+  /// Libellé figé (160 caractères au plus, colonne `product_name` du serveur).
   final String label;
 
   /// Quantité active (millionièmes).
   int quantity;
+
+  /// Coefficient du conditionnement (millionièmes), figé.
+  final int coefficient;
   final int unitPrice;
   int discount;
   String? comment;
 
   /// Poste figé à l'ajout de la ligne ; null = rien ne part.
   final String? stationUuid;
+  final String? parentLineUuid;
   bool free;
   RestoLineStatus status;
 
@@ -101,20 +114,25 @@ class RestoLine {
   /// Quantité réglée.
   int settled;
 
+  bool get active => status != RestoLineStatus.cancelled;
   int get gross => Decimal6.amount(unitPrice, quantity);
-  int get total => free ? 0 : gross - discount;
-  int get toSend => status == RestoLineStatus.cancelled ? 0 : quantity - sent;
+  int get lineDiscount => free ? gross : discount;
+  int get total => gross - lineDiscount;
+  int get toSend => active ? quantity - sent : 0;
 
   RestoLine copy() => RestoLine(
     uuid: uuid,
     productUuid: productUuid,
     packagingUuid: packagingUuid,
+    lotUuid: lotUuid,
     label: label,
     quantity: quantity,
+    coefficient: coefficient,
     unitPrice: unitPrice,
     discount: discount,
     comment: comment,
     stationUuid: stationUuid,
+    parentLineUuid: parentLineUuid,
     free: free,
     status: status,
     sent: sent,
@@ -125,14 +143,17 @@ class RestoLine {
     'ligne_uuid': uuid,
     'produit_uuid': productUuid,
     'conditionnement_uuid': packagingUuid,
+    'lot_uuid': lotUuid,
     'libelle': label,
     'quantite': Decimal6.format(quantity),
+    'coefficient': Decimal6.format(coefficient),
     'prix_unitaire': unitPrice,
-    'remise': free ? gross : discount,
+    'remise': lineDiscount,
     'tarif': free ? 'free' : (discount > 0 ? 'manual_discount' : 'standard'),
     'statut': status.name,
     'poste_uuid': stationUuid,
     'commentaire': comment,
+    'parent_ligne_uuid': parentLineUuid,
     'envoye': Decimal6.format(sent),
     'reglee': Decimal6.format(settled),
   };
@@ -141,17 +162,44 @@ class RestoLine {
     uuid: m['ligne_uuid'] as String,
     productUuid: m['produit_uuid'] as String,
     packagingUuid: m['conditionnement_uuid'] as String?,
+    lotUuid: m['lot_uuid'] as String?,
     label: m['libelle'] as String,
     quantity: Decimal6.parse(m['quantite'] as String),
+    coefficient: Decimal6.parse(m['coefficient'] as String),
     unitPrice: m['prix_unitaire'] as int,
     discount: m['tarif'] == 'free' ? 0 : m['remise'] as int,
     free: m['tarif'] == 'free',
     comment: m['commentaire'] as String?,
     stationUuid: m['poste_uuid'] as String?,
+    parentLineUuid: m['parent_ligne_uuid'] as String?,
     status: RestoLineStatus.values.byName(m['statut'] as String),
     sent: Decimal6.parse(m['envoye'] as String),
     settled: Decimal6.parse(m['reglee'] as String),
   );
+}
+
+/// Étape du service (`ServiceStage` du web) : seule règle de passage, appliquée à chaque fait.
+class RestoStage {
+  RestoStage._();
+
+  static const waiting = 'waiting';
+  static const billPrinted = 'bill_printed';
+  static const customerValidated = 'customer_validated';
+  static const amended = 'amended';
+
+  /// Contenu modifié : une commande déjà préfacturée ou validée par le client devient « modifiée ».
+  static String? afterChange(String? current) => current == billPrinted || current == customerValidated ? amended : current;
+
+  /// Préfacture : une commande validée ou modifiée garde son étape.
+  static String? afterPrebill(String? current) => current == customerValidated || current == amended ? current : billPrinted;
+}
+
+/// TVA de la boutique pour les totaux de la commande (règle du web, `SaleCalculator`).
+class RestoVat {
+  const RestoVat({this.rate = '0.000000', this.included = true});
+
+  final String rate;
+  final bool included;
 }
 
 class RestoOrder {
@@ -160,13 +208,20 @@ class RestoOrder {
     required this.localNumber,
     required this.businessDay,
     required this.profile,
+    this.channel,
     this.tableUuid,
+    this.menuUuid,
     this.covers,
     this.serverId,
+    this.customerUuid,
+    this.customerName,
+    this.externalReference,
     this.comment,
     this.status = 'open',
+    this.stage,
     this.version = 0,
     this.prebills = 0,
+    this.globalDiscount = 0,
     List<RestoLine>? lines,
   }) : lines = lines ?? [];
 
@@ -178,20 +233,28 @@ class RestoOrder {
 
   /// `TABLE_SERVICE` ou `PRODUCTION`.
   final String profile;
+  final String? channel;
   String? tableUuid;
+  final String? menuUuid;
   int? covers;
   String? serverId;
+  final String? customerUuid;
+  final String? customerName;
+  final String? externalReference;
   String? comment;
 
   /// `open`, `settled` ou `cancelled`.
   String status;
+
+  /// Étape du service ([RestoStage]) ; null hors Service de table.
+  String? stage;
   int version;
   int prebills;
+  int globalDiscount;
   final List<RestoLine> lines;
 
   bool get isOpen => status == 'open';
-  List<RestoLine> get activeLines => [for (final l in lines) if (l.status != RestoLineStatus.cancelled) l];
-  int get payable => activeLines.fold(0, (sum, l) => sum + l.total);
+  List<RestoLine> get activeLines => [for (final l in lines) if (l.active) l];
 
   RestoLine line(String uuid) => lines.where((l) => l.uuid == uuid).firstOrNull ?? (throw const RestoRefusal('Ligne introuvable dans la commande.'));
 
@@ -200,58 +263,114 @@ class RestoOrder {
     localNumber: localNumber,
     businessDay: businessDay,
     profile: profile,
+    channel: channel,
     tableUuid: tableUuid,
+    menuUuid: menuUuid,
     covers: covers,
     serverId: serverId,
+    customerUuid: customerUuid,
+    customerName: customerName,
+    externalReference: externalReference,
     comment: comment,
     status: status,
+    stage: stage,
     version: version,
     prebills: prebills,
+    globalDiscount: globalDiscount,
     lines: [for (final l in lines) l.copy()],
   );
 
-  /// État complet de la commande (forme `etat_commande` proposée par A, champs connus du moteur).
-  Map<String, dynamic> toJson() {
+  /// Totaux par la règle du web (`CommandesCaisse::totaux`) : brut = Σ prix × quantité des lignes actives, remises =
+  /// Σ remises de ligne + remise globale, à payer = total de la vente avec la TVA de la boutique.
+  ({int gross, int discounts, int payable, int settled}) totals(RestoVat vat) {
     final active = activeLines;
+    if (active.isEmpty) return (gross: 0, discounts: globalDiscount, payable: 0, settled: 0);
+    final web = webTotals(
+      lineBases: [for (final l in active) l.gross],
+      lineDiscounts: [for (final l in active) l.lineDiscount],
+      globalDiscount: globalDiscount,
+      vatRate: vat.rate,
+      vatIncluded: vat.included,
+    );
     final gross = active.fold<int>(0, (sum, l) => sum + l.gross);
+    final payable = web.payable;
+    final quantity = active.fold<int>(0, (sum, l) => sum + l.quantity);
+    final settledQuantity = active.fold<int>(0, (sum, l) => sum + (l.settled > l.quantity ? l.quantity : l.settled));
+    // Réglé : part du total à payer au prorata des quantités réglées (non contrôlé par le serveur, affichage).
+    final settled = quantity == 0 ? 0 : (settledQuantity >= quantity ? payable : (BigInt.from(payable) * BigInt.from(settledQuantity) ~/ BigInt.from(quantity)).toInt());
+    return (gross: gross, discounts: active.fold<int>(globalDiscount, (sum, l) => sum + l.lineDiscount), payable: payable, settled: settled);
+  }
+
+  /// État complet de la commande APRÈS le fait (`etat_commande`, operation.json, lot R-2).
+  Map<String, dynamic> state(RestoVat vat) {
+    final t = totals(vat);
     return {
-      'uuid': uuid,
       'profil': profile,
       'numero_local': localNumber,
       'date_metier': businessDay,
+      'canal': channel,
       'table_uuid': tableUuid,
+      'menu_uuid': menuUuid,
       'couverts': covers,
       'serveur_id': serverId,
+      'client_uuid': customerUuid,
+      'client_nom': customerName,
+      'reference_externe': externalReference,
       'commentaire': comment,
       'statut': status,
-      'version': version,
+      'etape': stage,
       'prefactures': prebills,
+      'remise_globale': globalDiscount,
       'lignes': [for (final l in lines) l.toJson()],
-      'totaux': {
-        'brut': gross,
-        'remises': gross - payable,
-        'a_payer': payable,
-        'regle': active.fold<int>(0, (sum, l) => sum + _settledShare(l)),
-      },
+      'totaux': {'brut': t.gross, 'remises': t.discounts, 'a_payer': t.payable, 'regle': t.settled},
     };
   }
 
-  static int _settledShare(RestoLine l) => l.quantity == 0 ? 0 : (l.total * l.settled) ~/ l.quantity;
-
-  static RestoOrder fromJson(Map m) => RestoOrder(
-    uuid: m['uuid'] as String,
+  /// Commande relue depuis l'état de sa dernière version (la file des opérations fait foi).
+  static RestoOrder fromState(String uuid, int version, Map m) => RestoOrder(
+    uuid: uuid,
     localNumber: m['numero_local'] as String,
     businessDay: m['date_metier'] as String,
     profile: m['profil'] as String,
+    channel: m['canal'] as String?,
     tableUuid: m['table_uuid'] as String?,
+    menuUuid: m['menu_uuid'] as String?,
     covers: m['couverts'] as int?,
     serverId: m['serveur_id'] as String?,
+    customerUuid: m['client_uuid'] as String?,
+    customerName: m['client_nom'] as String?,
+    externalReference: m['reference_externe'] as String?,
     comment: m['commentaire'] as String?,
     status: m['statut'] as String,
-    version: m['version'] as int,
+    stage: m['etape'] as String?,
+    version: version,
     prebills: m['prefactures'] as int,
+    globalDiscount: m['remise_globale'] as int,
     lines: [for (final l in (m['lignes'] as List).cast<Map>()) RestoLine.fromJson(l)],
   );
+}
+
+/// Article à ajouter à une commande (prix, libellé et coefficient lus au catalogue au moment de l'ajout).
+class RestoNewLine {
+  const RestoNewLine({
+    required this.productUuid,
+    this.packagingUuid,
+    required this.label,
+    required this.quantity,
+    this.coefficient = Decimal6.scale,
+    required this.unitPrice,
+    this.routing = const RestoRouting(),
+    this.comment,
+  });
+
+  final String productUuid;
+  final String? packagingUuid;
+  final String label;
+  final int quantity;
+  final int coefficient;
+  final int unitPrice;
+  final RestoRouting routing;
+  final String? comment;
 }
 
 // ------------------------------------------------------------------ bons
@@ -357,7 +476,15 @@ class RestoResult {
 // ------------------------------------------------------------------ moteur
 
 class RestoEngine {
-  RestoEngine({required this.newUuid, required this.now, required this.stations, required this.counters, this.sendToStations = true});
+  RestoEngine({
+    required this.newUuid,
+    required this.now,
+    required this.stations,
+    required this.counters,
+    this.sendToStations = true,
+    this.vat = const RestoVat(),
+    this.cancellationReasonRequired = false,
+  });
 
   final String Function() newUuid;
   final DateTime Function() now;
@@ -366,34 +493,134 @@ class RestoEngine {
   final Map<String, RestoStation> stations;
   final RestoCounters counters;
 
-  /// Paramètre d'envoi (`restaurant.table_service_send_to_production` ou `restaurant.production_send_to_stations`) :
-  /// éteint, « Envoyer » devient « Valider » : la commande est figée et aucun bon ne part.
+  /// Paramètre d'envoi (`restaurant.reglages.envoi_production`) : éteint, « Envoyer » devient « Valider » : la commande
+  /// est figée et aucun bon ne part.
   final bool sendToStations;
+
+  /// TVA de la boutique, pour les totaux de l'état (`a_payer`).
+  final RestoVat vat;
+
+  /// `restaurant.reglages.motif_annulation_commande`.
+  final bool cancellationReasonRequired;
 
   RestoResult _record(RestoOrder order, String action, Map<String, dynamic> fact, {String? reason, List<RestoTicket> tickets = const []}) {
     order.version++;
-    return RestoResult(order, RestoEvent(uuid: newUuid(), version: order.version, action: action, fact: fact, reason: reason, state: order.toJson(), tickets: tickets), tickets);
+    return RestoResult(
+      order,
+      RestoEvent(uuid: newUuid(), version: order.version, action: action, fact: fact, reason: reason, state: order.state(vat), tickets: tickets),
+      tickets,
+    );
   }
 
   void _requireOpen(RestoOrder order) {
     if (!order.isOpen) throw const RestoRefusal('Cette commande est close : elle ne se modifie plus.');
   }
 
-  /// Ouverture : numéro local `PREFIXE-AAAAMMJJ-L0001`, compté par jour sur la caisse maîtresse.
-  RestoResult open({required String prefix, required String businessDay, required String profile, String? tableUuid, int? covers, String? serverId}) {
-    final cleanPrefix = prefix.toUpperCase().replaceAll(RegExp('[^A-Z0-9]'), '');
+  /// Numéro local d'une commande : préfixe normalisé (majuscules, A-Z et 0-9, 23 caractères au plus), date métier, `L` et
+  /// 4 chiffres (6 au plus) ; compté par jour sur la caisse maîtresse.
+  static String localNumber(String prefix, String businessDay, int sequence) {
+    var clean = prefix.toUpperCase().replaceAll(RegExp('[^A-Z0-9]'), '');
+    if (clean.isEmpty) clean = 'CMD';
+    if (clean.length > 23) clean = clean.substring(0, 23);
+    return '$clean-${businessDay.replaceAll('-', '')}-L${sequence.toString().padLeft(4, '0')}';
+  }
+
+  /// Rang d'un numéro local (`…-L0012` → 12) et sa date (`AAAAMMJJ`), ou null.
+  static (String, int)? parseLocalNumber(String? number) {
+    final m = RegExp(r'-([0-9]{8})-L([0-9]{4,6})$').firstMatch(number ?? '');
+    return m == null ? null : (m.group(1)!, int.parse(m.group(2)!));
+  }
+
+  /// Ouverture : commande vide, en attente (Service de table : table obligatoire).
+  RestoResult open({required String prefix, required String businessDay, required String profile, String? tableUuid, int? covers, String? serverId, String? menuUuid}) {
+    if (profile == 'TABLE_SERVICE' && tableUuid == null) throw const RestoRefusal('Choisissez la table de la commande.');
+    if (covers != null && (covers < 1 || covers > 500)) throw const RestoRefusal('Nombre de couverts invalide (1 à 500).');
     final day = businessDay.replaceAll('-', '');
     final sequence = counters.next('commande|$day');
+    if (sequence > 999999) throw const RestoRefusal('Nombre maximal de commandes du jour atteint.');
     final order = RestoOrder(
       uuid: newUuid(),
-      localNumber: '${cleanPrefix.isEmpty ? 'CMD' : cleanPrefix}-$day-L${sequence.toString().padLeft(4, '0')}',
+      localNumber: localNumber(prefix, businessDay, sequence),
       businessDay: businessDay,
       profile: profile,
       tableUuid: tableUuid,
+      menuUuid: menuUuid,
       covers: covers,
       serverId: serverId,
+      stage: RestoStage.waiting,
     );
     return _record(order, 'ouverture', const {});
+  }
+
+  /// Une validation de l'opérateur = une version `lignes` : articles ajoutés, quantités ou commentaires changés, articles
+  /// retirés. Seules les lignes jamais envoyées se modifient ou se retirent ; une ligne envoyée s'annule ([cancelLine]).
+  RestoResult editLines(
+    RestoOrder order, {
+    List<RestoNewLine> added = const [],
+    Map<String, int> quantities = const {},
+    Map<String, String?> comments = const {},
+    Set<String> removed = const {},
+    bool firstActiveFallback = false,
+  }) {
+    _requireOpen(order);
+    final next = order.copy();
+    final addedUuids = <String>[], changed = <String>[], removedUuids = <String>[];
+    for (final item in added) {
+      if (item.quantity <= 0) throw const RestoRefusal('Quantité invalide.');
+      if (item.unitPrice < 0) throw const RestoRefusal('Prix invalide.');
+      final line = RestoLine(
+        uuid: newUuid(),
+        productUuid: item.productUuid,
+        packagingUuid: item.packagingUuid,
+        label: item.label,
+        quantity: item.quantity,
+        coefficient: item.coefficient,
+        unitPrice: item.unitPrice,
+        comment: _clean(item.comment),
+        stationUuid: item.routing.resolve(stations, firstActiveFallback: firstActiveFallback)?.uuid,
+      );
+      next.lines.add(line);
+      addedUuids.add(line.uuid);
+    }
+    for (final uuid in {...quantities.keys, ...comments.keys}) {
+      if (removed.contains(uuid)) continue;
+      final line = next.line(uuid);
+      if (!line.active) throw const RestoRefusal('Cette ligne est annulée.');
+      var touched = false;
+      if (quantities.containsKey(uuid) && quantities[uuid] != line.quantity) {
+        final quantity = quantities[uuid]!;
+        if (quantity <= 0) throw const RestoRefusal('Quantité invalide : retirez l’article.');
+        // Une ligne envoyée peut augmenter (le surplus partira en AJOUT), jamais baisser sous l'envoyé.
+        if (quantity < line.sent) throw RestoRefusal('« ${line.label} » est déjà envoyé : annulez la quantité envoyée avec un motif.');
+        line.quantity = quantity;
+        if (quantity > line.sent) line.status = RestoLineStatus.pending;
+        touched = true;
+      }
+      if (comments.containsKey(uuid) && _clean(comments[uuid]) != line.comment) {
+        if (line.status != RestoLineStatus.pending) throw RestoRefusal('« ${line.label} » est déjà envoyé : son commentaire ne change plus.');
+        line.comment = _clean(comments[uuid]);
+        touched = true;
+      }
+      if (touched) changed.add(uuid);
+    }
+    for (final uuid in removed) {
+      final line = next.line(uuid);
+      if (!line.active) continue;
+      if (line.sent > 0 || line.status == RestoLineStatus.sent) throw RestoRefusal('« ${line.label} » est déjà envoyé : annulez-le avec un motif.');
+      line.status = RestoLineStatus.cancelled;
+      removedUuids.add(uuid);
+    }
+    if (addedUuids.isEmpty && changed.isEmpty && removedUuids.isEmpty) throw const RestoRefusal('Aucune modification à enregistrer.');
+    if (next.lines.length > 200) throw const RestoRefusal('Une commande compte 200 lignes au plus.');
+    next.stage = RestoStage.afterChange(next.stage);
+    return _record(next, 'lignes', {'ajoutees': addedUuids, 'modifiees': changed, 'retirees': removedUuids},
+        reason: removedUuids.isEmpty ? null : 'Retiré de la commande');
+  }
+
+  static String? _clean(String? comment) {
+    final text = comment?.trim() ?? '';
+    if (text.isEmpty) return null;
+    return text.length > 500 ? text.substring(0, 500) : text;
   }
 
   /// Ajout d'un article : poste figé à l'ajout (règle du Restaurant), prix et libellé figés.
@@ -407,46 +634,18 @@ class RestoEngine {
     required RestoRouting routing,
     String? comment,
     bool firstActiveFallback = false,
-  }) {
-    _requireOpen(order);
-    if (quantity <= 0) throw const RestoRefusal('Quantité invalide.');
-    final next = order.copy();
-    final line = RestoLine(
-      uuid: newUuid(),
-      productUuid: productUuid,
-      packagingUuid: packagingUuid,
-      label: label,
-      quantity: quantity,
-      unitPrice: unitPrice,
-      comment: comment == null || comment.trim().isEmpty ? null : comment.trim(),
-      stationUuid: routing.resolve(stations, firstActiveFallback: firstActiveFallback)?.uuid,
-    );
-    next.lines.add(line);
-    return _record(next, 'lignes', {'ajoutees': [line.uuid], 'modifiees': <String>[], 'retirees': <String>[]});
-  }
+  }) => editLines(
+    order,
+    added: [RestoNewLine(productUuid: productUuid, packagingUuid: packagingUuid, label: label, quantity: quantity, unitPrice: unitPrice, routing: routing, comment: comment)],
+    firstActiveFallback: firstActiveFallback,
+  );
 
   /// Changement de quantité d'une ligne pas encore envoyée. Une ligne envoyée ne baisse que par [cancelLine].
-  RestoResult changeQuantity(RestoOrder order, String lineUuid, int quantity) {
-    _requireOpen(order);
-    final next = order.copy();
-    final line = next.line(lineUuid);
-    if (line.status == RestoLineStatus.cancelled) throw const RestoRefusal('Cette ligne est annulée.');
-    if (quantity <= 0) return removeLine(order, lineUuid);
-    if (quantity < line.sent) throw const RestoRefusal('Article déjà envoyé : annulez la quantité envoyée avec un motif.');
-    line.quantity = quantity;
-    if (quantity > line.sent) line.status = RestoLineStatus.pending;
-    return _record(next, 'lignes', {'ajoutees': <String>[], 'modifiees': [lineUuid], 'retirees': <String>[]});
-  }
+  RestoResult changeQuantity(RestoOrder order, String lineUuid, int quantity) =>
+      quantity <= 0 ? removeLine(order, lineUuid) : editLines(order, quantities: {lineUuid: quantity});
 
   /// Retrait d'une ligne jamais envoyée.
-  RestoResult removeLine(RestoOrder order, String lineUuid) {
-    _requireOpen(order);
-    final next = order.copy();
-    final line = next.line(lineUuid);
-    if (line.sent > 0) throw const RestoRefusal('Article déjà envoyé : annulez-le avec un motif.');
-    line.status = RestoLineStatus.cancelled;
-    return _record(next, 'lignes', {'ajoutees': <String>[], 'modifiees': <String>[], 'retirees': [lineUuid]}, reason: 'Retiré de la commande');
-  }
+  RestoResult removeLine(RestoOrder order, String lineUuid) => editLines(order, removed: {lineUuid});
 
   RestoTicket _ticket(RestoOrder order, String stationUuid, String type, List<RestoTicketLine> lines, {String? reason}) {
     final station = stations[stationUuid]!;
@@ -467,8 +666,8 @@ class RestoEngine {
     );
   }
 
-  /// Envoi par différence : à envoyer = quantité active − envoyé net, un bon par poste. Les articles sans poste sont
-  /// figés sans bon. Envoi éteint : « Valider » fige la commande sans aucun bon.
+  /// Envoi par différence (lot R-3) : à envoyer = quantité active − envoyé net, un bon par poste. Les articles sans poste
+  /// sont figés sans bon. Envoi éteint : « Valider » fige la commande sans aucun bon.
   RestoResult send(RestoOrder order) {
     _requireOpen(order);
     final next = order.copy();
@@ -500,15 +699,15 @@ class RestoEngine {
     return _record(next, 'envoi', {'bons': [for (final t in tickets) t.toJson()]}, tickets: tickets);
   }
 
-  /// Annulation d'une quantité envoyée (droit `resto_modifier_envoye` ou autorisation, vérifiés par l'appelant) ; motif
-  /// d'au moins 3 caractères. Bon d'ANNULATION seulement si la ligne avait été annoncée à un poste.
+  /// Annulation d'une quantité envoyée (lot R-3 ; droit `resto_modifier_envoye` ou autorisation, vérifiés par
+  /// l'appelant) ; motif d'au moins 3 caractères. Bon d'ANNULATION seulement si la ligne avait été annoncée à un poste.
   RestoResult cancelLine(RestoOrder order, String lineUuid, int quantity, String reason) {
     _requireOpen(order);
     final motive = reason.trim();
     if (motive.length < 3) throw const RestoRefusal('Indiquez le motif de l’annulation (3 caractères au moins).');
     final next = order.copy();
     final line = next.line(lineUuid);
-    if (line.status == RestoLineStatus.cancelled) throw const RestoRefusal('Cette ligne est déjà annulée.');
+    if (!line.active) throw const RestoRefusal('Cette ligne est déjà annulée.');
     if (quantity <= 0 || quantity > line.quantity) throw const RestoRefusal('Quantité à annuler invalide.');
     final announced = quantity > line.sent ? line.sent : quantity;
     final tickets = <RestoTicket>[];
@@ -521,11 +720,13 @@ class RestoEngine {
       ..quantity -= quantity
       ..sent -= announced;
     if (line.quantity == 0) line.status = RestoLineStatus.cancelled;
+    next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'annulation_ligne', {'ligne_uuid': lineUuid, 'quantite': Decimal6.format(quantity), 'bons': [for (final t in tickets) t.toJson()]},
         reason: motive, tickets: tickets);
   }
 
-  /// Annulation de la commande : bons d'ANNULATION pour tout ce qui était annoncé, poste par poste.
+  /// Annulation de la commande : motif exigé si la boutique le demande ou si des articles sont envoyés ; bons
+  /// d'ANNULATION pour tout ce qui était annoncé, poste par poste (lot R-3).
   RestoResult cancelOrder(RestoOrder order, String? reason) {
     _requireOpen(order);
     final motive = reason?.trim() ?? '';
@@ -535,6 +736,8 @@ class RestoEngine {
       if (l.sent > 0 && l.stationUuid != null && stations.containsKey(l.stationUuid)) (announced[l.stationUuid!] ??= []).add(l);
     }
     if (announced.isNotEmpty && motive.length < 3) throw const RestoRefusal('Des articles sont déjà envoyés : indiquez le motif de l’annulation.');
+    if (cancellationReasonRequired && motive.isEmpty) throw const RestoRefusal('Indiquez le motif de l’annulation de la commande.');
+    if (next.activeLines.any((l) => l.settled > 0)) throw const RestoRefusal('Des articles sont déjà réglés : la commande ne s’annule plus.');
     final tickets = [
       if (sendToStations)
         for (final entry in announced.entries)
@@ -551,21 +754,26 @@ class RestoEngine {
     return _record(next, 'annulation', {'bons': [for (final t in tickets) t.toJson()]}, reason: motive.isEmpty ? null : motive, tickets: tickets);
   }
 
-  /// Préfacture : compteur d'impressions (rien n'est imprimé par le serveur).
+  /// Préfacture : compteur d'impressions et étape (rien n'est imprimé par le serveur).
   RestoResult prebill(RestoOrder order) {
     _requireOpen(order);
-    final next = order.copy()..prebills += 1;
+    if (order.activeLines.isEmpty) throw const RestoRefusal('Commande vide : rien à préfacturer.');
+    final next = order.copy()
+      ..prebills += 1
+      ..stage = RestoStage.afterPrebill(order.stage);
     return _record(next, 'prefacture', {'numero_local': next.localNumber});
   }
 
   RestoResult transfer(RestoOrder order, String tableUuid) {
     _requireOpen(order);
-    final next = order.copy();
-    final from = next.tableUuid;
-    next.tableUuid = tableUuid;
+    final from = order.tableUuid;
+    if (from == null) throw const RestoRefusal('Cette commande n’est pas à une table.');
+    if (from == tableUuid) throw const RestoRefusal('La commande est déjà à cette table.');
+    final next = order.copy()..tableUuid = tableUuid;
     return _record(next, 'transfert_table', {'table_uuid_source': from, 'table_uuid_cible': tableUuid});
   }
 
+  /// Couverts et serveur (lot R-4).
   RestoResult coversAndServer(RestoOrder order, {int? covers, String? serverId}) {
     _requireOpen(order);
     if (covers != null && (covers < 1 || covers > 500)) throw const RestoRefusal('Nombre de couverts invalide (1 à 500).');
@@ -575,17 +783,15 @@ class RestoEngine {
     return _record(next, 'couverts_serveur', {'couverts': covers, 'serveur_id': serverId});
   }
 
-  /// Règlement d'une partie des lignes (après la vente v2 qui les encaisse) puis clôture quand tout est réglé.
-  RestoResult settle(RestoOrder order, Map<String, int> quantities) {
+  /// Clôture après le règlement complet (`full`) par la vente v2 qui le précède dans la file : toutes les lignes actives
+  /// réglées, commande soldée.
+  RestoResult close(RestoOrder order) {
     _requireOpen(order);
+    if (order.activeLines.isEmpty) throw const RestoRefusal('Commande vide : annulez-la plutôt que de la clôturer.');
     final next = order.copy();
-    for (final e in quantities.entries) {
-      final line = next.line(e.key);
-      if (e.value <= 0 || line.settled + e.value > line.quantity) throw const RestoRefusal('Quantité réglée supérieure à la quantité commandée.');
-      line.settled += e.value;
+    for (final l in next.activeLines) {
+      l.settled = l.quantity;
     }
-    final done = next.activeLines.every((l) => l.settled >= l.quantity);
-    if (!done) return _record(next, 'lignes', {'ajoutees': <String>[], 'modifiees': quantities.keys.toList(), 'retirees': <String>[]});
     next.status = 'settled';
     return _record(next, 'cloture', const {});
   }

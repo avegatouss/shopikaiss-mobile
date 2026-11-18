@@ -5,7 +5,17 @@ import 'decimal6.dart';
 
 /// Ligne d'un panier v2, telle que choisie à l'écran (catalogue de la projection v2).
 class V2CartLine {
-  const V2CartLine({required this.productUuid, this.packagingUuid, required this.quantityMicros, this.discount = 0, this.discountEntry, this.fixedPrice, this.lotUuid, this.wholesale = false});
+  const V2CartLine({
+    required this.productUuid,
+    this.packagingUuid,
+    required this.quantityMicros,
+    this.discount = 0,
+    this.discountEntry,
+    this.fixedPrice,
+    this.lotUuid,
+    this.wholesale = false,
+    this.orderLineUuid,
+  });
 
   final String productUuid;
   final String? packagingUuid;
@@ -23,6 +33,9 @@ class V2CartLine {
 
   /// [fixedPrice] est le prix de gros (`ligne.tarif`).
   final bool wholesale;
+
+  /// Ligne de la commande restaurant réglée par cette ligne de vente (`commande.lignes`) ; null hors restaurant.
+  final String? orderLineUuid;
 }
 
 /// Paiement d'une vente (au plus 10) ; [received] = somme remise par le client (espèces seulement), [reference] =
@@ -77,8 +90,10 @@ class V2SaleBuilder {
     bool revision21 = false,
     SaleApproval? approval,
     List<Map<String, dynamic>> passages = const [],
+    ({String orderUuid, String settlementUuid})? order,
   }) {
     if (!revision21 && !extras.isEmpty) throw const V2SaleInvalid('Remise globale, livraison et note : contrat 2.1 requis.');
+    final orderLines = <Map<String, dynamic>>[];
     if (cart.isEmpty) throw const V2SaleInvalid('Panier vide.');
     final lines = <Map<String, dynamic>>[];
     final movements = <Map<String, dynamic>>[];
@@ -117,6 +132,10 @@ class V2SaleBuilder {
         if (revision21) 'tarif': item.wholesale ? 'gros' : 'detail',
         if (item.lotUuid != null) 'lot_uuid': item.lotUuid,
       });
+      if (order != null) {
+        if (item.orderLineUuid == null) throw const V2SaleInvalid('Ligne de vente sans ligne de commande.');
+        orderLines.add({'ligne_commande_uuid': item.orderLineUuid, 'ligne_vente_uuid': lines.last['ligne_uuid'], 'quantite': Decimal6.format(item.quantityMicros)});
+      }
       if (product['stock_illimite'] != true || item.lotUuid != null) {
         movements.add({'mouvement_uuid': newUuid(), 'produit_uuid': item.productUuid, 'lot_uuid': item.lotUuid, 'variation': Decimal6.format(-baseQuantity)});
       }
@@ -179,6 +198,9 @@ class V2SaleBuilder {
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[if (approval != null) approval.toJson()],
       if (passages.isNotEmpty) 'passages': passages,
+      // Règlement complet d'une commande de la caisse maîtresse (RESTAURANT-1 §4.6, Service de table : `full`).
+      if (order != null)
+        'commande': {'commande_uuid': order.orderUuid, 'reglement_uuid': order.settlementUuid, 'type': 'full', 'lignes': orderLines, 'parts': null, 'libelle': null},
     };
   }
 

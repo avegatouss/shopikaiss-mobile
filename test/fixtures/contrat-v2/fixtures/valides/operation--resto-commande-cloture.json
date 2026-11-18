@@ -1,0 +1,89 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000106",
+    "type": "resto_commande",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 345,
+    "cree_le": "2026-11-17T19:35:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000012",
+        "version": 5,
+        "action": "cloture",
+        "fait": {},
+        "motif": null,
+        "autorisations": [],
+        "etat": {
+            "profil": "TABLE_SERVICE",
+            "numero_local": "PF-20261117-L0012",
+            "date_metier": "2026-11-17",
+            "canal": null,
+            "table_uuid": "7ab1e000-0000-4000-8000-0000000000e2",
+            "menu_uuid": null,
+            "couverts": 2,
+            "serveur_id": "7",
+            "client_uuid": null,
+            "client_nom": null,
+            "reference_externe": null,
+            "commentaire": null,
+            "statut": "settled",
+            "etape": "bill_printed",
+            "prefactures": 1,
+            "remise_globale": 0,
+            "lignes": [
+                {
+                    "reglee": "1.000000",
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000001",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000101",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Pizza margherita",
+                    "quantite": "1.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 5000,
+                    "remise": 0,
+                    "tarif": "standard",
+                    "statut": "pending",
+                    "poste_uuid": null,
+                    "commentaire": "Bien cuite",
+                    "parent_ligne_uuid": null,
+                    "envoye": "0.000000"
+                },
+                {
+                    "reglee": "2.000000",
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000002",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000102",
+                    "libelle": "Bière 33 cl",
+                    "quantite": "2.000000",
+                    "prix_unitaire": 1500,
+                    "commentaire": null,
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "coefficient": "1.000000",
+                    "remise": 0,
+                    "tarif": "standard",
+                    "statut": "pending",
+                    "poste_uuid": null,
+                    "parent_ligne_uuid": null,
+                    "envoye": "0.000000"
+                }
+            ],
+            "totaux": {
+                "brut": 8000,
+                "remises": 0,
+                "a_payer": 8000,
+                "regle": 8000
+            }
+        }
+    },
+    "empreinte": "3243263a47bf8b592ba63e052b8663a189aa7d507a6e0bae6e4c033500cbaea5"
+}

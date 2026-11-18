@@ -52,6 +52,13 @@ class FakeV2Server implements V2Transport {
   Map<String, dynamic> Function(Map request)? passVerdict;
   bool passesUnreachable = false;
 
+  /// Bloc `restaurant` de `/etat` (capacité `restaurant.v1`) ; null : absent. Fonctions restreintes rendues par `/etat`.
+  Map<String, dynamic>? restaurant;
+  List<Map<String, dynamic>> restricted = const [];
+
+  /// Raison rendue avec un état forcé par [verdict] (`recue` en attente de version, `a_arbitrer` d'un code restaurant).
+  Map<String, dynamic>? Function(Map<String, dynamic> op)? reasonFor;
+
   /// Capacités rendues à l'appairage et par `/etat`.
   List<String> capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes'];
 
@@ -172,7 +179,7 @@ class FakeV2Server implements V2Transport {
           'heure_serveur': '2026-10-29T08:00:00Z',
           'protocole': {'courant': 2, 'minimum': 2, 'maximum': 2},
           'capacites_serveur': capabilities,
-          'fonctions_restreintes': [],
+          'fonctions_restreintes': restricted,
           'autorisation': {
             'vente_locale': authorized,
             'version': '5',
@@ -182,6 +189,7 @@ class FakeV2Server implements V2Transport {
           'versions': {'politiques': '$sequence', 'calcul': '1', 'schema_instantane': '1'},
           'delais': {'changements_secondes': 10, 'reprise_max_secondes': 60},
           'notifications': {'mode': 'sondage', 'url': null},
+          'restaurant': ?restaurant,
         }, 'etat.json');
       case ('POST', '/instantanes'):
         _requireBody(payload, 'instantanes.json#/\$defs/demande');
@@ -276,7 +284,7 @@ class FakeV2Server implements V2Transport {
     if (existing != null) return existing['operation']['empreinte'] == op['empreinte'] ? _result(uuid) : reject('conflit_contenu');
     final state = verdict?.call(op) ?? 'integree';
     received[uuid] = {'operation': op, 'etat': state, 'version': 1, 'numero': 'V-20261029-${(++saleNumber).toString().padLeft(4, '0')}',
-      'raison': state == 'a_arbitrer' ? {'code': 'stock.negatif', 'message': 'Stock insuffisant', 'details': null} : null};
+      'raison': reasonFor?.call(op) ?? (state == 'a_arbitrer' ? {'code': 'stock.negatif', 'message': 'Stock insuffisant', 'details': null} : null)};
     return _result(uuid);
   }
 }

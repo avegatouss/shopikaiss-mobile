@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, lot 8, passes.evenement) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-2) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -1181,6 +1181,30 @@ const contractV2Schemas = <String, String>{
                                     ]
                                 }
                             }
+                        },
+                        "commande": {
+                            "description": "Capacité restaurant.v1 : sur une resto_commande intégrée, la commande et sa version (numéro = numéro serveur).",
+                            "type": "object",
+                            "required": [
+                                "commande_uuid",
+                                "numero",
+                                "version"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "commande_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "numero": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                },
+                                "version": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                }
+                            }
                         }
                     }
                 }
@@ -1928,6 +1952,447 @@ const contractV2Schemas = <String, String>{
     }
 }
 ''',
+  'donnees-restaurant-1.json': r'''{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "donnees-restaurant-1.json",
+    "title": "Données des changements restaurant.* (révision restaurant-1, lots R-1 et R-2 ; RESTAURANT-1 §3). Rendues aux seuls clients à qui restaurant.v1 est accordée. R-1 : critiques ; R-2 (salle, table, menu, categorie) : non critiques.",
+    "$defs": {
+        "restaurant.point_de_vente": {
+            "description": "Point de vente de la boutique (clé = son uuid). Le mode du terminal en dépend : Boutique, Service de table ou Restaurant.",
+            "type": "object",
+            "required": [
+                "code",
+                "nom",
+                "profil",
+                "actif",
+                "terminaux",
+                "membres",
+                "reglages_vente"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 20
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "profil": {
+                    "enum": [
+                        null,
+                        "TABLE_SERVICE",
+                        "PRODUCTION"
+                    ]
+                },
+                "actif": {
+                    "type": "boolean"
+                },
+                "terminaux": {
+                    "description": "Terminaux actifs qui travaillent dans ce point de vente (rattachés, plus ceux sans rattachement pour le point de vente principal).",
+                    "type": "array",
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "membres": {
+                    "description": "null : toute affiliation de la boutique y travaille ; sinon les seuls opérateurs admis (operateur_id).",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "array",
+                            "maxItems": 2000,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/identifiant_serveur"
+                            }
+                        }
+                    ]
+                },
+                "reglages_vente": {
+                    "type": "object",
+                    "required": [
+                        "changement_client_paiement",
+                        "reference_plateforme_avant_envoi",
+                        "verrouillage_minutes"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Valeurs résolues : surcharge du point de vente, sinon valeur de la boutique.",
+                    "properties": {
+                        "changement_client_paiement": {
+                            "type": "boolean"
+                        },
+                        "reference_plateforme_avant_envoi": {
+                            "type": "boolean"
+                        },
+                        "verrouillage_minutes": {
+                            "description": "0 = verrouillage désactivé.",
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 1440
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        },
+        "restaurant.maitre": {
+            "description": "Caisse maîtresse du point de vente (clé = maitre:<uuid du point de vente>). Je suis maître si appareil_uuid est mon appareil ET epoque mon époque d’appairage. terminal_uuid null : aucune caisse maîtresse, le web a la main.",
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "generation",
+                "terminal_uuid",
+                "appareil_uuid",
+                "epoque",
+                "designe_le"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Croît à chaque désignation, changement ou retrait ; 0 = jamais désigné."
+                },
+                "terminal_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "appareil_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "epoque": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    ]
+                },
+                "designe_le": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                }
+            }
+        },
+        "restaurant.reglages": {
+            "description": "Réglages restaurant résolus pour le point de vente (clé = reglages:<uuid du point de vente>) : valeur de la boutique, profil du point de vente.",
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "envoi_production",
+                "plusieurs_commandes_par_table",
+                "prefixe_commande",
+                "motif_annulation_commande",
+                "registre_obligatoire",
+                "prefacture_a_la_demande",
+                "retard_production_minutes",
+                "sections_z",
+                "fuseau",
+                "impression_mode",
+                "repli_premier_poste_actif",
+                "assistant"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "envoi_production": {
+                    "type": "boolean",
+                    "description": "restaurant.table_service_send_to_production (Service de table) ou restaurant.production_send_to_stations (Restaurant) ; faux sans profil. Éteint : « Envoyer » devient « Valider », aucun bon."
+                },
+                "plusieurs_commandes_par_table": {
+                    "type": "boolean"
+                },
+                "prefixe_commande": {
+                    "type": "string",
+                    "maxLength": 30,
+                    "description": "Préfixe du numéro local, à normaliser par la caisse (majuscules, caractères admis)."
+                },
+                "motif_annulation_commande": {
+                    "type": "boolean"
+                },
+                "registre_obligatoire": {
+                    "type": "boolean"
+                },
+                "prefacture_a_la_demande": {
+                    "type": "boolean"
+                },
+                "retard_production_minutes": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 240
+                },
+                "sections_z": {
+                    "type": "array",
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/code"
+                    }
+                },
+                "fuseau": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "description": "Fuseau de la journée métier (restaurant.timezone, sinon celui de la boutique)."
+                },
+                "impression_mode": {
+                    "enum": [
+                        "register",
+                        "station"
+                    ],
+                    "description": "Indicatif : hors ligne, chaque bon part à toutes les cibles de son poste (plan §2)."
+                },
+                "repli_premier_poste_actif": {
+                    "type": "boolean",
+                    "description": "Paramètre à créer (plan §2 bis), absent du web : toujours faux en R-1."
+                },
+                "assistant": {
+                    "type": "object",
+                    "required": [
+                        "max_operations_par_jour",
+                        "max_montant_par_operation",
+                        "max_montant_par_jour",
+                        "max_remise_pourcent"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Plafonds d’une autorisation par un assistant manager (approval.assistant.*) ; 0 = illimité, sauf la remise.",
+                    "properties": {
+                        "max_operations_par_jour": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000
+                        },
+                        "max_montant_par_operation": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "max_montant_par_jour": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "max_remise_pourcent": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100
+                        }
+                    }
+                }
+            }
+        },
+        "restaurant.salle": {
+            "description": "Salle de la boutique (clé = uuid de restaurant_spaces). Par boutique, sans point de vente.",
+            "type": "object",
+            "required": [
+                "code",
+                "nom",
+                "ordre",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "restaurant.table": {
+            "description": "Table (clé = uuid de restaurant_tables). L'occupation n'est pas publiée : elle appartient à la caisse maîtresse.",
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "salle_uuid",
+                "nom",
+                "code",
+                "capacite",
+                "ordre",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "salle_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "code": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 40
+                },
+                "capacite": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "integer",
+                            "minimum": 0
+                        }
+                    ]
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "restaurant.menu": {
+            "description": "Menu du Service de table (clé = uuid de restaurant_menus) : produits et catégories qu'il propose.",
+            "type": "object",
+            "required": [
+                "nom",
+                "actif",
+                "produits",
+                "categories"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "actif": {
+                    "type": "boolean"
+                },
+                "produits": {
+                    "type": "array",
+                    "maxItems": 5000,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                },
+                "categories": {
+                    "type": "array",
+                    "maxItems": 500,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    }
+                }
+            }
+        },
+        "restaurant.categorie": {
+            "description": "Réglages restaurant d'une catégorie (clé = uuid de la catégorie ; réponse de B à Q16) : onglets de la caisse. Publié pour chaque catégorie qui a des réglages restaurant ; sans entité, la catégorie est visible, sans parent ni poste. `poste_uuid` sert au routage à partir de R-3 (postes publiés avec R-3).",
+            "type": "object",
+            "required": [
+                "parent_uuid",
+                "poste_uuid",
+                "ordre",
+                "visible"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "parent_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "poste_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "visible": {
+                    "type": "boolean"
+                }
+            }
+        }
+    }
+}
+''',
   'donnees.json': r'''{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "donnees.json",
@@ -2191,6 +2656,60 @@ const contractV2Schemas = <String, String>{
         "mode": { "enum": ["sondage", "sse"] },
         "url": { "type": ["string", "null"], "maxLength": 300 }
       }
+    },
+    "restaurant": { "$ref": "#/$defs/restaurant" }
+  },
+  "$defs": {
+    "restaurant": {
+      "description": "Révision restaurant-1 (RESTAURANT-1 §2.3) : rendu SEULEMENT aux terminaux à qui restaurant.v1 est accordée. Double l’entité restaurant.maitre pour un refus rapide ; en cas de désaccord, la caisse retient le plus restrictif (non maîtresse).",
+      "type": "object",
+      "required": ["point_de_vente_uuid", "profil", "maitre", "generation", "derniers_numeros"],
+      "additionalProperties": false,
+      "properties": {
+        "point_de_vente_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+        "profil": { "enum": [null, "TABLE_SERVICE", "PRODUCTION"] },
+        "maitre": { "type": "boolean", "description": "Vrai si cet appareil ET cette époque sont la caisse maîtresse désignée de son point de vente." },
+        "generation": { "$ref": "commun.json#/$defs/version" },
+        "derniers_numeros": {
+          "description": "Rendu seulement à l’appareil maître : derniers numéros reçus de lui (relecture B, Q1). Toujours null avant le lot R-2.",
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["commande", "bons"],
+              "additionalProperties": false,
+              "properties": {
+                "commande": { "oneOf": [{ "type": "null" }, { "type": "string", "maxLength": 40 }] },
+                "bons": {
+                  "description": "Dernier numero_jour reçu par poste. Liste et non carte : le profil SK-SCHEMA-1 n’a que des objets fermés.",
+                  "type": "array",
+                  "maxItems": 50,
+                  "items": {
+                    "type": "object",
+                    "required": ["poste_uuid", "numero_jour"],
+                    "additionalProperties": false,
+                    "properties": {
+                      "poste_uuid": { "$ref": "commun.json#/$defs/uuid" },
+                      "numero_jour": { "type": "string", "maxLength": 30 }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "reprise": {
+      "description": "Déclaration de reprise d’une caisse restaurée (RESTAURANT-1 §2.3) : en-tête X-Caisse-Reprise de GET /etat, en JSON compact ou en base64url de ce JSON. Appareil et époque d’origine de la sauvegarde, dernière séquence qu’elle contient.",
+      "type": "object",
+      "required": ["appareil_uuid", "epoque", "derniere_sequence"],
+      "additionalProperties": false,
+      "properties": {
+        "appareil_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "epoque": { "type": "integer", "minimum": 1 },
+        "derniere_sequence": { "type": "integer", "minimum": 0 }
+      }
     }
   }
 }
@@ -2294,6 +2813,9 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/retour"
+        },
+        {
+            "$ref": "#/$defs/resto_commande"
         }
     ],
     "$defs": {
@@ -2585,6 +3107,9 @@ const contractV2Schemas = <String, String>{
                     "items": {
                         "$ref": "#/$defs/passage"
                     }
+                },
+                "commande": {
+                    "$ref": "#/$defs/commande_vente"
                 }
             }
         },
@@ -3430,6 +3955,1137 @@ const contractV2Schemas = <String, String>{
                 }
             },
             "description": "Retour hors ligne limité (REVISION-2.1 §3.4, capacité retour.especes, politique retours.mode = especes) : espèces, vente émise par ce terminal."
+        },
+        "commande_vente": {
+            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.6) : la vente règle une commande de la caisse maîtresse. Sans la capacité : rejet_protocole capacite_absente. La vente est intégrée dans tous les cas où elle l'aurait été sans ce champ ; un lien impossible part en arbitrage sur la commande, jamais la vente. Révision R-2 : seul `full` est relié, `items` et `shares` (R-4) sont reçus, la vente intégrée et le lien arbitré `restaurant.hors_lot`.",
+            "type": "object",
+            "required": [
+                "commande_uuid",
+                "reglement_uuid",
+                "type",
+                "lignes",
+                "parts",
+                "libelle"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "reglement_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Règlement créé par la caisse : restaurant_order_settlements.uuid."
+                },
+                "type": {
+                    "enum": [
+                        "full",
+                        "items",
+                        "shares"
+                    ]
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "ligne_commande_uuid",
+                            "ligne_vente_uuid",
+                            "quantite"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "ligne_commande_uuid": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            },
+                            "ligne_vente_uuid": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            },
+                            "quantite": {
+                                "$ref": "commun.json#/$defs/quantite"
+                            }
+                        }
+                    }
+                },
+                "parts": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "array",
+                            "minItems": 2,
+                            "maxItems": 50,
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "libelle",
+                                    "montant",
+                                    "paiements"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "libelle": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 120
+                                    },
+                                    "montant": {
+                                        "$ref": "commun.json#/$defs/montant"
+                                    },
+                                    "paiements": {
+                                        "description": "Index des paiements de la vente qui composent la part.",
+                                        "type": "array",
+                                        "minItems": 1,
+                                        "maxItems": 20,
+                                        "items": {
+                                            "type": "integer",
+                                            "minimum": 0
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                },
+                "libelle": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                }
+            }
+        },
+        "ligne_commande": {
+            "description": "Ligne de commande dans l'état résultant. `lignes` contient TOUTES les lignes de la commande, retirées comprises (statut cancelled) : une ligne n'en disparaît jamais. Libellé et prix figés à l'ajout.",
+            "type": "object",
+            "required": [
+                "ligne_uuid",
+                "produit_uuid",
+                "conditionnement_uuid",
+                "lot_uuid",
+                "libelle",
+                "quantite",
+                "coefficient",
+                "prix_unitaire",
+                "remise",
+                "tarif",
+                "statut",
+                "poste_uuid",
+                "commentaire",
+                "parent_ligne_uuid",
+                "envoye",
+                "reglee"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "ligne_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "conditionnement_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "lot_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "libelle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "quantite": {
+                    "$ref": "commun.json#/$defs/quantite"
+                },
+                "coefficient": {
+                    "$ref": "commun.json#/$defs/quantite"
+                },
+                "prix_unitaire": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "remise": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "tarif": {
+                    "description": "promotion, happy_hour et staff sont refusés tant que les promotions sont restreintes.",
+                    "enum": [
+                        "standard",
+                        "free",
+                        "manual_discount"
+                    ]
+                },
+                "statut": {
+                    "enum": [
+                        "pending",
+                        "sent",
+                        "cancelled"
+                    ]
+                },
+                "poste_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "commentaire": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "parent_ligne_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "envoye": {
+                    "$ref": "commun.json#/$defs/quantite",
+                    "description": "Quantité nette annoncée aux postes (Σ ajouts − Σ annulations des bons). 0 en R-2."
+                },
+                "reglee": {
+                    "$ref": "commun.json#/$defs/quantite",
+                    "description": "Quantité réglée. Un réglé supérieur à ce que le serveur connaît est accepté : il attend les ventes."
+                }
+            }
+        },
+        "etat_commande": {
+            "description": "État complet de la commande APRÈS le fait (une version par validation de l'opérateur, réponse de B à Q2).",
+            "type": "object",
+            "required": [
+                "profil",
+                "numero_local",
+                "date_metier",
+                "canal",
+                "table_uuid",
+                "menu_uuid",
+                "couverts",
+                "serveur_id",
+                "client_uuid",
+                "client_nom",
+                "reference_externe",
+                "commentaire",
+                "statut",
+                "etape",
+                "prefactures",
+                "remise_globale",
+                "lignes",
+                "totaux"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "profil": {
+                    "enum": [
+                        "TABLE_SERVICE",
+                        "PRODUCTION"
+                    ]
+                },
+                "numero_local": {
+                    "description": "Forme de B (Q1) : préfixe publié normalisé (majuscules, A-Z et 0-9 seulement, 23 caractères au plus), date métier AAAAMMJJ, puis L et 4 à 6 chiffres : PF-20261117-L0012.",
+                    "type": "string",
+                    "pattern": "^[A-Z0-9]{1,23}-[0-9]{8}-L[0-9]{4,6}$"
+                },
+                "date_metier": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "canal": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "string",
+                            "maxLength": 40
+                        }
+                    ]
+                },
+                "table_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "menu_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "couverts": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 500
+                        }
+                    ]
+                },
+                "serveur_id": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        }
+                    ]
+                },
+                "client_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "client_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 160
+                },
+                "reference_externe": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 80
+                },
+                "commentaire": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 2000
+                },
+                "statut": {
+                    "enum": [
+                        "open",
+                        "settled",
+                        "cancelled"
+                    ]
+                },
+                "etape": {
+                    "enum": [
+                        null,
+                        "waiting",
+                        "bill_printed",
+                        "customer_validated",
+                        "amended"
+                    ]
+                },
+                "prefactures": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 10000
+                },
+                "remise_globale": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "lignes": {
+                    "type": "array",
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/ligne_commande"
+                    }
+                },
+                "totaux": {
+                    "type": "object",
+                    "required": [
+                        "brut",
+                        "remises",
+                        "a_payer",
+                        "regle"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "brut": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "remises": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "a_payer": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "regle": {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    }
+                }
+            }
+        },
+        "bon": {
+            "description": "Bon de production (RESTAURANT-1 §4.4), créé une fois par la caisse maîtresse. Reçu en R-2 sans être intégré : un fait qui porte des bons part en arbitrage `restaurant.hors_lot` (lot R-3), conservé et rejouable.",
+            "type": "object",
+            "required": [
+                "bon_uuid",
+                "poste_uuid",
+                "numero",
+                "numero_jour",
+                "type",
+                "premier_envoi",
+                "cree_le",
+                "empreinte_contenu",
+                "lignes"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "bon_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "poste_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "numero": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Numéro du bon dans (commande, poste) : 1, 2, 3…"
+                },
+                "numero_jour": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9]{1,10}-[0-9]{8}-[0-9]{4,6}$",
+                    "description": "Compteur du poste et du jour, d'après ECAS : CUI-20261107-0001."
+                },
+                "type": {
+                    "enum": [
+                        "envoi",
+                        "annulation"
+                    ]
+                },
+                "premier_envoi": {
+                    "type": "boolean"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "empreinte_contenu": {
+                    "$ref": "commun.json#/$defs/empreinte",
+                    "description": "SHA-256 SK-JCS-1 du bon sans ce champ."
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "ligne_uuid",
+                            "libelle",
+                            "quantite",
+                            "commentaire",
+                            "action"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "ligne_uuid": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            },
+                            "libelle": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 240
+                            },
+                            "quantite": {
+                                "$ref": "commun.json#/$defs/quantite"
+                            },
+                            "commentaire": {
+                                "type": [
+                                    "string",
+                                    "null"
+                                ],
+                                "maxLength": 500
+                            },
+                            "action": {
+                                "enum": [
+                                    "add",
+                                    "cancel"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "resto_commande_ouverture": {
+            "description": "Version 1 seulement : ouvre la commande (lignes vides).",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "ouverture"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [],
+                    "additionalProperties": false,
+                    "properties": {}
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_lignes": {
+            "description": "Lignes en attente ajoutées, modifiées ou retirées (statut cancelled).",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "lignes"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "ajoutees",
+                        "modifiees",
+                        "retirees"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "ajoutees": {
+                            "type": "array",
+                            "maxItems": 200,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            }
+                        },
+                        "modifiees": {
+                            "type": "array",
+                            "maxItems": 200,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            }
+                        },
+                        "retirees": {
+                            "type": "array",
+                            "maxItems": 200,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            }
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_prefacture": {
+            "description": "Préfacture imprimée par la caisse ; rien n'est imprimé côté serveur.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "prefacture"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "numero_local"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "numero_local": {
+                            "type": "string",
+                            "pattern": "^[A-Z0-9]{1,23}-[0-9]{8}-L[0-9]{4,6}$"
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_transfert_table": {
+            "description": "Transfert de la commande vers une autre table.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "transfert_table"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "table_uuid_source",
+                        "table_uuid_cible"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "table_uuid_source": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "table_uuid_cible": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_annulation": {
+            "description": "Annulation de la commande. `bons` : bons d'ANNULATION (R-3) ; non vide en R-2 = arbitrage restaurant.hors_lot.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "annulation"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "bons"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "bons": {
+                            "type": "array",
+                            "maxItems": 50,
+                            "items": {
+                                "$ref": "#/$defs/bon"
+                            }
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_cloture": {
+            "description": "Constat que la commande est soldée : refusé si Σ réglé < Σ quantités actives.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "cloture"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [],
+                    "additionalProperties": false,
+                    "properties": {}
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_envoi": {
+            "description": "Lot R-3 : reçu et conservé, arbitré restaurant.hors_lot en R-2.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "envoi"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "bons"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "bons": {
+                            "type": "array",
+                            "maxItems": 50,
+                            "items": {
+                                "$ref": "#/$defs/bon"
+                            }
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_annulation_ligne": {
+            "description": "Lot R-3 : reçu et conservé, arbitré restaurant.hors_lot en R-2.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "annulation_ligne"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "ligne_uuid",
+                        "quantite",
+                        "bons"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "ligne_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "quantite": {
+                            "$ref": "commun.json#/$defs/quantite"
+                        },
+                        "bons": {
+                            "type": "array",
+                            "maxItems": 50,
+                            "items": {
+                                "$ref": "#/$defs/bon"
+                            }
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "contenu_resto_commande": {
+            "description": "Un fait sur une commande et son état résultant (RESTAURANT-1 §4.3). Révision R-2 : ouverture, lignes, prefacture, transfert_table, annulation, cloture ; envoi et annulation_ligne reçus pour R-3. Les autres actions du §4.3 arrivent avec leur lot.",
+            "oneOf": [
+                {
+                    "$ref": "#/$defs/resto_commande_ouverture"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_lignes"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_prefacture"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_transfert_table"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_annulation"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_cloture"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_envoi"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_annulation_ligne"
+                }
+            ]
+        },
+        "resto_commande": {
+            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.1, §4.3) : seule la caisse maîtresse émet ce type. Sans la capacité : rejet_protocole capacite_absente.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "resto_commande"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_resto_commande"
+                }
+            }
         }
     }
 }
@@ -3615,6 +5271,30 @@ const contractV2Schemas = <String, String>{
                                         "V1",
                                         "COMPLETE"
                                     ]
+                                }
+                            }
+                        },
+                        "commande": {
+                            "description": "Capacité restaurant.v1 : sur une resto_commande intégrée, la commande et sa version (numéro = numéro serveur).",
+                            "type": "object",
+                            "required": [
+                                "commande_uuid",
+                                "numero",
+                                "version"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "commande_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "numero": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                },
+                                "version": {
+                                    "type": "integer",
+                                    "minimum": 1
                                 }
                             }
                         }
