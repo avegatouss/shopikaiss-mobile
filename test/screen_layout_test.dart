@@ -11,6 +11,8 @@ import 'package:shopikaiss_terminal/src/offline/engine.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
 import 'package:shopikaiss_terminal/src/offline/offline_register_page.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
+import 'package:shopikaiss_terminal/src/restaurant/resto_context.dart';
+import 'package:shopikaiss_terminal/src/restaurant/resto_engine.dart';
 import 'package:shopikaiss_terminal/src/terminal/terminal_channel.dart';
 import 'package:shopikaiss_terminal/src/terminal/terminal_session.dart';
 import 'package:shopikaiss_terminal/src/ui/screen_profile.dart';
@@ -116,6 +118,81 @@ class _ApprovalEngine extends OfflineEngine {
   }
 }
 
+/// Caisse maîtresse d'un Service de table, en mémoire : le moteur pur du restaurant, sans file ni serveur.
+class _RestaurantEngine extends OfflineEngine {
+  _RestaurantEngine({required super.store, required super.transport});
+
+  var _ids = 0;
+  late final _resto = RestoEngine(newUuid: () => '00000000-0000-4000-8000-${(++_ids).toString().padLeft(12, '0')}', now: DateTime.now, stations: const {}, counters: RestoCounters(), sendToStations: false);
+  final orders = <String, RestoOrder>{};
+  final actions = <String>[];
+  List<CartPayment>? settledWith;
+
+  @override
+  RestoContext? get restaurant => const RestoContext(
+    pointOfSaleUuid: 'pdv',
+    pointOfSaleName: 'Salle',
+    profile: 'TABLE_SERVICE',
+    master: true,
+    generation: '1',
+    rooms: [RestoRoom(uuid: 'r1', code: 'S', name: 'Terrasse', order: 1)],
+    tables: [RestoTable(uuid: 't1', roomUuid: 'r1', name: 'T1', capacity: 4, order: 1), RestoTable(uuid: 't2', roomUuid: 'r1', name: 'T2', order: 2)],
+  );
+
+  @override
+  String? restaurantBlocker(Operator operator) => null;
+
+  @override
+  bool hasRight(Operator operator, String right) => true;
+
+  RestoOrderView _view(RestoOrder o) => RestoOrderView(order: o, payable: o.totals(const RestoVat()).payable);
+
+  RestoOrderView _keep(RestoResult r, String action) {
+    actions.add('$action:${r.event.version}');
+    orders[r.order.uuid] = r.order;
+    notifyListeners();
+    return _view(r.order);
+  }
+
+  @override
+  Future<List<RestoOrderView>> restaurantOrders({bool all = false}) async => [for (final o in orders.values) if (all || o.isOpen) _view(o)];
+
+  @override
+  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers}) async =>
+      _keep(_resto.open(prefix: 'PF', businessDay: '2026-11-17', profile: 'TABLE_SERVICE', tableUuid: tableUuid, covers: covers), 'ouverture');
+
+  @override
+  Future<RestoOrderView> restoEditLines(
+    Operator operator,
+    String orderUuid, {
+    List<(CartLine, String?)> added = const [],
+    Map<String, int> quantities = const {},
+    Map<String, String?> comments = const {},
+    Set<String> removed = const {},
+  }) async => _keep(
+    _resto.editLines(orders[orderUuid]!, added: [
+      for (final (l, c) in added) RestoNewLine(productUuid: '${l.product.id}', label: l.label, quantity: l.quantity.toInt(), unitPrice: l.unitPrice, comment: c),
+    ], quantities: quantities, comments: comments, removed: removed),
+    'lignes',
+  );
+
+  @override
+  Future<RestoOrderView> restoPrebill(Operator operator, String orderUuid) async => _keep(_resto.prebill(orders[orderUuid]!), 'prefacture');
+
+  @override
+  Future<List<CartLine>> restoCart(String orderUuid) async => [
+    for (final l in orders[orderUuid]!.activeLines) CartLine(product: snapshot!.byId(int.parse(l.productUuid))!, quantity: BigInt.from(l.quantity), fixedPrice: l.unitPrice),
+  ];
+
+  @override
+  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) async {
+    settledWith = payments;
+    final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid);
+    _keep(_resto.close(orders[orderUuid]!), 'cloture');
+    return sale;
+  }
+}
+
 Future<TerminalSession> _session({
   required double inches,
   String layout = 'auto',
@@ -123,6 +200,7 @@ Future<TerminalSession> _session({
   bool permanent = false,
   bool rich = false,
   bool approver = false,
+  bool restaurant = false,
 }) async {
   final snapshot = _snapshot();
   if (approver) {
@@ -161,7 +239,11 @@ Future<TerminalSession> _session({
       StoreKeys.snapshotAt: DateTime.now().toUtc().toIso8601String(),
       StoreKeys.lastContact: DateTime.now().toUtc().toIso8601String(),
     });
-  final engine = approver ? _ApprovalEngine(store: store, transport: _Offline()) : OfflineEngine(store: store, transport: _Offline());
+  final engine = restaurant
+      ? _RestaurantEngine(store: store, transport: _Offline())
+      : approver
+      ? _ApprovalEngine(store: store, transport: _Offline())
+      : OfflineEngine(store: store, transport: _Offline());
   await engine.load('https://boutique.exemple.ci');
   final settings = AppSettings(
     shopUrl: 'https://boutique.exemple.ci/caisse',
@@ -287,6 +369,70 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('1 ligne(s)'), findsOneWidget);
       expect(find.text('Suspendus (0)'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Service de table : salle, ouverture d’une table, ajouts enregistrés en une version, préfacture, encaissement puis clôture', (tester) async {
+      final session = await _session(inches: 10.1, restaurant: true);
+      final engine = session.offline as _RestaurantEngine;
+      await _pump(tester, const Size(1280, 800), session);
+      await tester.tap(find.text('Salle'));
+      await tester.pumpAndSettle();
+      expect(find.text('Terrasse'), findsNothing, reason: 'une seule salle : pas d’onglets');
+      expect(find.text('Libre · 4 places'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('table-t1')));
+      await tester.pumpAndSettle();
+      expect(find.text('4 couverts'), findsOneWidget);
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('T1 · PF-20261117-L0001'), findsOneWidget);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 3 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      expect(find.text('Préfacture'), findsNothing, reason: 'modifications à enregistrer d’abord');
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      expect(engine.actions, ['ouverture:1', 'lignes:2'], reason: 'trois ajouts = une seule version');
+      expect(find.text('7 000 F'), findsWidgets);
+      await tester.tap(find.text('Préfacture'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('PRÉFACTURE'), findsOneWidget, reason: 'sans imprimante, la préfacture s’affiche');
+      expect(find.textContaining('n’est pas un ticket de caisse'), findsOneWidget);
+      await tester.tap(find.text('Fermer'));
+      await tester.pumpAndSettle();
+      expect(find.text('Préfacture imprimée'), findsOneWidget);
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      expect(find.text('Valider la vente'), findsOneWidget);
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      expect(engine.settledWith!.single.amount, 7000);
+      expect(engine.actions, ['ouverture:1', 'lignes:2', 'prefacture:3', 'cloture:4']);
+      expect(find.text('Commande réglée et close.'), findsOneWidget);
+      await tester.tap(find.text('Retour à la salle'));
+      await tester.pumpAndSettle();
+      expect(find.text('Libre · 4 places'), findsOneWidget, reason: 'table libérée');
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Service de table sur téléphone 5 pouces : commande et ajouts en onglets, aucun débordement', (tester) async {
+      final session = await _session(inches: 5.0, restaurant: true);
+      await _pump(tester, const Size(360, 640), session);
+      await tester.tap(find.text('Salle'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('table-t2')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ajouter'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Article numéro 1 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Commande (1)'));
+      await tester.pumpAndSettle();
+      expect(find.text('À ajouter'), findsOneWidget);
+      expect(find.text('Enregistrer'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

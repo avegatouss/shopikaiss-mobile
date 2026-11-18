@@ -7,6 +7,9 @@ import 'package:uuid/uuid.dart';
 
 import '../app_settings.dart';
 import '../diagnostics.dart';
+import '../restaurant/resto_context.dart';
+import '../restaurant/resto_engine.dart';
+import '../sync_v2/decimal6.dart';
 import '../terminal/terminal_session.dart';
 import '../web/shop_browser_page.dart';
 import '../web/shop_browser_policy.dart';
@@ -20,6 +23,8 @@ import 'pass_sheet.dart';
 import 'pending_operations_page.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
+
+part 'restaurant_screen.dart';
 
 const _offline = Color(0xFFB45309);
 
@@ -51,6 +56,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Un second encaissement du même panier (double appui, écran rejoué) est refusé par la base.
   String _draftUuid = const Uuid().v4();
   Operator? _operator;
+
+  /// Plan de salle affiché à la place de la caisse (Service de table, capacité `restaurant.v1`).
+  bool _floor = false;
   Timer? _probe;
   Map<int, BigInt> _sold = {};
 
@@ -874,6 +882,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() => _operator = o)))
                     : !_engine.sessionOpen
                     ? _scrollable(_SessionOpening(engine: _engine, operator: _operator!, onOpened: () => setState(() {})))
+                    : _floor && (_engine.restaurant?.tableService ?? false)
+                    ? _RestaurantFloor(host: this)
                     : _register(snapshot),
               ),
             ],
@@ -977,6 +987,20 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             },
           ),
           const SizedBox(width: 8),
+          if (_engine.restaurant?.tableService ?? false) ...[
+            SegmentedButton<bool>(
+              showSelectedIcon: false,
+              style: const ButtonStyle(visualDensity: VisualDensity.compact),
+              segments: const [
+                ButtonSegment(value: true, icon: Icon(Icons.table_restaurant, size: 18), label: Text('Salle')),
+                ButtonSegment(value: false, icon: Icon(Icons.point_of_sale, size: 18), label: Text('Caisse')),
+              ],
+              selected: {_floor},
+              // Le panier de la caisse reste à part : on ne passe en salle qu'avec un panier vide.
+              onSelectionChanged: _cart.isEmpty ? (value) => setState(() => _floor = value.single) : null,
+            ),
+            const SizedBox(width: 8),
+          ],
           if (operator != null)
             action(operator.name, Icons.person_outline, _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true) ? () => setState(() => _operator = null) : null),
           action('Ventes récentes', Icons.history, _openJournal),

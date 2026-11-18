@@ -51,6 +51,8 @@ class TerminalSession extends ChangeNotifier {
       legacyTransport: HttpRegisterTransport(appVersion: package.version),
       declaredPayments: true,
       contract21: true,
+      // Écran de salle présent (Service de table) : annonce restaurant.v1, accordée par le serveur sur la démo seulement.
+      announceRestaurant: true,
       imageDirectory: p.join(await getDatabasesPath(), 'images'),
     );
     if (settings.configured) await offline.load(settings.origin);
