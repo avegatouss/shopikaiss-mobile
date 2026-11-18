@@ -1,5 +1,15 @@
 # Préparation Windows — Restaurant et service de table
 
+## Mise à jour du 18 novembre 2026
+
+Les commits B `7a7e7d1` et `e0dee59` sont intégrés. Les contrats R-1/R-2 sont validés par A ; R-3 est également livré côté serveur, mais pas encore repris dans le moteur B intégré ici.
+
+La commande IPC `restaurantView` consulte le contexte et les commandes du moteur partagé après identification de l'opérateur. Elle ne crée aucune opération. Le bouton « Salle et tables » ouvre la présentation Windows, avec actualisation explicite, motif de non-désignation maîtresse, numéros des commandes et attente de synchronisation. Plusieurs commandes sur la même table restent des entrées distinctes ; leurs totaux ne sont pas additionnés par l'écran.
+
+La capacité restaurant n'est pas encore annoncée par l'hôte Windows : l'écran affiche son indisponibilité tant que le moteur ne fournit pas de contexte. Les actions de salle restent désactivées. Ne pas considérer cette livraison comme une caisse restaurant opérationnelle.
+
+Demande à B consignée dans JOURNAL : commandes de l'adaptateur partagé pour ouverture, lignes, préfacture, transfert, annulation, règlement complet et clôture, avec sérialisation et reprise des identifiants après réponse perdue. C ne prend pas l'opérateur privé de B pour appeler directement les mutations métier. L'annonce Windows attend ces commandes et les schémas critiques R-3. Les imprimantes, afficheurs et leur recette restent à raccorder ensuite.
+
 17 novembre 2026. Travail indépendant demandé par le responsable, en attendant les livraisons A/B.
 
 ## Livré côté présentation

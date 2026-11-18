@@ -117,6 +117,15 @@ void main() {
     await directory.delete(recursive: true);
   });
 
+  test('restaurant consultation requires login and never creates an operation', () async {
+    final before = (await store.operations()).length;
+    final result = await host.call(HostCommand.restaurantView);
+    expect(result['available'], false);
+    expect((await store.operations()).length, before);
+    await host.call(HostCommand.logout);
+    await expectLater(host.call(HostCommand.restaurantView), throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'operator_required')));
+  });
+
   Future<void> prepare() async {
     final view = await host.call(HostCommand.view);
     final product = (view['products'] as List).first as Map;

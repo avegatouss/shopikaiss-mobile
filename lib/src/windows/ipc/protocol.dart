@@ -50,6 +50,7 @@ enum HostCommand {
   history,
   cashDocuments,
   cashDocument,
+  restaurantView,
   reprint,
   printTicket,
   synchronize,

@@ -3,6 +3,7 @@ import '../../offline/ticket.dart';
 import '../../offline/money.dart';
 import 'host_server.dart';
 import 'protocol.dart';
+import 'restaurant_projection.dart';
 
 /// Transport adaptation only; business rules stay in B's shared engine.
 class BEngineAdapter implements WindowsEngineAdapter {
@@ -16,6 +17,13 @@ class BEngineAdapter implements WindowsEngineAdapter {
     Map<String, dynamic> arguments,
     String? operationId,
   ) async {
+    if (command == HostCommand.restaurantView) {
+      final status = await inner.execute('status', const {}, null);
+      if (status['operator'] == null) {
+        throw const HostFailure('operator_required', 'Identifiez le caissier pour consulter la salle.');
+      }
+      return restaurantProjection(inner.engine.restaurant, await inner.engine.restaurantOrders());
+    }
     if (command == HostCommand.cashDocuments || command == HostCommand.cashDocument) {
       final documents = (await inner.engine.history()).where((o) => o.type == 'retour' || o.type == 'cloture_session').toList().reversed;
       if (command == HostCommand.cashDocuments) {
