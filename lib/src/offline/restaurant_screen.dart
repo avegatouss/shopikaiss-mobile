@@ -8,8 +8,9 @@ String _stageLabel(String? stage) => switch (stage) {
   _ => 'En attente',
 };
 
-/// Plan de salle de la caisse maîtresse (Service de table, capacité `restaurant.v1`, lots R-1 et R-2) : une tuile par
-/// table, libre ou occupée par sa commande (numéro, montant, étape, remontée). Hors caisse maîtresse : lecture seule.
+/// Plan de salle de la caisse maîtresse (Service de table, capacité `restaurant.v1`, lots R-1 à R-3) : une tuile par
+/// table, libre ou occupée par sa commande (numéro, montant, étape, remontée), bons à vérifier, imprimantes des postes.
+/// Hors caisse maîtresse : lecture seule.
 class _RestaurantFloor extends StatefulWidget {
   const _RestaurantFloor({required this.host});
 
@@ -21,6 +22,7 @@ class _RestaurantFloor extends StatefulWidget {
 
 class _RestaurantFloorState extends State<_RestaurantFloor> {
   List<RestoOrderView> _orders = const [];
+  List<RestoTicketView> _alerts = const [];
   String? _room;
   bool _loading = true;
 
@@ -41,11 +43,73 @@ class _RestaurantFloorState extends State<_RestaurantFloor> {
 
   Future<void> _reload() async {
     final orders = await _engine.restaurantOrders();
+    final tickets = await _engine.restoTickets();
     if (!mounted) return;
     setState(() {
       _orders = orders;
+      _alerts = [for (final t in tickets) if (t.state == RestoDeliveryState.toCheck || t.state == RestoDeliveryState.failed) t];
       _loading = false;
     });
+  }
+
+  /// Adresses des imprimantes de poste, saisies sur cette caisse (jamais reçues du serveur).
+  Future<void> _printers() async {
+    final ctx = _engine.restaurant!;
+    final stations = ctx.stations.values.where((s) => s.active && s.paper).toList()..sort((a, b) => a.order.compareTo(b.order));
+    final fields = {for (final s in stations) s.uuid: TextEditingController(text: _engine.restoPrinterAddresses[s.uuid] ?? '')};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Imprimantes des postes'),
+        content: SizedBox(
+          width: 420,
+          child: stations.isEmpty
+              ? const Text('Aucun poste avec impression papier n’est publié pour cette boutique.')
+              : SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text('Adresse réseau de l’imprimante ESC/POS de chaque poste (port 9100 par défaut). Vide : les bons sortent sur l’imprimante de la caisse.'),
+                      const SizedBox(height: 8),
+                      for (final s in stations)
+                        TextField(
+                          controller: fields[s.uuid],
+                          keyboardType: TextInputType.url,
+                          decoration: InputDecoration(labelText: s.name, hintText: '192.168.1.50:9100'),
+                        ),
+                    ],
+                  ),
+                ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+          if (stations.isNotEmpty) FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enregistrer')),
+        ],
+      ),
+    );
+    try {
+      if (ok == true) {
+        for (final s in stations) {
+          await _engine.setRestoPrinterAddress(s.uuid, fields[s.uuid]!.text);
+        }
+        if (mounted) widget.host._toast('Imprimantes des postes enregistrées.');
+      }
+    } on OfflineRefusal catch (e) {
+      await widget.host._refuse(e.message, title: 'Imprimante non enregistrée');
+    } finally {
+      for (final f in fields.values) {
+        f.dispose();
+      }
+    }
+  }
+
+  Future<void> _showAlerts() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _TicketsSheet(host: widget.host, title: 'Bons à vérifier'),
+    );
+    await _reload();
   }
 
   Future<void> _openTable(RestoTable table, RestoOrderView? current) async {
@@ -117,6 +181,18 @@ class _RestaurantFloorState extends State<_RestaurantFloor> {
             leading: const Icon(Icons.lock_outline),
             content: Text(blocker),
             actions: [TextButton(onPressed: () => widget.host._tryOnline(), child: const Text('Synchroniser'))],
+          ),
+        if (_alerts.isNotEmpty)
+          MaterialBanner(
+            backgroundColor: Colors.orange.shade50,
+            leading: const Icon(Icons.print_disabled_outlined, color: Colors.deepOrange),
+            content: Text('${_alerts.length} bon${_alerts.length > 1 ? 's' : ''} de production à vérifier : la cuisine ne l’a peut-être pas reçu.'),
+            actions: [TextButton(onPressed: _showAlerts, child: const Text('Vérifier'))],
+          ),
+        if (blocker == null && ctx.settings.sendToProduction && ctx.stations.values.any((s) => s.active && s.paper))
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(onPressed: _printers, icon: const Icon(Icons.print_outlined, size: 18), label: const Text('Imprimantes des postes')),
           ),
         if (rooms.length > 1)
           SingleChildScrollView(
@@ -190,6 +266,327 @@ class _RestaurantFloorState extends State<_RestaurantFloor> {
                     );
                   },
                 ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Bons de production (d'une commande, ou tous ceux à vérifier) : état de la livraison, vérification sur place,
+/// duplicata.
+class _TicketsSheet extends StatefulWidget {
+  const _TicketsSheet({required this.host, required this.title, this.orderUuid});
+
+  final _OfflineRegisterPageState host;
+  final String title;
+  final String? orderUuid;
+
+  @override
+  State<_TicketsSheet> createState() => _TicketsSheetState();
+}
+
+class _TicketsSheetState extends State<_TicketsSheet> {
+  List<RestoTicketView>? _tickets;
+  bool _busy = false;
+
+  CaisseEngine get _engine => widget.host._engine;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final all = await _engine.restoTickets(orderUuid: widget.orderUuid);
+    if (!mounted) return;
+    setState(() => _tickets = widget.orderUuid != null ? all : [for (final t in all) if (t.state == RestoDeliveryState.toCheck || t.state == RestoDeliveryState.failed) t]);
+  }
+
+  Future<void> _act(Future<void> Function() action) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+    } on OfflineRefusal catch (e) {
+      if (mounted) await widget.host._refuse(e.message, title: 'Action impossible');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+      await _reload();
+    }
+  }
+
+  Future<void> _verify(RestoTicketView t) async {
+    final printed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${t.ticket.title} ${t.ticket.dayNumber}'),
+        content: Text('L’impression vers ${t.stationName} a eu une issue inconnue. Le bon est-il sorti au poste ?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Pas sorti')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Sorti')),
+        ],
+      ),
+    );
+    if (printed == null) return;
+    await _act(() => _engine.restoVerifyTicket(widget.host._operator!, t.ticket.uuid, printed: printed));
+  }
+
+  Future<void> _duplicate(RestoTicketView t) async {
+    final reason = TextEditingController(text: t.state == RestoDeliveryState.failed ? 'Bon non reçu au poste' : '');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Réimprimer ${t.ticket.dayNumber}'),
+        content: TextField(controller: reason, autofocus: true, maxLength: 500, decoration: const InputDecoration(labelText: 'Motif (3 caractères au moins)')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Imprimer le duplicata')),
+        ],
+      ),
+    );
+    final text = reason.text;
+    reason.dispose();
+    if (ok != true) return;
+    await _act(() async {
+      final outcome = await _engine.restoDuplicateTicket(widget.host._operator!, t.ticket.uuid, text);
+      if (outcome == RestoOutcome.nonEnvoye && mounted) {
+        await _show(t, 'Aucune imprimante n’a reçu le duplicata : remettez ce bon au poste.');
+      } else if (outcome == RestoOutcome.aVerifier) {
+        widget.host._toast('Impression du duplicata incertaine : vérifiez au poste.');
+      }
+    });
+  }
+
+  Future<void> _show(RestoTicketView t, [String? message]) => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(t.ticket.title),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (message != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(message, style: const TextStyle(color: Colors.deepOrange))),
+            Text(
+              t.ticket.printLines(stationName: t.stationName, orderNumber: t.orderNumber, table: t.table).join('\n'),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+      actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer'))],
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final tickets = _tickets;
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(padding: const EdgeInsets.fromLTRB(16, 16, 16, 8), child: Text(widget.title, style: Theme.of(context).textTheme.titleLarge)),
+            if (tickets == null)
+              const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+            else if (tickets.isEmpty)
+              const Padding(padding: EdgeInsets.all(24), child: Text('Aucun bon.'))
+            else
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final t in tickets)
+                      ListTile(
+                        leading: Icon(switch (t.state) {
+                          RestoDeliveryState.delivered => Icons.check_circle_outline,
+                          RestoDeliveryState.toCheck => Icons.help_outline,
+                          RestoDeliveryState.failed => Icons.print_disabled_outlined,
+                          RestoDeliveryState.pending => Icons.schedule,
+                        }, color: switch (t.state) {
+                          RestoDeliveryState.delivered => Colors.green,
+                          RestoDeliveryState.pending => Colors.black45,
+                          _ => Colors.deepOrange,
+                        }),
+                        title: Text('${t.ticket.title} · ${t.stationName} · ${t.ticket.dayNumber}'),
+                        subtitle: Text([
+                          if (widget.orderUuid == null) '${t.table == null ? '' : '${t.table} · '}${t.orderNumber}',
+                          switch (t.state) {
+                            RestoDeliveryState.delivered => 'Livré',
+                            RestoDeliveryState.toCheck => 'Issue inconnue : à vérifier au poste',
+                            RestoDeliveryState.failed => 'Non reçu par le poste',
+                            RestoDeliveryState.pending => 'En cours de livraison',
+                          },
+                          '${t.ticket.lines.length} article${t.ticket.lines.length > 1 ? 's' : ''}',
+                        ].join(' · ')),
+                        onTap: () => _show(t),
+                        trailing: _busy
+                            ? null
+                            : t.state == RestoDeliveryState.toCheck
+                            ? TextButton(onPressed: () => _verify(t), child: const Text('Vérifier'))
+                            : TextButton(onPressed: () => _duplicate(t), child: const Text('Réimprimer')),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Annulation d'un article envoyé ou d'une commande avec des articles annoncés : motif, puis, si l'opérateur n'a pas le
+/// droit (ou si la boutique l'exige toujours), code de 8 chiffres d'un responsable.
+class _SentCancelDialog extends StatefulWidget {
+  const _SentCancelDialog({required this.engine, required this.operator, required this.title, required this.amountOf, this.maxQuantity});
+
+  final CaisseEngine engine;
+  final Operator operator;
+  final String title;
+
+  /// Montant autorisé pour une quantité donnée (plafonds de l'assistant).
+  final int Function(int quantity) amountOf;
+
+  /// Quantité maximale à annuler (article) ; null = commande entière.
+  final int? maxQuantity;
+
+  @override
+  State<_SentCancelDialog> createState() => _SentCancelDialogState();
+}
+
+class _SentCancelDialogState extends State<_SentCancelDialog> {
+  final _reason = TextEditingController();
+  final _code = TextEditingController();
+  late int _quantity = widget.maxQuantity == null ? 0 : (widget.maxQuantity! < Decimal6.scale ? widget.maxQuantity! : Decimal6.scale);
+  List<Operator>? _approvers;
+  Operator? _approver;
+  String? _error;
+  bool _busy = false;
+
+  bool get _needsApproval => widget.engine.restoApprovalRequired(widget.operator);
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApprovers();
+  }
+
+  @override
+  void dispose() {
+    _reason.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadApprovers() async {
+    if (!_needsApproval) return;
+    final list = await widget.engine.restoApprovers(widget.operator, widget.amountOf(_quantity));
+    if (!mounted) return;
+    setState(() {
+      _approvers = list;
+      if (!list.any((o) => o.id == _approver?.id)) _approver = list.firstOrNull;
+    });
+  }
+
+  Future<void> _confirm() async {
+    final reason = _reason.text.trim();
+    if (reason.length < 3) return setState(() => _error = 'Indiquez le motif (3 caractères au moins).');
+    RestoApproval? approval;
+    if (_needsApproval) {
+      final approver = _approver;
+      if (approver == null) return setState(() => _error = 'Aucun responsable de ce terminal ne peut autoriser cette annulation.');
+      setState(() => _busy = true);
+      try {
+        approval = await widget.engine.restoAuthorize(cashier: widget.operator, approver: approver, code: _code.text.trim(), reason: reason, amount: widget.amountOf(_quantity));
+      } on OfflineRefusal catch (e) {
+        _code.clear();
+        return setState(() {
+          _busy = false;
+          _error = e.message;
+        });
+      }
+    }
+    if (mounted) Navigator.pop(context, (quantity: _quantity, reason: reason, approval: approval));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final max = widget.maxQuantity;
+    final approvers = _approvers;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (max != null && max > Decimal6.scale)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton.filledTonal(
+                      onPressed: _quantity > Decimal6.scale ? () {
+                        setState(() => _quantity -= Decimal6.scale);
+                        _loadApprovers();
+                      } : null,
+                      icon: const Icon(Icons.remove),
+                    ),
+                    Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('${Decimal6.label(_quantity)} à annuler', style: const TextStyle(fontSize: 18))),
+                    IconButton.filledTonal(
+                      onPressed: _quantity + Decimal6.scale <= max ? () {
+                        setState(() => _quantity += Decimal6.scale);
+                        _loadApprovers();
+                      } : null,
+                      icon: const Icon(Icons.add),
+                    ),
+                  ],
+                ),
+              TextField(
+                controller: _reason,
+                autofocus: true,
+                maxLength: 500,
+                decoration: const InputDecoration(labelText: 'Motif (obligatoire)'),
+              ),
+              if (_needsApproval) ...[
+                const SizedBox(height: 4),
+                const Text('Article déjà envoyé : un responsable autorise avec son code.', style: TextStyle(color: Colors.black54)),
+                if (approvers == null)
+                  const Padding(padding: EdgeInsets.all(8), child: Center(child: CircularProgressIndicator()))
+                else if (approvers.isEmpty)
+                  const Padding(padding: EdgeInsets.only(top: 8), child: Text('Aucun responsable de ce terminal ne peut autoriser cette annulation.', style: TextStyle(color: Colors.red)))
+                else ...[
+                  DropdownButtonFormField<int>(
+                    initialValue: _approver?.id,
+                    decoration: const InputDecoration(labelText: 'Responsable'),
+                    items: [for (final o in approvers) DropdownMenuItem(value: o.id, child: Text(o.name))],
+                    onChanged: (id) => setState(() => _approver = approvers.firstWhere((o) => o.id == id)),
+                  ),
+                  TextField(
+                    controller: _code,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 8,
+                    decoration: const InputDecoration(labelText: 'Code du responsable (8 chiffres)'),
+                  ),
+                ],
+              ],
+              if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Retour')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: _busy ? null : _confirm,
+          child: Text(max == null ? 'Annuler la commande' : 'Annuler l’article'),
         ),
       ],
     );
@@ -402,7 +799,66 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     await _run(() => _engine.restoTransfer(_operator, widget.orderUuid, target.uuid), title: 'Transfert impossible');
   }
 
+  /// Envoi aux postes (ou « Valider », envoi éteint) : un bon par poste, livré aussitôt ; un bon non reçu est signalé.
+  Future<void> _send() async {
+    RestoOrderView? sent;
+    final ok = await _run(() async => sent = await _engine.restoSend(_operator, widget.orderUuid), title: 'Envoi impossible');
+    if (!ok || sent == null || !mounted) return;
+    final tickets = sent!.tickets;
+    if (tickets.isEmpty) return widget.host._toast('Commande validée.');
+    final states = {for (final t in await _engine.restoTickets(orderUuid: widget.orderUuid)) t.ticket.uuid: t.state};
+    final missed = tickets.where((t) => states[t.uuid] != RestoDeliveryState.delivered).length;
+    if (!mounted) return;
+    if (missed == 0) {
+      widget.host._toast('${tickets.length} bon${tickets.length > 1 ? 's' : ''} envoyé${tickets.length > 1 ? 's' : ''}.');
+    } else {
+      await _refuse('$missed bon${missed > 1 ? 's' : ''} sur ${tickets.length} pas reçu${missed > 1 ? 's' : ''} avec certitude : vérifiez au poste depuis « Bons ».',
+          title: 'Envoi à vérifier');
+    }
+  }
+
+  Future<void> _tickets() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => _TicketsSheet(host: widget.host, title: 'Bons de la commande', orderUuid: widget.orderUuid),
+    );
+    await _reload();
+  }
+
+  /// Article envoyé : réduit ou annulé avec un motif, et l'autorisation d'un responsable si l'opérateur n'a pas le droit.
+  Future<void> _cancelSent(RestoLine line) async {
+    final result = await showDialog<({int quantity, String reason, RestoApproval? approval})>(
+      context: context,
+      builder: (_) => _SentCancelDialog(
+        engine: _engine,
+        operator: _operator,
+        title: 'Annuler · ${line.label}',
+        maxQuantity: line.quantity,
+        amountOf: (quantity) => Decimal6.amount(line.unitPrice, quantity),
+      ),
+    );
+    if (result == null || !mounted) return;
+    await _run(
+      () => _engine.restoCancelLine(_operator, widget.orderUuid, line.uuid, result.quantity, result.reason, approval: result.approval),
+      title: 'Annulation impossible',
+    );
+  }
+
   Future<void> _cancel() async {
+    final view = _view;
+    if (view == null) return;
+    if (RestoEngine.hasAnnounced(view.order)) {
+      // Des articles sont partis aux postes : motif, droit ou responsable, bons d'ANNULATION.
+      final result = await showDialog<({int quantity, String reason, RestoApproval? approval})>(
+        context: context,
+        builder: (_) => _SentCancelDialog(engine: _engine, operator: _operator, title: 'Annuler la commande ?', amountOf: (_) => view.payable),
+      );
+      if (result == null || !mounted) return;
+      final ok = await _run(() => _engine.restoCancel(_operator, widget.orderUuid, result.reason, approval: result.approval), title: 'Annulation impossible');
+      if (ok && mounted) Navigator.pop(context);
+      return;
+    }
     final reason = TextEditingController();
     final required = _engine.restaurant?.settings.cancellationReason ?? false;
     final confirmed = await showDialog<bool>(
@@ -511,6 +967,12 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
         appBar: AppBar(
           title: Text(order == null ? 'Commande' : '${table ?? 'Commande'} · ${order.localNumber}'),
           actions: [
+            if (order != null && order.lines.any((l) => l.status != RestoLineStatus.pending))
+              IconButton(
+                tooltip: 'Bons',
+                onPressed: _tickets,
+                icon: Badge(isLabelVisible: (view?.ticketsToCheck ?? 0) > 0, label: Text('${view?.ticketsToCheck ?? 0}'), child: const Icon(Icons.receipt_long_outlined)),
+              ),
             if (editable) ...[
               IconButton(tooltip: 'Transférer', onPressed: _busy || _dirty ? null : _transfer, icon: const Icon(Icons.swap_horiz)),
               IconButton(tooltip: 'Annuler la commande', onPressed: _busy || _dirty ? null : _cancel, icon: const Icon(Icons.delete_outline)),
@@ -575,10 +1037,20 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               title: Text(l.label, style: TextStyle(decoration: !l.active || _removed.contains(l.uuid) ? TextDecoration.lineThrough : null)),
               subtitle: Text([
                 '${Decimal6.label(_quantities[l.uuid] ?? l.quantity)} x ${formatFcfa(l.unitPrice)}',
+                if (l.status == RestoLineStatus.sent) _engine.restaurant?.settings.sendToProduction == true && l.sent > 0 ? 'Envoyé' : 'Validé',
                 if (l.comment != null) l.comment!,
               ].join(' · ')),
               trailing: !editable || !l.active
                   ? Text(formatFcfa(l.total))
+                  : l.status == RestoLineStatus.sent
+                  // Envoyé : il ne change plus, il s'annule avec un motif (on ajoute l'article à nouveau pour en servir plus).
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(formatFcfa(l.total)),
+                        IconButton(tooltip: 'Annuler l’article', onPressed: _busy || _dirty ? null : () => _cancelSent(l), icon: const Icon(Icons.cancel_outlined)),
+                      ],
+                    )
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -716,6 +1188,15 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               label: const Text('Enregistrer'),
             )
           else if (editable) ...[
+            if (view.order.lines.any((l) => l.toSend > 0)) ...[
+              FilledButton.icon(
+                style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange, minimumSize: const Size(0, 48)),
+                onPressed: _busy ? null : _send,
+                icon: const Icon(Icons.send_outlined),
+                label: Text(_engine.restaurant?.sendLabel ?? 'Envoyer'),
+              ),
+              const SizedBox(width: 8),
+            ],
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
               onPressed: _busy || view.order.activeLines.isEmpty ? null : _prebill,

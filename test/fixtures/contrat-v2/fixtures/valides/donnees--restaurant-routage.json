@@ -1,0 +1,9 @@
+{
+    "routage": "station",
+    "poste_uuid": "b2000000-0000-4000-8000-0000000000c9",
+    "categorie_poste_uuid": "b2000000-0000-4000-8000-0000000000c1",
+    "poste_effectif_uuid": "b2000000-0000-4000-8000-0000000000c1",
+    "visible": true,
+    "ordre": 3,
+    "favori": false
+}

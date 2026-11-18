@@ -180,6 +180,16 @@ class _RestaurantEngine extends OfflineEngine {
   Future<RestoOrderView> restoPrebill(Operator operator, String orderUuid) async => _keep(_resto.prebill(orders[orderUuid]!), 'prefacture');
 
   @override
+  Future<RestoOrderView> restoSend(Operator operator, String orderUuid) async => _keep(_resto.send(orders[orderUuid]!), 'envoi');
+
+  @override
+  bool restoApprovalRequired(Operator operator) => false;
+
+  @override
+  Future<RestoOrderView> restoCancelLine(Operator operator, String orderUuid, String lineUuid, int quantity, String reason, {RestoApproval? approval}) async =>
+      _keep(_resto.cancelLine(orders[orderUuid]!, lineUuid, quantity, reason), 'annulation_ligne');
+
+  @override
   Future<List<CartLine>> restoCart(String orderUuid) async => [
     for (final l in orders[orderUuid]!.activeLines) CartLine(product: snapshot!.byId(int.parse(l.productUuid))!, quantity: BigInt.from(l.quantity), fixedPrice: l.unitPrice),
   ];
@@ -433,6 +443,41 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('À ajouter'), findsOneWidget);
       expect(find.text('Enregistrer'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Service de table : « Valider » fige les articles, un article validé s’annule avec un motif', (tester) async {
+      final session = await _session(inches: 10.1, restaurant: true);
+      final engine = session.offline as _RestaurantEngine;
+      await _pump(tester, const Size(1280, 800), session);
+      await tester.tap(find.text('Salle'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('table-t1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      // Envoi en production éteint : « Valider », aucun bon.
+      await tester.tap(find.text('Valider'));
+      await tester.pumpAndSettle();
+      expect(engine.actions, ['ouverture:1', 'lignes:2', 'envoi:3']);
+      expect(find.text('Valider'), findsNothing, reason: 'plus rien en attente');
+      expect(find.textContaining('Validé'), findsOneWidget);
+      expect(find.byTooltip('Plus'), findsNothing, reason: 'un article validé ne change plus');
+      await tester.tap(find.byTooltip('Annuler l’article'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Annuler l’article'));
+      await tester.pumpAndSettle();
+      expect(find.text('Indiquez le motif (3 caractères au moins).'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Motif (obligatoire)'), 'Client parti');
+      await tester.tap(find.widgetWithText(FilledButton, 'Annuler l’article'));
+      await tester.pumpAndSettle();
+      expect(engine.actions.last, 'annulation_ligne:4');
+      expect(engine.orders.values.single.activeLines.single.quantity, 1000000);
       expect(tester.takeException(), isNull);
     });
 

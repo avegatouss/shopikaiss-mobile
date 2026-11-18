@@ -6,7 +6,7 @@ import '../sync_v2/decimal6.dart';
 /// commandes, lignes, routage vers les postes, bons de production par différence, annulations, et planification de la
 /// livraison des bons sans doublon. Pur et déterministe (horloge et uuid injectés) : chaque fait rend la version suivante
 /// de la commande, au format `resto_commande` (RESTAURANT-1 validé, lots R-1 et R-2), que la caisse maîtresse enregistre
-/// dans sa file v2. Envoi et annulation de ligne avec bons : lot R-3, pas encore émis.
+/// dans sa file v2. Envoi, annulation de ligne et bons : lot R-3 (postes, routage, `resto_bons_etats`).
 ///
 /// Quantités en millionièmes (comme le contrat v2), montants en francs entiers.
 class RestoRefusal implements Exception {
@@ -22,7 +22,16 @@ class RestoRefusal implements Exception {
 
 /// Poste de production (`restaurant.poste`) : écran et/ou papier.
 class RestoStation {
-  const RestoStation({required this.uuid, required this.code, required this.name, this.screen = false, this.paper = true, this.active = true, this.order = 0});
+  const RestoStation({
+    required this.uuid,
+    required this.code,
+    required this.name,
+    this.screen = false,
+    this.paper = true,
+    this.active = true,
+    this.order = 0,
+    this.flow = 'preparation',
+  });
 
   final String uuid;
   final String code;
@@ -31,6 +40,9 @@ class RestoStation {
   final bool paper;
   final bool active;
   final int order;
+
+  /// `preparation` (new → in_progress → ready → served) ou `handover` (new → served).
+  final String flow;
 
   /// Code du poste pour le numéro du jour : majuscules, lettres et chiffres seulement, 10 au plus (contrat §4.2).
   String get dayCode {
@@ -102,8 +114,8 @@ class RestoLine {
   int discount;
   String? comment;
 
-  /// Poste figé à l'ajout de la ligne ; null = rien ne part.
-  final String? stationUuid;
+  /// Poste de la ligne, choisi au premier envoi (Service de table, règle du web) ; null = rien ne part.
+  String? stationUuid;
   final String? parentLineUuid;
   bool free;
   RestoLineStatus status;
@@ -118,7 +130,8 @@ class RestoLine {
   int get gross => Decimal6.amount(unitPrice, quantity);
   int get lineDiscount => free ? gross : discount;
   int get total => gross - lineDiscount;
-  int get toSend => active ? quantity - sent : 0;
+  /// Reste à annoncer : seule une ligne en attente part ; une ligne `sent` sans bon (sans poste, envoi éteint) est figée.
+  int get toSend => status == RestoLineStatus.pending ? quantity - sent : 0;
 
   RestoLine copy() => RestoLine(
     uuid: uuid,
@@ -390,6 +403,22 @@ class RestoTicketLine {
 
 /// Bon de production : créé une fois par la caisse maîtresse, immuable, même uuid sur toutes les cibles.
 class RestoTicket {
+  /// Bon relu dans le fait d'une commande de la file (`fait.bons[]`).
+  factory RestoTicket.fromJson(String orderUuid, Map m) => RestoTicket(
+    uuid: m['bon_uuid'] as String,
+    orderUuid: orderUuid,
+    stationUuid: m['poste_uuid'] as String,
+    number: m['numero'] as int,
+    dayNumber: m['numero_jour'] as String,
+    type: m['type'] as String,
+    firstSend: m['premier_envoi'] as bool,
+    createdAt: DateTime.parse(m['cree_le'] as String),
+    lines: [
+      for (final l in (m['lignes'] as List).cast<Map>())
+        RestoTicketLine(lineUuid: l['ligne_uuid'] as String, label: l['libelle'] as String, quantity: Decimal6.parse(l['quantite'] as String), comment: l['commentaire'] as String?, action: l['action'] as String),
+    ],
+  );
+
   RestoTicket({
     required this.uuid,
     required this.orderUuid,
@@ -440,6 +469,26 @@ class RestoTicket {
   String get fingerprint => CanonicalJson.sha256Of(_content());
 
   Map<String, dynamic> toJson() => {..._content(), 'empreinte_contenu': fingerprint};
+
+  /// Texte imprimé du bon (même contenu sur toutes les cibles ; [duplicate] : réimpression demandée par un opérateur).
+  List<String> printLines({required String stationName, required String orderNumber, String? table, int columns = 32, bool duplicate = false}) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final local = createdAt.toLocal();
+    return [
+      if (duplicate) '*** DUPLICATA ***',
+      '$title · $stationName',
+      dayNumber,
+      'Commande $orderNumber${number > 1 ? ' · bon $number' : ''}',
+      if (table != null && table.isNotEmpty) 'Table $table',
+      '${two(local.day)}/${two(local.month)} ${two(local.hour)}:${two(local.minute)}',
+      '-' * columns,
+      for (final l in lines) ...[
+        '${l.action == 'cancel' ? '-' : ''}${Decimal6.label(l.quantity)} x ${l.label}',
+        if (l.comment != null) '  > ${l.comment}',
+      ],
+      '-' * columns,
+    ];
+  }
 }
 
 /// Compteurs des bons, persistés par la caisse maîtresse : numéro par (commande, poste) et numéro du jour par poste.
@@ -453,7 +502,16 @@ class RestoCounters {
 
 /// Fait d'une commande (forme `resto_commande` : version, action, fait, motif, état résultant), gardé pour la remontée.
 class RestoEvent {
-  const RestoEvent({required this.uuid, required this.version, required this.action, required this.fact, this.reason, required this.state, this.tickets = const []});
+  const RestoEvent({
+    required this.uuid,
+    required this.version,
+    required this.action,
+    required this.fact,
+    this.reason,
+    required this.state,
+    this.tickets = const [],
+    this.authorizations = const [],
+  });
 
   final String uuid;
   final int version;
@@ -462,6 +520,9 @@ class RestoEvent {
   final String? reason;
   final Map<String, dynamic> state;
   final List<RestoTicket> tickets;
+
+  /// Autorisations d'un approbateur (`autorisation_restaurant`), code vérifié sur la caisse.
+  final List<Map<String, dynamic>> authorizations;
 }
 
 /// Résultat d'une action : nouvelle commande, fait à remonter, bons à livrer.
@@ -503,11 +564,27 @@ class RestoEngine {
   /// `restaurant.reglages.motif_annulation_commande`.
   final bool cancellationReasonRequired;
 
-  RestoResult _record(RestoOrder order, String action, Map<String, dynamic> fact, {String? reason, List<RestoTicket> tickets = const []}) {
+  RestoResult _record(
+    RestoOrder order,
+    String action,
+    Map<String, dynamic> fact, {
+    String? reason,
+    List<RestoTicket> tickets = const [],
+    List<Map<String, dynamic>> authorizations = const [],
+  }) {
     order.version++;
     return RestoResult(
       order,
-      RestoEvent(uuid: newUuid(), version: order.version, action: action, fact: fact, reason: reason, state: order.state(vat), tickets: tickets),
+      RestoEvent(
+        uuid: newUuid(),
+        version: order.version,
+        action: action,
+        fact: fact,
+        reason: reason,
+        state: order.state(vat),
+        tickets: tickets,
+        authorizations: authorizations,
+      ),
       tickets,
     );
   }
@@ -590,10 +667,14 @@ class RestoEngine {
       if (quantities.containsKey(uuid) && quantities[uuid] != line.quantity) {
         final quantity = quantities[uuid]!;
         if (quantity <= 0) throw const RestoRefusal('Quantité invalide : retirez l’article.');
-        // Une ligne envoyée peut augmenter (le surplus partira en AJOUT), jamais baisser sous l'envoyé.
-        if (quantity < line.sent) throw RestoRefusal('« ${line.label} » est déjà envoyé : annulez la quantité envoyée avec un motif.');
+        // Une ligne envoyée ne change plus par `lignes` (contrat §4.3) : on ajoute l'article à nouveau, ou on annule avec
+        // un motif.
+        if (line.status == RestoLineStatus.sent) {
+          throw RestoRefusal(quantity < line.quantity
+              ? '« ${line.label} » est déjà envoyé : annulez la quantité avec un motif.'
+              : '« ${line.label} » est déjà envoyé : ajoutez l’article à nouveau.');
+        }
         line.quantity = quantity;
-        if (quantity > line.sent) line.status = RestoLineStatus.pending;
         touched = true;
       }
       if (comments.containsKey(uuid) && _clean(comments[uuid]) != line.comment) {
@@ -666,84 +747,108 @@ class RestoEngine {
     );
   }
 
-  /// Envoi par différence (lot R-3) : à envoyer = quantité active − envoyé net, un bon par poste. Les articles sans poste
-  /// sont figés sans bon. Envoi éteint : « Valider » fige la commande sans aucun bon.
-  RestoResult send(RestoOrder order) {
+  /// Envoi par différence (lot R-3) : chaque ligne en attente annonce à son poste quantité − envoyé net, un bon par poste
+  /// et par envoi. Le poste d'une ligne qui n'en a pas encore est choisi à l'envoi par [route] (`poste_effectif_uuid`,
+  /// règle du Service de table) ; un poste inconnu ou inactif = rien ne part. Les articles sans poste, et tous les
+  /// articles quand l'envoi en production est éteint, sont figés (`sent`) sans bon : « Valider ».
+  RestoResult send(RestoOrder order, {String? Function(String productUuid)? route}) {
     _requireOpen(order);
     final next = order.copy();
     final waiting = [for (final l in next.lines) if (l.toSend > 0) l];
     if (waiting.isEmpty) throw const RestoRefusal('Rien de nouveau à envoyer.');
-    if (!sendToStations) {
-      for (final l in waiting) {
-        l
-          ..sent = l.quantity
-          ..status = RestoLineStatus.sent;
-      }
-      return _record(next, 'validation', {'lignes': [for (final l in waiting) l.uuid]});
-    }
     final byStation = <String, List<RestoLine>>{};
-    for (final l in waiting) {
-      if (l.stationUuid != null && stations.containsKey(l.stationUuid)) (byStation[l.stationUuid!] ??= []).add(l);
+    if (sendToStations) {
+      for (final l in waiting) {
+        if (l.stationUuid == null && route != null) {
+          final chosen = route(l.productUuid);
+          if (chosen != null && stations[chosen]?.active == true) l.stationUuid = chosen;
+        }
+        if (l.stationUuid != null && stations.containsKey(l.stationUuid)) (byStation[l.stationUuid!] ??= []).add(l);
+      }
     }
+    final ordered = byStation.entries.toList()
+      ..sort((a, b) {
+        final sa = stations[a.key]!, sb = stations[b.key]!;
+        return sa.order != sb.order ? sa.order.compareTo(sb.order) : sa.code.compareTo(sb.code);
+      });
     final tickets = [
-      for (final entry in (byStation.entries.toList()..sort((a, b) => stations[a.key]!.order.compareTo(stations[b.key]!.order))))
+      for (final entry in ordered)
         _ticket(next, entry.key, 'envoi', [
           for (final l in entry.value) RestoTicketLine(lineUuid: l.uuid, label: l.label, quantity: l.toSend, comment: l.comment, action: 'add'),
         ]),
     ];
+    final announced = {for (final e in byStation.values) for (final l in e) l.uuid};
     for (final l in waiting) {
-      l
-        ..sent = l.quantity
-        ..status = RestoLineStatus.sent;
+      // `envoye` = Σ des bons : une ligne figée sans bon garde son envoyé net.
+      if (announced.contains(l.uuid)) l.sent = l.quantity;
+      l.status = RestoLineStatus.sent;
     }
     return _record(next, 'envoi', {'bons': [for (final t in tickets) t.toJson()]}, tickets: tickets);
   }
 
-  /// Annulation d'une quantité envoyée (lot R-3 ; droit `resto_modifier_envoye` ou autorisation, vérifiés par
-  /// l'appelant) ; motif d'au moins 3 caractères. Bon d'ANNULATION seulement si la ligne avait été annoncée à un poste.
-  RestoResult cancelLine(RestoOrder order, String lineUuid, int quantity, String reason) {
+  /// Annulation d'une quantité envoyée (lot R-3) : seulement sur une ligne `sent`, motif d'au moins 3 caractères ; droit
+  /// `resto_modifier_envoye` ou autorisation d'un approbateur, vérifiés par l'appelant et joints en [authorizations]. Bon
+  /// d'ANNULATION pour ce qui part de l'envoyé net (envoyé − quantité restante), aucun si la ligne n'a jamais été annoncée.
+  RestoResult cancelLine(RestoOrder order, String lineUuid, int quantity, String reason, {List<Map<String, dynamic>> authorizations = const []}) {
     _requireOpen(order);
     final motive = reason.trim();
     if (motive.length < 3) throw const RestoRefusal('Indiquez le motif de l’annulation (3 caractères au moins).');
+    if (motive.length > 500) throw const RestoRefusal('Motif trop long (500 caractères au plus).');
     final next = order.copy();
     final line = next.line(lineUuid);
     if (!line.active) throw const RestoRefusal('Cette ligne est déjà annulée.');
+    if (line.status != RestoLineStatus.sent) throw const RestoRefusal('Article pas encore envoyé : retirez-le ou changez sa quantité.');
     if (quantity <= 0 || quantity > line.quantity) throw const RestoRefusal('Quantité à annuler invalide.');
-    final announced = quantity > line.sent ? line.sent : quantity;
+    final remaining = line.quantity - quantity;
+    final announced = line.sent > remaining ? line.sent - remaining : 0;
     final tickets = <RestoTicket>[];
-    if (announced > 0 && line.stationUuid != null && stations.containsKey(line.stationUuid) && sendToStations) {
+    if (announced > 0) {
+      if (line.stationUuid == null || !stations.containsKey(line.stationUuid)) {
+        throw const RestoRefusal('Poste de cet article inconnu sur ce terminal : synchronisez avant d’annuler.');
+      }
       tickets.add(_ticket(next, line.stationUuid!, 'annulation', [
-        RestoTicketLine(lineUuid: line.uuid, label: line.label, quantity: announced, comment: 'ANNULÉ : $motive', action: 'cancel'),
+        RestoTicketLine(lineUuid: line.uuid, label: line.label, quantity: announced, comment: _cancelComment(motive), action: 'cancel'),
       ], reason: motive));
     }
     line
-      ..quantity -= quantity
+      ..quantity = remaining
       ..sent -= announced;
-    if (line.quantity == 0) line.status = RestoLineStatus.cancelled;
+    if (remaining == 0) line.status = RestoLineStatus.cancelled;
     next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'annulation_ligne', {'ligne_uuid': lineUuid, 'quantite': Decimal6.format(quantity), 'bons': [for (final t in tickets) t.toJson()]},
-        reason: motive, tickets: tickets);
+        reason: motive, tickets: tickets, authorizations: authorizations);
   }
 
-  /// Annulation de la commande : motif exigé si la boutique le demande ou si des articles sont envoyés ; bons
-  /// d'ANNULATION pour tout ce qui était annoncé, poste par poste (lot R-3).
-  RestoResult cancelOrder(RestoOrder order, String? reason) {
+  static String _cancelComment(String motive) {
+    final text = 'ANNULÉ : $motive';
+    return text.length > 500 ? text.substring(0, 500) : text;
+  }
+
+  /// Annulation de la commande : motif exigé si la boutique le demande ou si des articles sont annoncés (3 caractères au
+  /// moins) ; un bon d'ANNULATION par poste couvrant l'envoyé net de chaque article annoncé (lot R-3). Droit ou
+  /// autorisation vérifiés par l'appelant, joints en [authorizations].
+  RestoResult cancelOrder(RestoOrder order, String? reason, {List<Map<String, dynamic>> authorizations = const []}) {
     _requireOpen(order);
     final motive = reason?.trim() ?? '';
+    if (motive.length > 500) throw const RestoRefusal('Motif trop long (500 caractères au plus).');
     final next = order.copy();
     final announced = <String, List<RestoLine>>{};
     for (final l in next.activeLines) {
-      if (l.sent > 0 && l.stationUuid != null && stations.containsKey(l.stationUuid)) (announced[l.stationUuid!] ??= []).add(l);
+      if (l.sent <= 0) continue;
+      if (l.stationUuid == null || !stations.containsKey(l.stationUuid)) {
+        throw RestoRefusal('Poste de « ${l.label} » inconnu sur ce terminal : synchronisez avant d’annuler.');
+      }
+      (announced[l.stationUuid!] ??= []).add(l);
     }
-    if (announced.isNotEmpty && motive.length < 3) throw const RestoRefusal('Des articles sont déjà envoyés : indiquez le motif de l’annulation.');
+    if (announced.isNotEmpty && motive.length < 3) throw const RestoRefusal('Des articles sont déjà envoyés : indiquez le motif de l’annulation (3 caractères au moins).');
     if (cancellationReasonRequired && motive.isEmpty) throw const RestoRefusal('Indiquez le motif de l’annulation de la commande.');
     if (next.activeLines.any((l) => l.settled > 0)) throw const RestoRefusal('Des articles sont déjà réglés : la commande ne s’annule plus.');
+    final ordered = announced.entries.toList()..sort((a, b) => stations[a.key]!.order.compareTo(stations[b.key]!.order));
     final tickets = [
-      if (sendToStations)
-        for (final entry in announced.entries)
-          _ticket(next, entry.key, 'annulation', [
-            for (final l in entry.value) RestoTicketLine(lineUuid: l.uuid, label: l.label, quantity: l.sent, comment: 'ANNULÉ : $motive', action: 'cancel'),
-          ], reason: motive),
+      for (final entry in ordered)
+        _ticket(next, entry.key, 'annulation', [
+          for (final l in entry.value) RestoTicketLine(lineUuid: l.uuid, label: l.label, quantity: l.sent, comment: _cancelComment(motive), action: 'cancel'),
+        ], reason: motive),
     ];
     for (final l in next.activeLines) {
       l
@@ -751,8 +856,12 @@ class RestoEngine {
         ..status = RestoLineStatus.cancelled;
     }
     next.status = 'cancelled';
-    return _record(next, 'annulation', {'bons': [for (final t in tickets) t.toJson()]}, reason: motive.isEmpty ? null : motive, tickets: tickets);
+    return _record(next, 'annulation', {'bons': [for (final t in tickets) t.toJson()]},
+        reason: motive.isEmpty ? null : motive, tickets: tickets, authorizations: authorizations);
   }
+
+  /// Articles annoncés aux postes (envoyé net > 0) : leur annulation exige le droit ou une autorisation.
+  static bool hasAnnounced(RestoOrder order) => order.activeLines.any((l) => l.sent > 0);
 
   /// Préfacture : compteur d'impressions et étape (rien n'est imprimé par le serveur).
   RestoResult prebill(RestoOrder order) {
@@ -800,12 +909,31 @@ class RestoEngine {
 // ------------------------------------------------------------------ livraison sans doublon
 
 /// Cibles d'un bon, dans l'ordre de secours : écran du poste, imprimante du poste, imprimante de la caisse.
-enum RestoTarget { ecranPoste, imprimantePoste, imprimanteCaisse }
+enum RestoTarget {
+  ecranPoste('ecran_poste'),
+  imprimantePoste('imprimante_poste'),
+  imprimanteCaisse('imprimante_caisse');
+
+  const RestoTarget(this.code);
+
+  /// Valeur du contrat (`evenement_bon.cible`).
+  final String code;
+}
 
 /// Issue d'une tentative : `accuse` (l'afficheur a confirmé CE bon), `transmis` (octets partis, sans preuve de papier),
 /// `nonEnvoye` (échec certain avant tout octet : seul cas qui autorise le secours), `aVerifier` (issue inconnue : jamais
 /// relancé automatiquement).
-enum RestoOutcome { accuse, transmis, nonEnvoye, aVerifier }
+enum RestoOutcome {
+  accuse('accuse'),
+  transmis('transmis'),
+  nonEnvoye('non_envoye'),
+  aVerifier('a_verifier');
+
+  const RestoOutcome(this.code);
+
+  /// Valeur du contrat (`evenement_bon.resultat`).
+  final String code;
+}
 
 class RestoAttempt {
   const RestoAttempt(this.target, this.outcome, {this.fallback = false});

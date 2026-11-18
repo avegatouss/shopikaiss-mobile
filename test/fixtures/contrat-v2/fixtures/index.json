@@ -574,6 +574,76 @@
             "schema": "donnees-restaurant-1.json#/$defs/restaurant.table",
             "valide": false,
             "erreur_attendue": "$.occupation : propriété inconnue"
+        },
+        {
+            "fichier": "valides/donnees--restaurant-poste.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.poste",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-routage.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.routage",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-routage-aucun.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.routage",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-poste-ip-imprimante.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.poste",
+            "valide": false,
+            "erreur_attendue": "$.imprimante_ip : propriété inconnue"
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-poste-flux-accuse.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.poste",
+            "valide": false,
+            "erreur_attendue": "flux : valeur hors liste"
+        },
+        {
+            "fichier": "valides/donnees-2.1--operateur-serveur-de-salle.json",
+            "schema": "donnees-2.1.json#/$defs/operateur",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-2.1--operateur-approbateur-restaurant.json",
+            "schema": "donnees-2.1.json#/$defs/operateur",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-envoi.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-annulation-ligne.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-bons-etats.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--resto-bons-etats-statut-qui-recule.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "vers : valeur hors liste"
+        },
+        {
+            "fichier": "invalides/operation--resto-commande-bon-numero-jour-minuscules.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "numero_jour : format invalide"
+        },
+        {
+            "fichier": "invalides/operation--resto-commande-autorisation-inconnue.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "type : valeur hors liste"
         }
     ]
 }

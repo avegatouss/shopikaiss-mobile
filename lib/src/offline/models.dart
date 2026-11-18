@@ -201,7 +201,8 @@ class Operator {
       name = (m['nom'] ?? '') as String,
       pinHash = m['pin'] as String?,
       approver = m['approbateur'] == true,
-      approvalCodeHash = m['code_autorisation'] as String?;
+      approvalCodeHash = m['code_autorisation'] as String?,
+      restaurantApprover = m['approbateur_restaurant'] as String?;
 
   final int id;
   final String name;
@@ -212,6 +213,9 @@ class Operator {
 
   /// Empreinte de son code d'autorisation de 8 chiffres ; null = autorisation hors ligne impossible pour lui.
   final String? approvalCodeHash;
+
+  /// Approbateur restaurant (`manager`, `assistant`) ou null (restaurant.v1, lot R-3).
+  final String? restaurantApprover;
 }
 
 /// Client de la boutique (contrat 2.1, aucun solde) ; [pending] = créé sur ce terminal, pas encore reçu du serveur.

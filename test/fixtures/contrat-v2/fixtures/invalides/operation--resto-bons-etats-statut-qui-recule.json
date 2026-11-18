@@ -1,0 +1,32 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000304",
+    "type": "resto_bons_etats",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 362,
+    "cree_le": "2026-11-18T19:55:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+        "evenements": [
+            {
+                "evenement_uuid": "e5000000-0000-4000-8000-000000000005",
+                "type": "statut",
+                "bon_uuid": "b0000000-0000-4000-8000-000000000001",
+                "de": "ready",
+                "vers": "new",
+                "le": "2026-11-18T19:45:00Z",
+                "source": "caisse"
+            }
+        ]
+    },
+    "empreinte": "860a0a42f3916e33de767e94c4bf64c957fbdc87deca0391aafcc1b419b298d5"
+}

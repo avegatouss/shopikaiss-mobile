@@ -1,5 +1,5 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commit : 2a4278b5 (feat/restaurant-v1-r2, restaurant-1 lots R-1 et R-2, contient main 91e24601)
+Commit : eed36fde (feat/restaurant-v1-r3, restaurant-1 lots R-1 à R-3, contient R-2 56b95102)
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

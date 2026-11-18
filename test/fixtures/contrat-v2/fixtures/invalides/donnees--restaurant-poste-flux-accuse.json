@@ -1,0 +1,10 @@
+{
+    "code": "cuisine",
+    "nom": "Cuisine",
+    "type": "kitchen",
+    "flux": "acknowledgement",
+    "ecran": true,
+    "papier": true,
+    "ordre": 1,
+    "actif": true
+}
