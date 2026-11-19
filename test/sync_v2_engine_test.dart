@@ -10,6 +10,7 @@ import 'package:shopikaiss_terminal/src/passes/pass_rules.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_context.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_engine.dart';
 import 'package:shopikaiss_terminal/src/offline/web_rules.dart';
+import 'package:shopikaiss_terminal/src/offline/x_z_report.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
@@ -744,6 +745,157 @@ void main() {
     expect((await e.lastClosure())!.content['z_restaurant'], containsPair('type', 'session'));
   });
 
+  test('restaurant.v1 (R-5) : remise client, tarif du personnel autorisé, remboursements retour et annulation, codes du serveur, Z local, clôture bloquée', () async {
+    Matcher refused(String text) => throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains(text)));
+    const pdv = 'b1000000-0000-4000-8000-000000000005';
+    const client = 'c1e00000-0000-4000-8000-000000000001';
+    const staffPromo = 'b0000000-0000-4000-8000-000000000503';
+    const unit = 1000000;
+    final moment = DateTime.utc(2026, 11, 18, 19, 30);
+    final codeHash = r'$2y$12$' + 'c' * 53;
+    Map<String, dynamic> operateur(String id, String nom, List<String> droits, {String? approbateur}) => {
+      'operateur_id': id, 'nom': nom, 'pin_empreinte': 'empreinte', 'droits': droits,
+      'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+      if (approbateur != null) ...{'approbateur_restaurant': approbateur, 'code_autorisation_empreinte': codeHash},
+    };
+    serve21(server);
+    server
+      ..capabilities = [...server.capabilities, 'session.cloture', 'restaurant.v1']
+      ..authorizationExpires = '2026-11-20T00:00:00Z'
+      ..restaurant = {'point_de_vente_uuid': pdv, 'profil': 'PRODUCTION', 'maitre': true, 'generation': '5', 'derniers_numeros': {'commande': null, 'bons': <Map<String, dynamic>>[]}}
+      ..put('operateur', 'operateur:7', operateur('7', 'Awa', ['caisse_cloturer', 'caisse_restaurant', 'caisse_table', 'ouverture_session', 'vente']), critical: true)
+      ..put('operateur', 'operateur:3', operateur('3', 'Marie', ['caisse_table', 'remise', 'retour_creer', 'retour_rembourser_especes', 'vente'], approbateur: 'manager'), critical: true)
+      ..put('operateur', 'operateur:8', operateur('8', 'Koffi', ['caisse_restaurant', 'caisse_table']), critical: true)
+      ..put('restaurant.point_de_vente', pdv, {
+        'code': 'RESTO', 'nom': 'Restaurant', 'profil': 'PRODUCTION', 'actif': true, 'terminaux': [fakeTerminal], 'membres': null,
+        'reglages_vente': {'changement_client_paiement': true, 'reference_plateforme_avant_envoi': false, 'verrouillage_minutes': null},
+      }, critical: true)
+      ..put('restaurant.maitre', 'maitre:$pdv', {
+        'point_de_vente_uuid': pdv, 'generation': '5', 'terminal_uuid': fakeTerminal, 'appareil_uuid': fakeDevice, 'epoque': 3, 'designe_le': '2026-11-18T09:30:00Z',
+      }, critical: true)
+      ..put('restaurant.reglages', 'reglages:$pdv', {
+        'point_de_vente_uuid': pdv, 'envoi_production': false, 'plusieurs_commandes_par_table': false, 'prefixe_commande': 'PF', 'motif_annulation_commande': false,
+        'registre_obligatoire': false, 'prefacture_a_la_demande': true, 'retard_production_minutes': 15, 'sections_z': <String>[], 'fuseau': 'Africa/Abidjan',
+        'impression_mode': 'register', 'repli_premier_poste_actif': false, 'annulation_envoye_responsable': false,
+        'assistant': {'max_operations_par_jour': 0, 'max_montant_par_operation': 0, 'max_montant_par_jour': 0, 'max_remise_pourcent': 0},
+      }, critical: true)
+      ..put('restaurant.canal', 'c5000000-0000-4000-8000-000000000002', {
+        'code': 'emporter', 'nom': 'Emporter', 'type': 'takeaway', 'exige_table': false, 'exige_reference': false, 'suivi_livraison': false, 'ordre': 1, 'actif': true,
+      })
+      // Lot R-5 : promotion du personnel (forme de la fixture `donnees--restaurant-promotion-personnel`) et remise du client.
+      ..put('restaurant.promotion', staffPromo, {
+        'nom': 'Repas du personnel', 'categorie': 'staff', 'type': 'pourcentage', 'pourcentage': '50.000000', 'montant': null, 'achetes': null, 'offerts': null,
+        'priorite': 0, 'jours': <int>[], 'heure_debut': null, 'heure_fin': null, 'du': null, 'au': null, 'canaux': <String>[], 'salles': <String>[],
+        'produits': <String>[], 'categories': <String>[], 'max_par_personnel': '1.000000',
+      })
+      ..put('restaurant.remise_client', client, {'client_uuid': client, 'pourcent': 10});
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid,
+        pinVerifier: (secret, hash) async => hash == codeHash ? secret == '12345678' : FakeV2Server.pinVerifier(secret, hash),
+        contract21: true, announceRestaurant: true, clock: () => moment);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    await e.sync();
+    final ctx = e.restaurant!;
+    expect([ctx.staffPricing, [for (final p in ctx.staffPromotions) p.uuid], ctx.customerDiscounts], [true, [staffPromo], {client: 10}]);
+    final ops = {for (final o in e.snapshot!.operators) o.id: o};
+    final awa = ops[7]!, marie = ops[3]!;
+    Future<Map> lastFact() async => (await e.v2.operationsOfType('resto_commande')).last['operation']['contenu'] as Map;
+
+    // Remise client : client cité à l'ouverture, recalculée à chaque version ; champs R-5 toujours envoyés.
+    var view = await e.restoOpenOnChannel(awa, 'emporter', customerUuid: client, customerName: 'Awa K.');
+    final order = view.order.uuid;
+    expect([(await lastFact())['etat']['client_uuid'], (await lastFact())['etat'].containsKey('remise_globale_source')], [client, true]);
+    view = await e.restoEditLines(awa, order, added: [(savon(e, units: 4), null)]);
+    expect([view.order.globalDiscount, view.order.globalDiscountSource, view.payable], [200, 'customer', 1800]);
+    final firstLine = ((await lastFact())['etat']['lignes'] as List).single as Map;
+    expect([firstLine.containsKey('promotion_uuid'), firstLine['promotion_uuid'], firstLine.containsKey('personnel_id'), firstLine['personnel_id']], [true, null, true, null]);
+
+    // Tarif du personnel : Awa n'a pas Remise ; un responsable autorise la remise totale, motif prérempli exigé.
+    final staffItems = [(savon(e), null)];
+    expect(await e.restoStaffDiscount(order, 8, staffItems), 250);
+    await expectLater(e.restoStaffLines(awa, order, 8, staffItems, reason: 'Vente personnel pour Koffi'), refused('autorisation d’un responsable'));
+    expect([for (final o in await e.restoApprovers(awa, 250, type: 'remise')) o.name], ['Marie']);
+    final staffOk = await e.restoAuthorize(cashier: awa, approver: marie, code: '12345678', reason: 'Vente personnel pour Koffi', amount: 250, type: 'remise');
+    await expectLater(e.restoStaffLines(awa, order, 8, [(savon(e, units: 2), null)], reason: 'Vente personnel pour Koffi', approval: staffOk), refused('montant a changé'));
+    view = await e.restoStaffLines(awa, order, 8, staffItems, reason: 'Vente personnel pour Koffi', approval: staffOk);
+    var fact = await lastFact();
+    final staffLine = (fact['etat']['lignes'] as List).last as Map;
+    expect([fact['action'], fact['motif'], (fact['autorisations'] as List).single['type'], staffLine['tarif'], staffLine['remise'], staffLine['promotion_uuid'], staffLine['personnel_id']],
+        ['lignes', 'Vente personnel pour Koffi', 'remise', 'staff', 250, staffPromo, '8']);
+    expect([view.order.globalDiscount, view.payable], [225, 2025], reason: 'remise client sur le montant après remises de ligne (2 250 F)');
+
+    // Règlement complet : la remise client et le tarif du personnel sont de confiance ; la remise est ensuite figée.
+    await e.restoSend(awa, order);
+    final sale = await e.restoSettle(awa, order, await e.restoCart(order), [cash(e, 2025)]);
+    expect((await e.restaurantOrders(all: true)).firstWhere((o) => o.order.uuid == order).order.status, 'settled');
+
+    // Remboursement retour : droits du web manquants à Awa, autorisation `remboursement` d'un responsable qui les détient.
+    expect([e.restoRefundNeedsApproval(awa, 'retour'), e.restoRefundNeedsApproval(marie, 'retour'), e.restoRefundNeedsApproval(marie, 'annulation')], [true, false, true]);
+    var sales = await e.restoSettledSales();
+    expect([sales.single.saleUuid, sales.single.total, sales.single.refundable], [sale.uuid, 2025, true]);
+    final saleLine = sales.single.lines.first.lineUuid;
+    expect(await e.restoRefundAmount(sale.uuid, 'retour', {saleLine: unit}), 450, reason: 'part archivée 1 800 F pour 4 savons');
+    await expectLater(e.restoRefund(awa, sale.uuid, 'retour', {saleLine: unit}, 'Savon abîmé'), refused('autorisation d’un responsable'));
+    expect([for (final o in await e.restoApprovers(awa, 450, type: 'remboursement', refund: 'retour')) o.name], ['Marie']);
+    final refundOk = await e.restoAuthorize(cashier: awa, approver: marie, code: '12345678', reason: 'Savon abîmé', amount: 450, type: 'remboursement', refund: 'retour');
+    await expectLater(e.restoRefund(awa, sale.uuid, 'retour', {saleLine: 2 * unit}, 'Savon abîmé', approval: refundOk), refused('montant a changé'));
+    final retour = await e.restoRefund(awa, sale.uuid, 'retour', {saleLine: unit}, 'Savon abîmé', approval: refundOk);
+    final retourContent = (await e.v2.operation(retour.uuid))!['operation']['contenu'] as Map;
+    expect(retourContent, {
+      'maitre_generation': '5', 'point_de_vente_uuid': pdv, 'vente_ref': {'operation_uuid': sale.uuid}, 'commande_uuid': order, 'type': 'retour',
+      'lignes': [{'ligne_uuid': saleLine, 'quantite': '1.000000'}], 'montant': 450, 'motif': 'Savon abîmé',
+      'autorisations': [{'type': 'remboursement', 'approbateur_id': '3', 'motif': 'Savon abîmé', 'preuve': isA<String>()}],
+    });
+    await expectLater(e.restoRefund(marie, sale.uuid, 'annulation', const {}, 'Erreur'), refused('déjà un remboursement'));
+
+    // Annulation d'une autre vente : toute la vente sur ses moyens ; la commande soldée est rouverte SANS nouvelle version.
+    final other = (await e.restoOpenOnChannel(awa, 'emporter')).order.uuid;
+    await e.restoEditLines(awa, other, added: [(savon(e, units: 2), null)]);
+    await e.restoSend(awa, other);
+    final otherSale = await e.restoSettle(awa, other, await e.restoCart(other), [cash(e, 1000)]);
+    final closedVersion = (await e.restaurantOrders(all: true)).firstWhere((o) => o.order.uuid == other).order.version;
+    expect(await e.restoRefundAmount(otherSale.uuid, 'annulation', const {}), 1000);
+    expect([for (final o in await e.restoApprovers(awa, 1000, type: 'remboursement', refund: 'annulation')) o.name], ['Marie'], reason: 'manager présumé détenir ANNULATION');
+    final cancelOk = await e.restoAuthorize(cashier: awa, approver: marie, code: '12345678', reason: 'Erreur de commande', amount: 1000, type: 'remboursement', refund: 'annulation');
+    await e.restoRefund(awa, otherSale.uuid, 'annulation', const {}, 'Erreur de commande', approval: cancelOk);
+    var reopened = (await e.restaurantOrders()).firstWhere((o) => o.order.uuid == other);
+    expect([reopened.order.status, reopened.order.version, reopened.order.activeLines.single.settled, reopened.paid], ['open', closedVersion, 0, false]);
+    await expectLater(e.restoRefund(awa, otherSale.uuid, 'annulation', const {}, 'Encore', approval: cancelOk), refused('déjà annulée'));
+    // Sa version suivante part de l'état rouvert.
+    view = await e.restoCoversAndServer(awa, other, covers: 2);
+    fact = await lastFact();
+    expect([fact['version'], fact['etat']['statut'], (fact['etat']['lignes'] as List).single['reglee']], [closedVersion + 1, 'open', '0.000000']);
+    sales = await e.restoSettledSales();
+    expect([for (final s in sales) [s.number.isNotEmpty, s.cancelled, s.refunded]], [[true, true, 1000], [true, false, 450]]);
+
+    // Z local (pré-X) : remboursements de la session par moyen, retour et annulation détaillés.
+    final facts = (await e.closureFacts())!;
+    final detail = closureDetail(facts, [facts.openSession!], methodNames: const {'especes': 'Espèces'});
+    expect(detail['refunds'], [{'code': 'especes', 'label': 'Espèces', 'amount': 1450}]);
+    expect([for (final r in (detail['returns'] as List).cast<Map>()) [r['kind'], r['amount'], (r['lines'] as List).length]], [['return', 450, 1], ['cancellation', 1000, 1]]);
+    expect([(detail['summary'] as Map)['returns_amount'], (detail['summary'] as Map)['cancellations_amount'], (detail['summary'] as Map)['cancellations_count']], [450, 1000, 1]);
+
+    // Remontée : conforme au contrat. Le serveur attend la vente du retour (`recue`) et met l'annulation à arbitrer.
+    server
+      ..verdict = ((op) => op['type'] == 'resto_remboursement' ? ((op['contenu'] as Map)['type'] == 'retour' ? 'recue' : 'a_arbitrer') : 'integree')
+      ..reasonFor = ((op) => op['type'] != 'resto_remboursement'
+          ? null
+          : (op['contenu'] as Map)['type'] == 'retour'
+          ? {'code': 'restaurant.attente_reglement', 'message': 'La vente remboursée n’est pas encore intégrée.', 'details': {'ecart': 'vente_en_attente'}}
+          : {'code': 'restaurant.remboursement_incoherent', 'message': 'Montant du remboursement recalculé différent.', 'details': {'ecart': 'montant'}});
+    await e.sync();
+    final types = [for (final r in server.received.values) (r['operation'] as Map)['type']];
+    expect(types.where((t) => t == 'resto_remboursement').length, 2);
+    expect(server.received.values.where((r) => (r['operation'] as Map)['type'] != 'resto_remboursement').every((r) => r['etat'] == 'integree'), isTrue);
+    final staffSent = server.received.values.firstWhere((r) => (r['operation'] as Map)['type'] == 'resto_commande' && ((r['operation'] as Map)['contenu'] as Map)['motif'] == 'Vente personnel pour Koffi');
+    expect((((staffSent['operation'] as Map)['contenu'] as Map)['etat'] as Map)['remise_globale_source'], 'customer');
+    sales = await e.restoSettledSales();
+    final cancelView = sales.first.refunds.single, retourView = sales.last.refunds.single;
+    expect([retourView.waiting, retourView.message, retourView.toArbitrate], [true, 'La vente remboursée n’est pas encore intégrée.', false]);
+    expect([cancelView.waiting, cancelView.message, cancelView.toArbitrate], [false, 'Montant du remboursement recalculé différent.', true]);
+    // Un remboursement à arbitrer porte de l'argent : la clôture de session attend son traitement.
+    await expectLater(e.closeSession(awa, cash: 0), refused('attend l’arbitrage'));
+  });
   test('restaurant.v1 (R-5) : promotions publiées, happy hour et « X achetés, Y offerts » à la saisie, conditions figées, fonction restreinte', () async {
     const pdv = 'b1000000-0000-4000-8000-000000000005';
     const t1 = 'b4000000-0000-4000-8000-000000000051';

@@ -14,6 +14,7 @@ import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_context.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_engine.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_promotions.dart';
+import 'package:shopikaiss_terminal/src/sync_v2/decimal6.dart';
 import 'package:shopikaiss_terminal/src/terminal/terminal_channel.dart';
 import 'package:shopikaiss_terminal/src/terminal/terminal_session.dart';
 import 'package:shopikaiss_terminal/src/ui/screen_profile.dart';
@@ -162,7 +163,7 @@ class _RestaurantEngine extends OfflineEngine {
   Future<List<RestoOrderView>> restaurantOrders({bool all = false}) async => [for (final o in orders.values) if (all || o.isOpen) _view(o)];
 
   @override
-  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers}) async =>
+  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers, Customer? customer}) async =>
       _keep(_resto.open(prefix: 'PF', businessDay: '2026-11-17', profile: 'TABLE_SERVICE', tableUuid: tableUuid, covers: covers), 'ouverture');
 
   @override
@@ -267,10 +268,68 @@ class _ProductionEngine extends _RestaurantEngine {
       RestoChannel(uuid: 'c2', code: 'emporter', name: 'Emporter', kind: 'takeaway', order: 2),
       RestoChannel(uuid: 'c3', code: 'livraison', name: 'Livraison', kind: 'delivery', requiresReference: true, order: 3),
     ],
+    promotions: [_staffPromotion],
   );
 
+  static const _staffPromotion = RestoPromotion(uuid: 'promo-staff', name: 'Repas du personnel', category: 'staff', type: 'pourcentage', percent: 50000000);
+
+  // Tarif du personnel : même moteur de promotions que l'engine réel (catégorie `staff`).
   @override
-  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) async =>
+  RestoPromotions? get _promotionBook => RestoPromotions(promotions: const [_staffPromotion]);
+
+  // ---------------------------------------------------------------- lot R-5
+
+  final refunds = <String>[];
+
+  static int _half(CartLine l) => Decimal6.amount(l.unitPrice, l.quantity.toInt()) ~/ 2;
+
+  @override
+  Future<int> restoStaffDiscount(String orderUuid, int staffId, List<(CartLine, String?)> added) async => added.fold<int>(0, (sum, a) => sum + _half(a.$1));
+
+  @override
+  Future<RestoOrderView> restoStaffLines(Operator operator, String orderUuid, int staffId, List<(CartLine, String?)> added, {required String reason, RestoApproval? approval}) async {
+    final r = _resto.editLines(orders[orderUuid]!, reason: reason, added: [
+      for (final (l, c) in added)
+        RestoNewLine(productUuid: '${l.product.id}', label: l.label, quantity: l.quantity.toInt(), unitPrice: l.unitPrice, comment: c, staffId: '$staffId'),
+    ]);
+    actions.add('personnel:${r.event.reason}');
+    return _keep(r, 'lignes');
+  }
+
+  @override
+  Future<List<RestoSettledSale>> restoSettledSales() async => [
+    RestoSettledSale(
+      saleUuid: 'v1',
+      number: 'HL-001-000001',
+      orderUuid: 'o1',
+      orderNumber: 'PF-20261118-L0009',
+      at: DateTime(2026, 11, 18, 20),
+      total: 3000,
+      lines: const [RestoSaleLine(lineUuid: 'l1', label: 'Article numéro 3', sold: 1000000, remaining: 1000000)],
+      refunds: [
+        if (refunds.isNotEmpty)
+          const RestoRefundView(uuid: 'r1', type: 'retour', amount: 3000, reason: 'Boisson renversée', state: 'recue', message: 'La vente remboursée n’est pas encore intégrée.', waiting: true),
+      ],
+    ),
+  ];
+
+  @override
+  String? restoRefundBlocker(Operator operator) => null;
+
+  @override
+  bool restoRefundNeedsApproval(Operator operator, String type) => false;
+
+  @override
+  Future<int> restoRefundAmount(String saleUuid, String type, Map<String, int> quantities) async => type == 'annulation' ? 3000 : (quantities['l1'] ?? 0) * 3000 ~/ 1000000;
+
+  @override
+  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) async {
+    refunds.add('$type:$reason:$quantities');
+    return OfflineOperation(uuid: 'r1', sequence: 2, type: 'resto_remboursement', number: null, date: DateTime(2026), operatorId: operator.id, content: const {});
+  }
+
+  @override
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers, String? customerUuid}) async =>
       _keep(_resto.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: channelCode, tableUuid: tableUuid, externalReference: reference, customerName: customerName), 'ouverture');
 
   @override
@@ -894,6 +953,65 @@ void main() {
       expect(find.textContaining('Clôturez d’abord la session'), findsOneWidget);
       await tester.tap(find.text('Fermer'));
       await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Restaurant (R-5) : remboursement d’une vente réglée (retour, motif, attente du serveur), tarif du personnel au motif prérempli', (tester) async {
+      final session = await _session(inches: 10.1, production: true);
+      final engine = session.offline as _ProductionEngine;
+      await _pump(tester, const Size(1280, 800), session);
+      await tester.pumpAndSettle();
+
+      // Ventes réglées : retour d'un article en espèces, motif obligatoire, puis l'attente du serveur affichée.
+      await tester.tap(find.byKey(const ValueKey('resto-remboursements')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Vente HL-001-000001'), findsOneWidget);
+      await tester.tap(find.text('Rembourser'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('remboursement-annulation')), findsOneWidget);
+      await tester.tap(find.byTooltip('Plus').last);
+      await tester.pumpAndSettle();
+      expect(find.text('À rendre : 3 000 F'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('remboursement-suite')));
+      await tester.pumpAndSettle();
+      expect(find.text('3 000 F à rendre en espèces.'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Rembourser'));
+      await tester.pumpAndSettle();
+      expect(find.text('Indiquez le motif (3 caractères au moins).'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Motif (obligatoire)'), 'Boisson renversée');
+      await tester.tap(find.widgetWithText(FilledButton, 'Rembourser'));
+      await tester.pumpAndSettle();
+      expect(engine.refunds, ['retour:Boisson renversée:{l1: 1000000}']);
+      expect(find.textContaining('En attente : La vente remboursée n’est pas encore intégrée.'), findsOneWidget);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+
+      // Tarif du personnel : l'employé d'abord, puis les articles ; motif « Vente personnel pour … » prérempli.
+      await tester.tap(find.byKey(const ValueKey('resto-nouvelle-commande')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('canal-emporter')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Plus d’actions'));
+      await tester.pumpAndSettle();
+      expect(find.text('Remise client'), findsNothing, reason: 'aucun client cité à l’ouverture');
+      await tester.tap(find.text('Tarif personnel'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Awa Koné'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('resto-vente-personnel')), findsOneWidget);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      expect(find.text('Vente personnel pour Awa Koné'), findsWidgets);
+      expect(find.textContaining('1 000 F de remise'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Appliquer le tarif'));
+      await tester.pumpAndSettle();
+      expect(engine.actions, ['ouverture:1', 'personnel:Vente personnel pour Awa Koné', 'lignes:2']);
+      expect(find.textContaining('Tarif personnel −1 000 F'), findsOneWidget);
+      expect(find.text('1 000 F'), findsWidgets);
       expect(tester.takeException(), isNull);
     });
 

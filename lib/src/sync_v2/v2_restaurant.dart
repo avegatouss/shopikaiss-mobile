@@ -11,6 +11,9 @@ class _RestoTrack {
   bool waiting = false;
   bool blocked = false;
   String? serverNumber;
+
+  /// Opération de la dernière version (ordre de la file : une annulation de vente postérieure rouvre la commande).
+  Map? lastOperation;
 }
 
 /// Restaurant hors connexion (capacité `restaurant.v1`, RESTAURANT-1 validé, lots R-1 à R-3) : la caisse maîtresse
@@ -33,6 +36,9 @@ extension _V2Restaurant on V2Engine {
 
   /// Adresses locales des imprimantes de poste (`{poste_uuid: "ip:port"}`), jamais reçues du serveur (§3.8).
   static const _printersKey = 'v2.resto_imprimantes';
+
+  /// Remboursement restaurant (RESTAURANT-1 §4.10, lot R-5).
+  static const _refundType = 'resto_remboursement';
 
   Future<RestoContext?> _loadRestaurant() async {
     if (!v2.restaurant || !_serverOffers(CaisseV2Client.restaurantCapability)) return null;
@@ -133,6 +139,10 @@ extension _V2Restaurant on V2Engine {
       categoryParents: {
         for (final e in (await v2.entities('restaurant.categorie')).entries) e.key: e.value['parent_uuid'] as String?,
       },
+      // Lot R-5 : remise par client, publiée seulement si le réglage est actif.
+      customerDiscounts: {
+        for (final e in (await v2.entities('restaurant.remise_client')).values) e['client_uuid'] as String: e['pourcent'] as int,
+      },
     );
   }
 
@@ -199,6 +209,7 @@ extension _V2Restaurant on V2Engine {
       final version = content['version'] as int;
       if (track.order == null || version > track.order!.version) {
         track.order = RestoOrder.fromState(uuid, version, content['etat'] as Map);
+        track.lastOperation = operation;
       }
       final state = row['etat'] as String;
       if (V2OperationState.unsent.contains(state)) track.pending++;
@@ -214,9 +225,21 @@ extension _V2Restaurant on V2Engine {
     _restoReceiveMoves(tracks, rows);
     // Réglé (R-4, règlements partiels) : quantités des ventes de ce terminal qui règlent chaque ligne, portées par la
     // version suivante (`reglee`) ; le serveur accepte un réglé en avance sur les ventes qu'il a intégrées.
-    final settled = await _restoSettledQuantities();
+    final sales = await _restoSaleFacts();
     for (final t in tracks.values) {
-      final paid = settled[t.uuid];
+      final paid = sales.settled[t.uuid];
+      // Lot R-5 : une commande qui a eu un règlement garde sa remise client (PromotionsCaisse::remiseClient).
+      if (sales.withSale.contains(t.uuid)) t.order!.discountFrozen = true;
+      final cancellation = sales.cancellations[t.uuid];
+      if (cancellation != null) {
+        // Annulation d'une vente (`resto_remboursement`, R-5) : les quantités réglées reviennent à la commande, une
+        // commande soldée est rouverte SANS nouvelle version ; la version suivante part de cet état rouvert.
+        for (final l in t.order!.lines) {
+          l.settled = paid?[l.uuid] ?? 0;
+        }
+        if (t.order!.status == 'settled' && t.lastOperation != null && _after(cancellation, t.lastOperation!)) t.order!.status = 'open';
+        continue;
+      }
       if (paid == null) continue;
       for (final l in t.order!.lines) {
         final quantity = paid[l.uuid] ?? 0;
@@ -267,20 +290,34 @@ extension _V2Restaurant on V2Engine {
   }
 
 
-  /// Quantités réglées par les ventes de ce terminal (hors quarantaine), par commande puis par ligne de commande.
-  Future<Map<String, Map<String, int>>> _restoSettledQuantities() async {
+  /// Ventes de ce terminal qui règlent des commandes (hors quarantaine) : quantités réglées par commande puis par ligne
+  /// (ventes annulées exclues, lot R-5), commandes qui ont eu un règlement, et dernière annulation de vente par commande.
+  Future<({Map<String, Map<String, int>> settled, Set<String> withSale, Map<String, Map> cancellations})> _restoSaleFacts() async {
     final settled = <String, Map<String, int>>{};
+    final withSale = <String>{};
+    final cancellations = <String, Map>{};
+    final cancelledSales = <String>{};
+    for (final row in await v2.operationsOfType(_V2Restaurant._refundType)) {
+      if (row['etat'] == V2OperationState.rejected) continue;
+      final operation = row['operation'] as Map;
+      final content = operation['contenu'] as Map;
+      if (content['type'] != 'annulation') continue;
+      cancelledSales.add((content['vente_ref'] as Map)['operation_uuid'] as String);
+      cancellations[content['commande_uuid'] as String] = operation;
+    }
     for (final row in await v2.operationsOfType('vente')) {
       if (row['etat'] == V2OperationState.rejected) continue;
       final link = ((row['operation'] as Map)['contenu'] as Map)['commande'];
       if (link is! Map) continue;
+      withSale.add(link['commande_uuid'] as String);
+      if (cancelledSales.contains((row['operation'] as Map)['uuid'])) continue;
       final lines = settled[link['commande_uuid'] as String] ??= {};
       for (final l in (link['lignes'] as List).cast<Map>()) {
         final uuid = l['ligne_commande_uuid'] as String;
         lines[uuid] = (lines[uuid] ?? 0) + Decimal6.parse(l['quantite'] as String);
       }
     }
-    return settled;
+    return (settled: settled, withSale: withSale, cancellations: cancellations);
   }
 
   /// Toutes les lignes actives réglées.
@@ -370,6 +407,7 @@ extension _V2Restaurant on V2Engine {
         tableRooms: {for (final t in ctx.tables) t.uuid: t.roomUuid},
         entryTerms: await _restoPromotionTerms(),
       ),
+      customerDiscounts: ctx.customerDiscounts,
     );
   }
 
@@ -488,12 +526,11 @@ extension _V2Restaurant on V2Engine {
 
   /// Approbateurs restaurant de ce terminal pour une annulation de [amount] F : autre personne que l'opérateur, manager
   /// ou assistant qui détient lui-même `resto_modifier_envoye`, avec un code publié ; un assistant dans ses plafonds.
-  Future<List<Operator>> _restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) async {
+  Future<List<Operator>> _restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent, String? refund}) async {
     final ctx = _resto;
     if (ctx == null) return const [];
     final caps = ctx.settings.assistant;
     final ledger = await _restoLedger();
-    final right = _restoRightOf(type);
     bool within(Operator o) {
       if (o.restaurantApprover == 'manager') return true;
       // Remise (R-4) : pourcentage de la ligne ou de la commande, arrondi au supérieur ; 0 = l'assistant n'en autorise pas.
@@ -510,7 +547,7 @@ extension _V2Restaurant on V2Engine {
         if (o.id != cashier.id &&
             (o.restaurantApprover == 'manager' || o.restaurantApprover == 'assistant') &&
             (o.approvalCodeHash?.isNotEmpty ?? false) &&
-            hasRight(o, right) &&
+            _restoApproverHolds(o, type, refund) &&
             within(o))
           o,
     ];
@@ -524,9 +561,10 @@ extension _V2Restaurant on V2Engine {
     required int amount,
     String type = 'resto_modifier_envoye',
     int? percent,
+    String? refund,
   }) async {
     final cancel = type == 'resto_modifier_envoye' || type == 'resto_annuler_commande';
-    if (!(await _restoApprovers(cashier, amount, type: type, percent: percent)).any((o) => o.id == approver.id)) {
+    if (!(await _restoApprovers(cashier, amount, type: type, percent: percent, refund: refund)).any((o) => o.id == approver.id)) {
       throw OfflineRefusal('${approver.name} ne peut pas autoriser ${cancel ? 'cette annulation' : 'ce geste'} (droit, code ou plafonds).');
     }
     final motive = reason.trim();
@@ -884,7 +922,7 @@ extension _V2Restaurant on V2Engine {
     notifyListeners();
   }
 
-  Future<RestoOrderView> _restoOpen(Operator operator, String tableUuid, {int? covers}) => serialized(() async {
+  Future<RestoOrderView> _restoOpen(Operator operator, String tableUuid, {int? covers, Customer? customer}) => serialized(() async {
     final ctx = _requireResto(operator);
     final table = ctx.table(tableUuid) ?? (throw const OfflineRefusal('Table inconnue de ce point de vente.'));
     if (!ctx.settings.severalOrdersPerTable) {
@@ -903,6 +941,8 @@ extension _V2Restaurant on V2Engine {
           tableUuid: tableUuid,
           covers: covers,
           serverId: '${operator.id}',
+          customerUuid: customer?.uuid,
+          customerName: customer?.name,
         ),
       );
     } on RestoRefusal catch (e) {
@@ -921,6 +961,7 @@ extension _V2Restaurant on V2Engine {
     String? reference,
     String? customerName,
     int? covers,
+    String? customerUuid,
   }) => serialized(() async {
     final ctx = _requireResto(operator);
     if (!ctx.production) throw const OfflineRefusal('Le Service de table ouvre une commande à une table.');
@@ -951,6 +992,7 @@ extension _V2Restaurant on V2Engine {
           tableUuid: channel.requiresTable ? tableUuid : null,
           externalReference: ref.isEmpty ? null : ref,
           customerName: customerName,
+          customerUuid: customerUuid,
           covers: covers,
           serverId: '${operator.id}',
         ),
@@ -1257,5 +1299,258 @@ extension _V2Restaurant on V2Engine {
     });
     await _restoFlush(force: true);
     return view;
+  }
+
+  // ---------------------------------------------------------------- tarif du personnel (R-5)
+
+  /// Articles servis à l'employé [staffId] au tarif du personnel (« Vente personnel » du web, PromotionEngine catégorie
+  /// `staff`) : pour chaque article, la promotion du personnel qui vaut maintenant au lieu de la commande ; refus si aucune
+  /// ne s'applique (comme le web). Le maximum par employé et par jour est un contrôle du serveur, jamais un refus ici.
+  List<(RestoNewLine, int)> _restoStaffItems(RestoContext ctx, RestoPromotions promotions, RestoOrder order, int staffId, List<(CartLine, String?)> added) {
+    if (!ctx.production) throw const OfflineRefusal('Le tarif du personnel est celui du Restaurant : le Service de table n’en a pas.');
+    final staff = snapshot?.operators.where((o) => o.id == staffId).firstOrNull ?? (throw const OfflineRefusal('Employé introuvable sur ce terminal.'));
+    if (added.isEmpty) throw const OfflineRefusal('Ajoutez les articles servis à l’employé.');
+    return [
+      for (final (line, comment) in added) _restoStaffItem(promotions, _restoNewLine(line, comment), '${staff.id}', order),
+    ];
+  }
+
+  /// Un article au tarif du personnel et sa remise : même moteur de promotions que le reste du lot R-5 (catégorie `staff`,
+  /// à l'heure de la caisse) ; l'engine refait ce choix et fige ses conditions à l'enregistrement.
+  (RestoNewLine, int) _restoStaffItem(RestoPromotions promotions, RestoNewLine item, String staffId, RestoOrder order) {
+    final best = promotions.best(
+          RestoPromotionLine(
+            productUuid: item.productUuid,
+            categoryUuid: item.categoryUuid,
+            unitPrice: item.unitPrice,
+            quantity: item.quantity,
+            coefficient: item.coefficient,
+            channel: order.channel,
+            tableUuid: order.tableUuid,
+          ),
+          now,
+          categories: const ['staff'],
+        ) ??
+        (throw OfflineRefusal('Le tarif du personnel ne s’applique pas à « ${item.label} » maintenant : il n’existe qu’aux jours, heures et articles configurés.'));
+    return (
+      RestoNewLine(
+        productUuid: item.productUuid,
+        packagingUuid: item.packagingUuid,
+        label: item.label,
+        quantity: item.quantity,
+        coefficient: item.coefficient,
+        unitPrice: item.unitPrice,
+        routing: item.routing,
+        comment: item.comment,
+        categoryUuid: item.categoryUuid,
+        staffId: staffId,
+      ),
+      best.lineDiscount(item.unitPrice, item.quantity, coefficient: item.coefficient),
+    );
+  }
+
+  /// Remise totale de ces articles au tarif du personnel : montant de l'autorisation `remise` (plafonds de l'assistant).
+  Future<int> _restoStaffDiscount(String orderUuid, int staffId, List<(CartLine, String?)> added) async {
+    final ctx = _resto ?? (throw const OfflineRefusal(_unavailable));
+    final promotions = (await _restoEngine(ctx)).promotions;
+    return _restoStaffItems(ctx, promotions, await _restoOrder(orderUuid), staffId, added).fold<int>(0, (sum, i) => sum + i.$2);
+  }
+
+  /// Une version `lignes` d'articles au tarif du personnel : droit `remise` ou autorisation `remise` d'un responsable (pour
+  /// la remise totale), motif obligatoire (« Vente personnel pour … »), employé servi sur chaque ligne (`personnel_id`).
+  Future<RestoOrderView> _restoStaffLines(Operator operator, String orderUuid, int staffId, List<(CartLine, String?)> added, {required String reason, RestoApproval? approval}) async {
+    final authorizations = _restoGestureAuthorizations(operator, 'remise', approval, reason);
+    return _restoAct(
+      operator,
+      orderUuid,
+      (engine, order) {
+        final items = _restoStaffItems(_resto!, engine.promotions, order, staffId, added);
+        _restoSameAmount(authorizations, approval, () => items.fold<int>(0, (sum, i) => sum + i.$2));
+        return engine.editLines(order, added: [for (final i in items) i.$1], reason: reason, authorizations: authorizations);
+      },
+      approvals: [if (authorizations.isNotEmpty) approval!],
+    );
+  }
+
+  // ---------------------------------------------------------------- remboursement restaurant (R-5, §4.10)
+
+  /// Pourquoi [operator] ne peut pas rembourser sur cette caisse : caisse maîtresse du profil Restaurant (le Service de table
+  /// garde le retour en espèces), session de caisse ouverte (le remboursement sort de son tiroir).
+  String? _restoRefundBlocker(Operator operator) {
+    final reason = _restaurantBlocker(operator);
+    if (reason != null) return reason;
+    if (!_resto!.production) return 'Le Service de table rembourse par le retour en espèces de la caisse.';
+    if (!sessionOpen) return 'Aucune session de caisse ouverte : ouvrez-la d’abord.';
+    return null;
+  }
+
+  /// Droits du web (RefundService::missingPermissions) : `ANNULATION` pour une annulation, `RETOUR_CREER` et
+  /// `RETOUR_REMBOURSER_ESPECES` pour un retour en espèces.
+  static List<String> _restoRefundRights(String type) => type == 'annulation' ? const ['annulation'] : const ['retour_creer', 'retour_rembourser_especes'];
+
+  bool _restoRefundNeedsApproval(Operator operator, String type) => !_restoRefundRights(type).every((r) => hasRight(operator, r));
+
+  /// Un approbateur détient le droit du geste ; pour un remboursement, les permissions qui manquent à l'opérateur.
+  /// `ANNULATION` n'est pas publiée aux terminaux : un manager est présumé la détenir, le serveur revérifie.
+  bool _restoApproverHolds(Operator o, String type, String? refund) {
+    if (type != 'remboursement') return hasRight(o, _restoRightOf(type));
+    return _restoRefundRights(refund ?? 'retour').every((r) => hasRight(o, r)) || (refund == 'annulation' && o.restaurantApprover == 'manager');
+  }
+
+  /// Vente de ce terminal qui règle une commande : parts archivées par ligne, quantités déjà rendues, total déjà remboursé
+  /// (retours de la caisse et remboursements restaurant, hors quarantaine), vente déjà annulée.
+  Future<({Map content, Map<String, int> shares, Map<String, int> before, int refunded, bool cancelled})> _restoRefundBasis(String saleUuid) async {
+    final row = await v2.operation(saleUuid);
+    final operation = row?['operation'] as Map?;
+    final content = operation?['contenu'] as Map?;
+    if (operation == null || operation['type'] != 'vente' || content?['commande'] is! Map) {
+      throw const OfflineRefusal('Seules les ventes de cette caisse qui règlent une commande se remboursent ici.');
+    }
+    if (row!['etat'] == V2OperationState.rejected) throw const OfflineRefusal('Cette vente est en quarantaine : remboursement impossible.');
+    final lines = (content!['lignes'] as List).cast<Map>();
+    final parts = archivedShares(V2Engine._saleNet(content), [for (final l in lines) l['total'] as int], _shopRules?['retour_residuel'] as String?) ??
+        (throw const OfflineRefusal('Le montant de ce remboursement dépend d’une règle d’arrondi de la boutique : faites-le en ligne.'));
+    final shares = {for (final (i, l) in lines.indexed) l['ligne_uuid'] as String: parts[i]};
+    final before = <String, int>{};
+    var refunded = 0;
+    var cancelled = false;
+    for (final other in await v2.operationRows()) {
+      final past = other['operation'] as Map;
+      if ((past['type'] != 'retour' && past['type'] != _refundType) || other['etat'] == V2OperationState.rejected) continue;
+      final pastContent = past['contenu'] as Map;
+      if ((pastContent['vente_ref'] as Map)['operation_uuid'] != saleUuid) continue;
+      refunded += pastContent['montant'] as int;
+      if (pastContent['type'] == 'annulation') cancelled = true;
+      for (final l in (pastContent['lignes'] as List).cast<Map>()) {
+        before.update(l['ligne_uuid'] as String, (v) => v + Decimal6.parse(l['quantite'] as String), ifAbsent: () => Decimal6.parse(l['quantite'] as String));
+      }
+    }
+    return (content: content, shares: shares, before: before, refunded: refunded, cancelled: cancelled);
+  }
+
+  /// Montant rendu (RefundService::estimate) : retour = parts archivées des quantités rendues ; annulation = tout ce qui a
+  /// été payé. Une vente déjà remboursée en partie s'annule en ligne (répartition du reste entre ses moyens).
+  int _restoRefundAmountOf(({Map content, Map<String, int> shares, Map<String, int> before, int refunded, bool cancelled}) basis, String type, Map<String, int> quantities) {
+    if (basis.cancelled) throw const OfflineRefusal('Cette vente est déjà annulée.');
+    if (type == 'annulation') {
+      if (basis.refunded > 0) throw const OfflineRefusal('Cette vente a déjà un remboursement : annulez le reste en ligne.');
+      return (basis.content['paiements'] as List).cast<Map>().fold<int>(0, (sum, p) => sum + (p['montant'] as int));
+    }
+    if (quantities.isEmpty) throw const OfflineRefusal('Choisissez au moins une quantité à rendre.');
+    if (quantities.length > 100) throw const OfflineRefusal('100 lignes au plus par remboursement.');
+    return _amountOf((content: basis.content, shares: basis.shares, before: basis.before, refunded: basis.refunded), quantities);
+  }
+
+  Future<int> _restoRefundAmount(String saleUuid, String type, Map<String, int> quantities) async =>
+      _restoRefundAmountOf(await _restoRefundBasis(saleUuid), type, quantities);
+
+  /// Remboursement restaurant (`resto_remboursement`) : `retour` (lignes de la vente, en espèces) ou `annulation` (toute la
+  /// vente, sur ses moyens d'origine : la commande soldée est rouverte, sans nouvelle version). Droits du web, sinon
+  /// autorisation `remboursement` d'un responsable pour ce montant ; motif obligatoire. Le serveur recalcule le montant
+  /// (`restaurant.remboursement_incoherent` s'il diffère, rien n'est remboursé) et attend la vente si elle n'est pas
+  /// encore intégrée (`restaurant.attente_reglement`).
+  Future<OfflineOperation> _restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) =>
+      serialized(() async {
+        final blocker = _restoRefundBlocker(operator);
+        if (blocker != null) throw OfflineRefusal(blocker);
+        final ctx = _resto!;
+        if (type != 'retour' && type != 'annulation') throw const OfflineRefusal('Type de remboursement inconnu.');
+        final motive = reason.trim();
+        if (motive.length < 3 || motive.length > 500) throw const OfflineRefusal('Indiquez le motif du remboursement (3 à 500 caractères).');
+        final basis = await _restoRefundBasis(saleUuid);
+        final amount = _restoRefundAmountOf(basis, type, type == 'annulation' ? const {} : quantities);
+        if (amount <= 0) throw const OfflineRefusal('Rien à rembourser.');
+        final orderUuid = (basis.content['commande'] as Map)['commande_uuid'] as String;
+        final order = (await _restoTracks())[orderUuid]?.order;
+        if (order == null || order.profile != 'PRODUCTION') throw const OfflineRefusal('Le remboursement restaurant concerne une commande du Restaurant de cette caisse.');
+        var authorizations = const <Map<String, dynamic>>[];
+        if (_restoRefundNeedsApproval(operator, type)) {
+          if (approval == null || approval.type != 'remboursement') {
+            throw OfflineRefusal('${operator.name} n’a pas le droit ${type == 'annulation' ? 'd’annuler une vente' : 'de rembourser en espèces'} : l’autorisation d’un responsable est requise.');
+          }
+          if (approval.approverId == operator.id) throw const OfflineRefusal('Le responsable doit être une autre personne que l’opérateur.');
+          if (approval.reason != motive) throw const OfflineRefusal('Le motif a changé depuis l’autorisation : faites-la de nouveau.');
+          if (approval.amount != amount) throw const OfflineRefusal('Le montant a changé depuis l’autorisation : faites-la de nouveau.');
+          authorizations = [approval.toJson()];
+        }
+        final operation = await _record(_newUuid(), _refundType, operator, (_) => {
+          'maitre_generation': ctx.generation,
+          'point_de_vente_uuid': ctx.pointOfSaleUuid,
+          'vente_ref': {'operation_uuid': saleUuid},
+          'commande_uuid': orderUuid,
+          'type': type,
+          'lignes': type == 'annulation'
+              ? <Map<String, dynamic>>[]
+              : [for (final e in quantities.entries) {'ligne_uuid': e.key, 'quantite': Decimal6.format(e.value)}],
+          'montant': amount,
+          'motif': motive,
+          'autorisations': authorizations,
+        });
+        if (authorizations.isNotEmpty) await _restoLedgerAdd([approval!]);
+        await _afterWrite();
+        return operation;
+      });
+
+  /// Ventes de cette caisse qui ont réglé une commande du Restaurant, la plus récente d'abord, avec ce qui reste à rendre
+  /// et l'état de leurs remboursements (attente du règlement, arbitrage).
+  Future<List<RestoSettledSale>> _restoSettledSales() async {
+    final ctx = _resto;
+    if (ctx == null || !ctx.production) return const [];
+    final tracks = await _restoTracks();
+    final refunds = <String, List<Map<String, dynamic>>>{};
+    for (final row in [...await v2.operationsOfType('retour'), ...await v2.operationsOfType(_refundType)]) {
+      if (row['etat'] == V2OperationState.rejected) continue;
+      final ref = (((row['operation'] as Map)['contenu'] as Map)['vente_ref'] as Map)['operation_uuid'] as String;
+      (refunds[ref] ??= []).add(row);
+    }
+    final sales = <RestoSettledSale>[];
+    for (final row in await v2.operationsOfType('vente')) {
+      if (row['etat'] == V2OperationState.rejected) continue;
+      final operation = row['operation'] as Map;
+      final content = operation['contenu'] as Map;
+      final link = content['commande'];
+      if (link is! Map) continue;
+      final order = tracks[link['commande_uuid']]?.order;
+      if (order == null || order.profile != 'PRODUCTION') continue;
+      final returned = <String, int>{};
+      final views = <RestoRefundView>[];
+      for (final r in refunds[operation['uuid']] ?? const <Map<String, dynamic>>[]) {
+        final refund = (r['operation'] as Map)['contenu'] as Map;
+        for (final l in (refund['lignes'] as List).cast<Map>()) {
+          returned.update(l['ligne_uuid'] as String, (v) => v + Decimal6.parse(l['quantite'] as String), ifAbsent: () => Decimal6.parse(l['quantite'] as String));
+        }
+        final state = r['etat'] as String;
+        final raison = r['raison'] as Map?;
+        final done = state == V2OperationState.integrated || state == V2OperationState.resolved;
+        views.add(RestoRefundView(
+          uuid: (r['operation'] as Map)['uuid'] as String,
+          type: refund['type'] as String? ?? 'retour',
+          amount: refund['montant'] as int,
+          reason: refund['motif'] as String? ?? '',
+          state: state,
+          message: done ? null : raison?['message'] as String?,
+          waiting: !done && raison?['code'] == 'restaurant.attente_reglement',
+        ));
+      }
+      sales.add(RestoSettledSale(
+        saleUuid: operation['uuid'] as String,
+        number: row['numero_serveur'] as String? ?? content['numero_local'] as String,
+        orderUuid: order.uuid,
+        orderNumber: order.localNumber,
+        at: DateTime.parse(operation['cree_le'] as String).toLocal(),
+        total: (content['totaux'] as Map)['a_payer'] as int,
+        lines: [
+          for (final l in (content['lignes'] as List).cast<Map>())
+            RestoSaleLine(
+              lineUuid: l['ligne_uuid'] as String,
+              label: l['libelle'] as String,
+              sold: Decimal6.parse(l['quantite_base'] as String),
+              remaining: Decimal6.parse(l['quantite_base'] as String) - (returned[l['ligne_uuid']] ?? 0),
+            ),
+        ],
+        refunds: views,
+      ));
+    }
+    return sales.reversed.toList();
   }
 }
