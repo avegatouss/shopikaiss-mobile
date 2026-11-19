@@ -1,0 +1,61 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000303",
+    "type": "resto_bons_etats",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 362,
+    "cree_le": "2026-11-18T19:55:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+        "evenements": [
+            {
+                "evenement_uuid": "e5000000-0000-4000-8000-000000000001",
+                "type": "livraison",
+                "bon_uuid": "b0000000-0000-4000-8000-000000000001",
+                "tentative_uuid": "e6000000-0000-4000-8000-000000000001",
+                "cible": "imprimante_poste",
+                "resultat": "a_verifier",
+                "secours": false,
+                "le": "2026-11-18T19:40:02Z"
+            },
+            {
+                "evenement_uuid": "e5000000-0000-4000-8000-000000000002",
+                "type": "verification",
+                "bon_uuid": "b0000000-0000-4000-8000-000000000001",
+                "tentative_uuid": "e6000000-0000-4000-8000-000000000001",
+                "constat": "sorti",
+                "operateur_id": "7",
+                "le": "2026-11-18T19:42:00Z"
+            },
+            {
+                "evenement_uuid": "e5000000-0000-4000-8000-000000000003",
+                "type": "statut",
+                "bon_uuid": "b0000000-0000-4000-8000-000000000001",
+                "de": "new",
+                "vers": "in_progress",
+                "le": "2026-11-18T19:43:00Z",
+                "source": "afficheur"
+            },
+            {
+                "evenement_uuid": "e5000000-0000-4000-8000-000000000004",
+                "type": "duplicata",
+                "bon_uuid": "b0000000-0000-4000-8000-000000000002",
+                "duplicata_uuid": "e7000000-0000-4000-8000-000000000001",
+                "cible": "imprimante_caisse",
+                "motif": "Bon taché",
+                "operateur_id": "7",
+                "le": "2026-11-18T19:44:00Z"
+            }
+        ]
+    },
+    "empreinte": "2da1a6350bcb607231db36b02c11b678886169ca40fbbc54ef2000bd67e35b7c"
+}

@@ -1,0 +1,11 @@
+{
+    "code": "cuisine",
+    "nom": "Cuisine",
+    "type": "kitchen",
+    "flux": "preparation",
+    "ecran": false,
+    "papier": true,
+    "ordre": 1,
+    "actif": true,
+    "imprimante_ip": "192.168.1.50"
+}

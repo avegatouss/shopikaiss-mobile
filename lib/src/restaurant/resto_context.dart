@@ -11,6 +11,8 @@ class RestoSettings {
     this.prebillOnRequest = false,
     this.timezone,
     this.firstActiveFallback = false,
+    this.sentCancelNeedsApprover = false,
+    this.assistant = const RestoAssistantCaps(),
   });
 
   factory RestoSettings.fromJson(Map m) => RestoSettings(
@@ -22,6 +24,9 @@ class RestoSettings {
     prebillOnRequest: m['prefacture_a_la_demande'] == true,
     timezone: m['fuseau'] as String?,
     firstActiveFallback: m['repli_premier_poste_actif'] == true,
+    // Absent d'un serveur R-2 : éteint (valeur par défaut du web).
+    sentCancelNeedsApprover: m['annulation_envoye_responsable'] == true,
+    assistant: m['assistant'] is Map ? RestoAssistantCaps.fromJson(m['assistant'] as Map) : const RestoAssistantCaps(),
   );
 
   /// Éteint : « Envoyer » devient « Valider », aucun bon (R-3).
@@ -35,6 +40,75 @@ class RestoSettings {
   /// Fuseau de la journée métier (`date_metier`).
   final String? timezone;
   final bool firstActiveFallback;
+
+  /// `annulation_envoye_responsable` (R-3) : annuler un article envoyé exige toujours un responsable, même avec le droit.
+  final bool sentCancelNeedsApprover;
+  final RestoAssistantCaps assistant;
+}
+
+/// Plafonds d'une autorisation donnée par un assistant manager (`restaurant.reglages.assistant`) ; 0 = illimité.
+class RestoAssistantCaps {
+  const RestoAssistantCaps({this.operationsPerDay = 0, this.amountPerOperation = 0, this.amountPerDay = 0});
+
+  factory RestoAssistantCaps.fromJson(Map m) => RestoAssistantCaps(
+    operationsPerDay: m['max_operations_par_jour'] as int? ?? 0,
+    amountPerOperation: m['max_montant_par_operation'] as int? ?? 0,
+    amountPerDay: m['max_montant_par_jour'] as int? ?? 0,
+  );
+
+  final int operationsPerDay;
+  final int amountPerOperation;
+  final int amountPerDay;
+}
+
+/// Autorisation d'un approbateur restaurant (`autorisation_restaurant`, §4.3 bis) : code de 8 chiffres vérifié sur la
+/// caisse. Jamais le code ni son empreinte.
+class RestoApproval {
+  const RestoApproval({required this.approverId, required this.type, required this.reason, required this.verifiedAt, required this.amount});
+
+  final int approverId;
+
+  /// `resto_modifier_envoye` ou `resto_annuler_commande`.
+  final String type;
+  final String reason;
+  final String verifiedAt;
+
+  /// Montant autorisé (article ou commande), compté dans les plafonds de l'assistant.
+  final int amount;
+
+  Map<String, dynamic> toJson() => {'type': type, 'approbateur_id': '$approverId', 'motif': reason, 'preuve': 'code_local|$verifiedAt'};
+}
+
+/// Où en est la livraison d'un bon sur ce terminal.
+enum RestoDeliveryState {
+  /// Au moins une cible a confirmé (`accuse`) ou reçu les octets (`transmis`).
+  delivered,
+
+  /// Issue inconnue (`a_verifier`) : à vérifier sur place, jamais relancé.
+  toCheck,
+
+  /// Aucune cible n'a reçu le bon (échec certain) : à réimprimer en duplicata.
+  failed,
+
+  /// Pas encore tenté.
+  pending,
+}
+
+/// Bon de production vu par la caisse : contenu immuable et état de sa livraison.
+class RestoTicketView {
+  const RestoTicketView({required this.ticket, required this.stationName, required this.orderNumber, this.table, required this.state, this.checkAttempt, this.checked = false});
+
+  final RestoTicket ticket;
+  final String stationName;
+  final String orderNumber;
+  final String? table;
+  final RestoDeliveryState state;
+
+  /// Tentative `a_verifier` encore sans vérification, ou null.
+  final String? checkAttempt;
+
+  /// Vérifié sur place (sorti ou non).
+  final bool checked;
 }
 
 class RestoRoom {
@@ -82,6 +156,9 @@ class RestoContext {
     this.menus = const [],
     this.hiddenCategories = const {},
     this.lastOrderNumber,
+    this.stations = const {},
+    this.routes = const {},
+    this.lastTicketNumbers = const {},
   });
 
   final String? pointOfSaleUuid;
@@ -109,14 +186,26 @@ class RestoContext {
   /// Dernier numéro local reçu par le serveur de cet appareil (`derniers_numeros.commande`) : jamais réutilisé.
   final String? lastOrderNumber;
 
+  /// Postes de production publiés (`restaurant.poste`, R-3), actifs ou non, par uuid.
+  final Map<String, RestoStation> stations;
+
+  /// Poste effectif de chaque produit (`restaurant.routage.poste_effectif_uuid`) ; absent ou null : rien ne part.
+  final Map<String, String?> routes;
+
+  /// Dernier numéro du jour reçu par le serveur, par poste (`derniers_numeros.bons`) : jamais réutilisé.
+  final Map<String, String> lastTicketNumbers;
+
   bool get tableService => profile == 'TABLE_SERVICE';
+
+  /// Libellé de l'action d'envoi : « Envoyer » vers les postes, « Valider » quand l'envoi en production est éteint.
+  String get sendLabel => settings.sendToProduction ? 'Envoyer' : 'Valider';
 
   RestoTable? table(String? uuid) => tables.where((t) => t.uuid == uuid).firstOrNull;
 }
 
 /// Commande vue par l'écran de salle : dernière version, et où en est sa remontée.
 class RestoOrderView {
-  const RestoOrderView({required this.order, required this.payable, this.paid = false, this.pendingVersions = 0, this.serverMessage, this.waiting = false, this.serverNumber});
+  const RestoOrderView({required this.order, required this.payable, this.paid = false, this.pendingVersions = 0, this.serverMessage, this.waiting = false, this.serverNumber, this.tickets = const [], this.ticketsToCheck = 0});
 
   final RestoOrder order;
 
@@ -137,4 +226,10 @@ class RestoOrderView {
 
   /// Numéro attribué par le serveur (`details.commande.numero`), une fois la version 1 intégrée.
   final String? serverNumber;
+
+  /// Bons créés par le dernier fait (à livrer), vide sinon.
+  final List<RestoTicket> tickets;
+
+  /// Bons de la commande à vérifier sur place (livraison d'issue inconnue) ou jamais livrés.
+  final int ticketsToCheck;
 }

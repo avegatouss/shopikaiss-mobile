@@ -7,6 +7,8 @@ import '../app_settings.dart';
 import '../offline/api.dart';
 import '../offline/caisse_engine.dart';
 import '../offline/store.dart';
+import '../offline/ticket.dart';
+import '../restaurant/resto_engine.dart';
 import '../sync_v2/v2_engine.dart';
 import '../sync_v2/v2_transport.dart';
 import '../ui/screen_profile.dart';
@@ -80,7 +82,19 @@ class TerminalSession extends ChangeNotifier {
     } catch (e) {
       debugPrint('Terminal : $e');
     }
+    // Bons de production (restaurant, R-3) : l'imprimante de la caisse sert de secours aux postes.
+    offline
+      ..restoRegisterPrinter = hasPrinter ? _printProductionTicket : null
+      ..restoTicketColumns = rollWidth >= 80 ? 48 : 32;
     notifyListeners();
+  }
+
+  Future<RestoOutcome> _printProductionTicket(List<String> text) async {
+    final result = await channel.printRaw(offlineTicketBytes(text));
+    if (result.ok) return RestoOutcome.transmis;
+    // Refus avant tout octet (imprimante absente, en chauffe, en démarrage) : échec certain ; sinon issue inconnue.
+    const beforeAnyByte = {'printer_not_configured', 'printer_overheated', 'printer_initialising'};
+    return beforeAnyByte.contains(result.error) ? RestoOutcome.nonEnvoye : RestoOutcome.aVerifier;
   }
 
   Future<void> save() async {

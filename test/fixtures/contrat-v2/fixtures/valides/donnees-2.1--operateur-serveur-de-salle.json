@@ -1,0 +1,13 @@
+{
+    "operateur_id": "12",
+    "nom": "Koffi Yao",
+    "pin_empreinte": null,
+    "droits": [
+        "caisse_service_table",
+        "caisse_table"
+    ],
+    "remise_max_pourcent": null,
+    "remise_max_montant": null,
+    "approbateur_remise": false,
+    "approbateur_restaurant": null
+}

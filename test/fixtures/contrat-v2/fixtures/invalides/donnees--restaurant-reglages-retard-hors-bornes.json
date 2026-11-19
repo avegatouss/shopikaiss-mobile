@@ -15,6 +15,7 @@
     "fuseau": "Africa/Abidjan",
     "impression_mode": "register",
     "repli_premier_poste_actif": false,
+    "annulation_envoye_responsable": false,
     "assistant": {
         "max_operations_par_jour": 20,
         "max_montant_par_operation": 20000,

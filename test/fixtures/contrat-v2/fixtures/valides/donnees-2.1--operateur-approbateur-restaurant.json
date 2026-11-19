@@ -1,0 +1,15 @@
+{
+    "operateur_id": "3",
+    "nom": "Mariam Traoré",
+    "pin_empreinte": null,
+    "droits": [
+        "caisse_table",
+        "resto_modifier_envoye",
+        "vente"
+    ],
+    "remise_max_pourcent": null,
+    "remise_max_montant": null,
+    "approbateur_remise": false,
+    "approbateur_restaurant": "assistant",
+    "code_autorisation_empreinte": "$2y$12$abcdefghijklmnopqrstuuJ1Q2w3E4r5T6y7U8i9O0pAaSsDdFfGg"
+}

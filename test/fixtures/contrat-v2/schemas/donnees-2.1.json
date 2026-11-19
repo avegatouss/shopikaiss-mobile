@@ -368,7 +368,7 @@
             }
         },
         "operateur": {
-            "description": "Opérateur autorisé sur ce terminal. Le PIN n'est transmis que sous forme d'empreinte lente (bcrypt), jamais en clair.",
+            "description": "Opérateur autorisé sur ce terminal. Le PIN n'est transmis que sous forme d'empreinte lente (bcrypt), jamais en clair. Avec restaurant.v1 (lot R-3), un opérateur qui a `caisse_table` sans `vente` (serveur de salle) est aussi publié : il prend des commandes, n'encaisse pas.",
             "type": "object",
             "required": [
                 "operateur_id",
@@ -433,6 +433,14 @@
                     "type": "string",
                     "minLength": 59,
                     "maxLength": 60
+                },
+                "approbateur_restaurant": {
+                    "description": "Restaurant.v1 seulement (RESTAURANT-1 §3.10, lot R-3) : approbateur restaurant (`manager` = RESTO_AUTORISER_SANS_LIMITE, `assistant` = RESTO_AUTORISER, plafonds de restaurant.reglages.assistant) ou null. Son `code_autorisation_empreinte` est alors publié même sans REMISE (E7). Clé absente pour les autres terminaux.",
+                    "enum": [
+                        "manager",
+                        "assistant",
+                        null
+                    ]
                 }
             }
         },

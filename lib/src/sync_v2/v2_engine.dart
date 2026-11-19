@@ -15,6 +15,7 @@ import '../offline/api.dart';
 import '../offline/engine.dart';
 import '../offline/models.dart';
 import '../offline/store.dart';
+import '../offline/ticket.dart';
 import 'contract_schemas.dart';
 import 'schema_validator.dart';
 import 'decimal6.dart';
@@ -64,6 +65,9 @@ class V2Engine extends CaisseEngine {
 
   /// Lignes des paniers de règlement rendus par [restoCart] : commande et ligne de commande de chacune (par identité).
   final Map<CartLine, (String, String)> _restoCartLines = Map.identity();
+
+  /// Adresses locales des imprimantes de poste, relues avec le restaurant.
+  final Map<String, String> _restoPrinters = {};
 
   /// Dossier du cache d'images (fichiers nommés par empreinte) ; null : aucune image téléchargée.
   final String? imageDirectory;
@@ -285,6 +289,8 @@ class V2Engine extends CaisseEngine {
     notifyListeners();
     try {
       await _drainLegacy();
+      // États des bons en attente : un lot au plus toutes les 10 s, avant l'envoi de la file.
+      await _restoFlush();
       final report = await engine.run();
       final failure = report.failure;
       if (failure == null && _heldCart != null) {
@@ -476,8 +482,40 @@ class V2Engine extends CaisseEngine {
   }
 
   @override
-  Future<RestoOrderView> restoCancel(Operator operator, String orderUuid, String? reason) =>
-      _restoAct(operator, orderUuid, (engine, order) => engine.cancelOrder(order, reason));
+  Future<RestoOrderView> restoCancel(Operator operator, String orderUuid, String? reason, {RestoApproval? approval}) =>
+      _restoCancel(operator, orderUuid, reason, approval: approval);
+
+  @override
+  Future<RestoOrderView> restoSend(Operator operator, String orderUuid) => _restoSend(operator, orderUuid);
+
+  @override
+  Future<RestoOrderView> restoCancelLine(Operator operator, String orderUuid, String lineUuid, int quantity, String reason, {RestoApproval? approval}) =>
+      _restoCancelLine(operator, orderUuid, lineUuid, quantity, reason, approval: approval);
+
+  @override
+  bool restoApprovalRequired(Operator operator) => _restoApprovalRequired(operator);
+
+  @override
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount) => _restoApprovers(cashier, amount);
+
+  @override
+  Future<RestoApproval> restoAuthorize({required Operator cashier, required Operator approver, required String code, required String reason, required int amount}) =>
+      _restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount);
+
+  @override
+  Future<List<RestoTicketView>> restoTickets({String? orderUuid}) => _restoTicketViews(orderUuid: orderUuid);
+
+  @override
+  Future<void> restoVerifyTicket(Operator operator, String ticketUuid, {required bool printed}) => _restoVerify(operator, ticketUuid, printed: printed);
+
+  @override
+  Future<RestoOutcome> restoDuplicateTicket(Operator operator, String ticketUuid, String reason) => _restoDuplicate(operator, ticketUuid, reason);
+
+  @override
+  Map<String, String> get restoPrinterAddresses => Map.unmodifiable(_restoPrinters);
+
+  @override
+  Future<void> setRestoPrinterAddress(String stationUuid, String? address) => _restoSetPrinter(stationUuid, address);
 
   @override
   Future<List<CartLine>> restoCart(String orderUuid) => _restoCart(orderUuid);
@@ -827,6 +865,7 @@ class V2Engine extends CaisseEngine {
       if (existing != null) return _view(existing);
     }
     if (!sessionOpen || _sessionUuid == null) throw const OfflineRefusal('Aucune session de caisse ouverte sur ce terminal.');
+    if (_resto != null) await _restoFlushLocked(force: true);
     if (!_serverOffers(CaisseV2Client.sessionCloseCapability) || !saleExtrasSupported) throw const OfflineRefusal('Clôture non disponible sur ce terminal : clôturez en ligne.');
     _requireRight(operator, 'caisse_cloturer', 'clôturer la session');
     if (cash < 0 || others.any((c) => c.amount < 0)) throw const OfflineRefusal('Montant compté invalide.');
@@ -1535,8 +1574,16 @@ class V2Engine extends CaisseEngine {
       if (o['remise_max_pourcent'] != null || o['remise_max_montant'] != null) {
         caps[id] = (o['remise_max_pourcent'] == null ? null : parseMicros(o['remise_max_pourcent'] as String), o['remise_max_montant'] as int?);
       }
-      if (rights[id]!.contains('vente')) {
-        operators.add({'id': id, 'nom': o['nom'], 'pin': o['pin_empreinte'], 'approbateur': o['approbateur_remise'], 'code_autorisation': o['code_autorisation_empreinte']});
+      // Restaurant (R-3) : le serveur de salle (`caisse_table` sans `vente`) prend des commandes sans encaisser.
+      if (rights[id]!.contains('vente') || (v2.restaurant && rights[id]!.contains('caisse_table'))) {
+        operators.add({
+          'id': id,
+          'nom': o['nom'],
+          'pin': o['pin_empreinte'],
+          'approbateur': o['approbateur_remise'],
+          'code_autorisation': o['code_autorisation_empreinte'],
+          'approbateur_restaurant': o['approbateur_restaurant'],
+        });
       }
     }
     // Index par produit : la reconstruction a lieu à chaque synchronisation et gèle la file des commandes.

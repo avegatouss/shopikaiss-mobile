@@ -47,8 +47,10 @@ void main() {
     expect(r.order.lines.every((l) => l.status == RestoLineStatus.sent), isTrue, reason: 'l’eau sans poste est figée sans bon');
     expect(() => e.send(r.order), throwsA(isA<RestoRefusal>()), reason: 'rien de nouveau : aucun bon en double');
 
-    // Un poulet de plus : seul le surplus part, en AJOUT, numéro 2 de la commande et 2 du jour.
-    r = e.changeQuantity(r.order, poulet, 3 * unit);
+    // Une ligne envoyée ne change plus (contrat §4.3) : le poulet de plus est une nouvelle ligne, qui part en AJOUT,
+    // numéro 2 de la commande et 2 du jour.
+    expect(() => e.changeQuantity(r.order, poulet, 3 * unit), throwsA(isA<RestoRefusal>()));
+    r = e.addLine(r.order, productUuid: 'poulet', label: 'Poulet braisé', quantity: unit, unitPrice: 4000, routing: const RestoRouting(categoryStationUuid: 'p-cuisine'));
     r = e.send(r.order);
     final ajout = r.tickets.single;
     expect([ajout.title, ajout.number, ajout.dayNumber, ajout.lines.single.quantity], ['AJOUT', 2, 'CUI-20261107-0002', unit]);
@@ -97,7 +99,56 @@ void main() {
     var r = e.open(prefix: 'ST', businessDay: '2026-11-07', profile: 'TABLE_SERVICE', tableUuid: 't9');
     r = e.addLine(r.order, productUuid: 'p', label: 'Plat', quantity: unit, unitPrice: 1000, routing: const RestoRouting(categoryStationUuid: 'p-cuisine'));
     r = e.send(r.order);
-    expect([r.event.action, r.tickets, r.order.lines.single.status], ['validation', isEmpty, RestoLineStatus.sent]);
+    // `validation` est au R-4 : un `envoi` sans bon la remplace ; l'envoyé net reste 0 (aucun bon reçu).
+    expect([r.event.action, r.event.fact, r.tickets, r.order.lines.single.status, r.order.lines.single.sent], ['envoi', {'bons': <Object>[]}, isEmpty, RestoLineStatus.sent, 0]);
+    expect(() => e.send(r.order), throwsA(isA<RestoRefusal>()), reason: 'une ligne figée sans bon ne repart pas');
+    // Annuler une ligne figée sans bon : aucun bon (jamais annoncée).
+    r = e.cancelLine(r.order, r.order.lines.single.uuid, unit, 'Erreur de saisie');
+    expect([r.tickets, r.order.lines.single.status, r.event.fact['bons']], [isEmpty, RestoLineStatus.cancelled, isEmpty]);
+  });
+
+  test('R-3 : poste choisi à l’envoi (Service de table), annulation = envoyé − restant, autorisations jointes', () {
+    final e = engine();
+    var r = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'TABLE_SERVICE', tableUuid: 't1');
+    r = e.editLines(r.order, added: [
+      const RestoNewLine(productUuid: 'pizza', label: 'Pizza', quantity: 3 * unit, unitPrice: 5000, comment: 'Bien cuite'),
+      const RestoNewLine(productUuid: 'biere', label: 'Bière', quantity: 2 * unit, unitPrice: 1500),
+      const RestoNewLine(productUuid: 'tarte', label: 'Tarte', quantity: unit, unitPrice: 2000),
+    ]);
+    final [pizza, biere, tarte] = [for (final l in r.order.lines) l.uuid];
+    expect(r.order.lines.every((l) => l.stationUuid == null), isTrue, reason: 'aucun poste figé à l’ajout');
+    // Routage publié : pizza → cuisine, bière → bar, tarte → pâtisserie inactive (rien ne part).
+    const routes = {'pizza': 'p-cuisine', 'biere': 'p-bar', 'tarte': 'p-ferme'};
+    r = e.send(r.order, route: (p) => routes[p]);
+    expect([for (final t in r.tickets) (t.stationUuid, t.dayNumber, t.firstSend)], [('p-cuisine', 'CUI-20261118-0001', true), ('p-bar', 'BAR1-20261118-0001', true)]);
+    expect([for (final l in r.order.lines) (l.stationUuid, l.status, l.sent)], [
+      ('p-cuisine', RestoLineStatus.sent, 3 * unit),
+      ('p-bar', RestoLineStatus.sent, 2 * unit),
+      (null, RestoLineStatus.sent, 0),
+    ]);
+    expect(r.event.state['lignes'][0]['envoye'], '3.000000');
+    expect(r.event.state['etape'], 'waiting', reason: 'l’envoi ne change pas l’étape');
+    // Pizza 3 envoyées, on en annule 1 : il en reste 2, 3 − 2 = 1 part en ANNULATION ; autorisation jointe telle quelle.
+    const auth = {'type': 'resto_modifier_envoye', 'approbateur_id': '3', 'motif': 'Renversée', 'preuve': 'code_local|2026-11-18T19:51:58Z'};
+    expect(() => e.cancelLine(r.order, pizza, unit, 'ok'), throwsA(isA<RestoRefusal>()), reason: 'motif de 3 caractères au moins');
+    r = e.cancelLine(r.order, pizza, unit, 'Renversée', authorizations: [auth]);
+    final bon = r.tickets.single;
+    expect([bon.title, bon.number, bon.stationUuid, bon.lines.single.quantity, bon.lines.single.comment, bon.lines.single.action], ['ANNULATION', 2, 'p-cuisine', unit, 'ANNULÉ : Renversée', 'cancel']);
+    expect([r.event.action, r.event.reason, r.event.authorizations, r.event.fact['quantite'], r.order.line(pizza).quantity, r.order.line(pizza).sent],
+        ['annulation_ligne', 'Renversée', [auth], '1.000000', 2 * unit, 2 * unit]);
+    expect(() => e.cancelLine(r.order, biere, 3 * unit, 'Trop'), throwsA(isA<RestoRefusal>()), reason: 'pas plus que la quantité de la ligne');
+    // Tarte figée sans bon : son annulation n'exige aucun bon.
+    r = e.cancelLine(r.order, tarte, unit, 'Plus de tarte');
+    expect(r.tickets, isEmpty);
+    // Annulation de la commande : un bon d'ANNULATION par poste couvrant l'envoyé net, autorisation jointe.
+    expect(RestoEngine.hasAnnounced(r.order), isTrue);
+    r = e.cancelOrder(r.order, 'Client parti', authorizations: [auth]);
+    expect([for (final t in r.tickets) (t.stationUuid, t.number, t.lines.single.quantity)], [('p-cuisine', 3, 2 * unit), ('p-bar', 2, 2 * unit)]);
+    expect([r.order.status, r.event.authorizations.length, RestoEngine.hasAnnounced(r.order)], ['cancelled', 1, isFalse]);
+    // Bons relus depuis la file : même empreinte.
+    final again = RestoTicket.fromJson(r.order.uuid, r.tickets.first.toJson());
+    expect(again.fingerprint, r.tickets.first.fingerprint);
+    expect(again.printLines(stationName: 'Cuisine', orderNumber: 'PF-20261118-L0001', table: 'T1').take(3), ['ANNULATION · Cuisine', 'CUI-20261118-0003', 'Commande PF-20261118-L0001 · bon 3']);
   });
 
   test('Service de table (R-2) : une version par validation, étapes du web, clôture après règlement, état relu à l’identique', () {

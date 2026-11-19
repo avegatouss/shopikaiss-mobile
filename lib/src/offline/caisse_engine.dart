@@ -6,6 +6,7 @@ import 'package:bcrypt/bcrypt.dart';
 
 import '../passes/pass_rules.dart';
 import '../restaurant/resto_context.dart';
+import '../restaurant/resto_engine.dart';
 import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -278,7 +279,55 @@ abstract class CaisseEngine extends EngineNotifier {
 
   Future<RestoOrderView> restoTransfer(Operator operator, String orderUuid, String tableUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
-  Future<RestoOrderView> restoCancel(Operator operator, String orderUuid, String? reason) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+  Future<RestoOrderView> restoCancel(Operator operator, String orderUuid, String? reason, {RestoApproval? approval}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Envoi aux postes (R-3) : un bon par poste pour ce qui est en attente ; « Valider » sans bon quand l'envoi en
+  /// production est éteint. Les bons partent aussitôt vers leurs cibles.
+  Future<RestoOrderView> restoSend(Operator operator, String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Réduit ou annule un article déjà envoyé (motif de 3 caractères au moins ; [approval] si
+  /// [restoApprovalRequired]).
+  Future<RestoOrderView> restoCancelLine(Operator operator, String orderUuid, String lineUuid, int quantity, String reason, {RestoApproval? approval}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Annuler un article envoyé exige-t-il l'autorisation d'un responsable pour [operator] ?
+  bool restoApprovalRequired(Operator operator) => true;
+
+  /// Responsables qui peuvent autoriser l'annulation d'un envoyé de [amount] F pour [cashier].
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount) async => const [];
+
+  /// Vérifie le code de 8 chiffres de [approver] et rend l'autorisation à joindre à l'annulation.
+  Future<RestoApproval> restoAuthorize({required Operator cashier, required Operator approver, required String code, required String reason, required int amount}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Bons de production de ce terminal (d'une commande si [orderUuid]) et état de leur livraison.
+  Future<List<RestoTicketView>> restoTickets({String? orderUuid}) async => const [];
+
+  /// Vérification sur place d'un bon livré avec une issue inconnue.
+  Future<void> restoVerifyTicket(Operator operator, String ticketUuid, {required bool printed}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Réimpression d'un bon (DUPLICATA) avec un motif.
+  Future<RestoOutcome> restoDuplicateTicket(Operator operator, String ticketUuid, String reason) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Adresses locales des imprimantes de poste (`ip` ou `ip:port`), par poste.
+  Map<String, String> get restoPrinterAddresses => const {};
+
+  Future<void> setRestoPrinterAddress(String stationUuid, String? address) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Imprimante de la caisse pour les bons (secours `imprimante_caisse`) ; null = aucune (échec certain).
+  Future<RestoOutcome> Function(List<String> text)? restoRegisterPrinter;
+
+  /// Imprimante de poste ; null = imprimante réseau ESC/POS à l'adresse locale du poste.
+  Future<RestoOutcome> Function(String address, List<String> text)? restoStationPrinter;
+
+  /// Afficheur de poste ; null = aucun sur ce terminal (échec certain, la chaîne de secours prend le relais).
+  Future<RestoOutcome> Function(RestoTicket ticket, RestoStation station)? restoStationScreen;
+
+  /// Largeur des bons imprimés, en caractères.
+  int restoTicketColumns = 32;
 
   /// Panier de règlement d'une commande : une ligne par article actif, au prix figé de la commande.
   Future<List<CartLine>> restoCart(String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');

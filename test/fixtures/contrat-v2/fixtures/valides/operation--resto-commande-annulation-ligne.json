@@ -1,0 +1,120 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000302",
+    "type": "resto_commande",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 361,
+    "cree_le": "2026-11-18T19:52:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000012",
+        "version": 4,
+        "action": "annulation_ligne",
+        "fait": {
+            "ligne_uuid": "e1000000-0000-4000-8000-000000000002",
+            "quantite": "1.000000",
+            "bons": [
+                {
+                    "bon_uuid": "b0000000-0000-4000-8000-000000000003",
+                    "poste_uuid": "b2000000-0000-4000-8000-0000000000b1",
+                    "numero": 2,
+                    "numero_jour": "BAR-20261118-0012",
+                    "type": "annulation",
+                    "premier_envoi": false,
+                    "cree_le": "2026-11-18T19:52:00Z",
+                    "lignes": [
+                        {
+                            "ligne_uuid": "e1000000-0000-4000-8000-000000000002",
+                            "libelle": "Bière 33 cl",
+                            "quantite": "1.000000",
+                            "commentaire": "ANNULÉ : Renversée",
+                            "action": "cancel"
+                        }
+                    ],
+                    "empreinte_contenu": "13cfd27b2850d55a77d1f6c2ae19f60b87683aaa52e9ec583b35261c1216cd7d"
+                }
+            ]
+        },
+        "motif": "Renversée",
+        "autorisations": [
+            {
+                "type": "resto_modifier_envoye",
+                "approbateur_id": "3",
+                "motif": "Renversée",
+                "preuve": "code_local|2026-11-18T19:51:58Z"
+            }
+        ],
+        "etat": {
+            "profil": "TABLE_SERVICE",
+            "numero_local": "PF-20261118-L0012",
+            "date_metier": "2026-11-18",
+            "canal": null,
+            "table_uuid": "7ab1e000-0000-4000-8000-0000000000e1",
+            "menu_uuid": null,
+            "couverts": 2,
+            "serveur_id": "7",
+            "client_uuid": null,
+            "client_nom": null,
+            "reference_externe": null,
+            "commentaire": null,
+            "statut": "open",
+            "etape": "waiting",
+            "prefactures": 0,
+            "remise_globale": 0,
+            "lignes": [
+                {
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000001",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000101",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Pizza margherita",
+                    "quantite": "1.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 5000,
+                    "remise": 0,
+                    "tarif": "standard",
+                    "statut": "sent",
+                    "poste_uuid": "b2000000-0000-4000-8000-0000000000c1",
+                    "commentaire": "Bien cuite",
+                    "parent_ligne_uuid": null,
+                    "envoye": "1.000000",
+                    "reglee": "0.000000"
+                },
+                {
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000002",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000102",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Bière 33 cl",
+                    "quantite": "1.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 1500,
+                    "remise": 0,
+                    "tarif": "standard",
+                    "statut": "sent",
+                    "poste_uuid": "b2000000-0000-4000-8000-0000000000b1",
+                    "commentaire": null,
+                    "parent_ligne_uuid": null,
+                    "envoye": "1.000000",
+                    "reglee": "0.000000"
+                }
+            ],
+            "totaux": {
+                "brut": 6500,
+                "remises": 0,
+                "a_payer": 6500,
+                "regle": 0
+            }
+        }
+    },
+    "empreinte": "5bee4b775eaffa7dc9e00c3ca507c34561b137faf03d2276ee682fd883e8d614"
+}

@@ -91,11 +91,12 @@ const knownV2Types = {
 /// Types ajoutés par la révision 2.1 (donnees-2.1.json), connus seulement quand la forme 2.1 est active.
 const knownV2Types21 = {'categorie', 'client', 'panier', 'lot', 'modele_ticket', 'ticket_terminal', 'pass_reglages', 'pass_evenement', 'pass'};
 
-/// Types de la révision restaurant-1 (donnees-restaurant-1.json, lots R-1 et R-2), connus quand `restaurant.v1` est
-/// accordée. Postes et routage (R-3) restent inconnus : non critiques, ignorés.
+/// Types de la révision restaurant-1 (donnees-restaurant-1.json, lots R-1 à R-3), connus quand `restaurant.v1` est
+/// accordée.
 const knownRestaurantTypes = {
   'restaurant.point_de_vente', 'restaurant.maitre', 'restaurant.reglages', //
-  'restaurant.salle', 'restaurant.table', 'restaurant.menu', 'restaurant.categorie',
+  'restaurant.salle', 'restaurant.table', 'restaurant.menu', 'restaurant.categorie', //
+  'restaurant.poste', 'restaurant.routage',
 };
 
 /// Résultat de l'application d'une page du journal.
@@ -241,6 +242,11 @@ class V2Store {
     final type = change['type'] as String;
     if (!knownTypes.contains(type)) return null;
     if (change['action'] == 'suppression') return null;
+    // Un serveur encore en R-2 publie les réglages sans `annulation_envoye_responsable` (obligatoire en R-3) : éteint,
+    // valeur par défaut du web, plutôt qu'un type critique refusé.
+    if (type == 'restaurant.reglages' && change['donnees'] is Map && !(change['donnees'] as Map).containsKey('annulation_envoye_responsable')) {
+      change['donnees'] = {...(change['donnees'] as Map).cast<String, dynamic>(), 'annulation_envoye_responsable': false};
+    }
     final file = type.startsWith('restaurant.') ? 'donnees-restaurant-1.json' : (contract21 ? 'donnees-2.1.json' : 'donnees.json');
     final errors = validator.validate(change['donnees'], '$file#/\$defs/$type');
     return errors.isEmpty ? null : '$type ${change['cle']} : ${errors.first}';

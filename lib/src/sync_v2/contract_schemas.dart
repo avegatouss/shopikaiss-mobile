@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-2) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-3) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -594,7 +594,7 @@ const contractV2Schemas = <String, String>{
             }
         },
         "operateur": {
-            "description": "Opérateur autorisé sur ce terminal. Le PIN n'est transmis que sous forme d'empreinte lente (bcrypt), jamais en clair.",
+            "description": "Opérateur autorisé sur ce terminal. Le PIN n'est transmis que sous forme d'empreinte lente (bcrypt), jamais en clair. Avec restaurant.v1 (lot R-3), un opérateur qui a `caisse_table` sans `vente` (serveur de salle) est aussi publié : il prend des commandes, n'encaisse pas.",
             "type": "object",
             "required": [
                 "operateur_id",
@@ -659,6 +659,14 @@ const contractV2Schemas = <String, String>{
                     "type": "string",
                     "minLength": 59,
                     "maxLength": 60
+                },
+                "approbateur_restaurant": {
+                    "description": "Restaurant.v1 seulement (RESTAURANT-1 §3.10, lot R-3) : approbateur restaurant (`manager` = RESTO_AUTORISER_SANS_LIMITE, `assistant` = RESTO_AUTORISER, plafonds de restaurant.reglages.assistant) ou null. Son `code_autorisation_empreinte` est alors publié même sans REMISE (E7). Clé absente pour les autres terminaux.",
+                    "enum": [
+                        "manager",
+                        "assistant",
+                        null
+                    ]
                 }
             }
         },
@@ -1955,7 +1963,7 @@ const contractV2Schemas = <String, String>{
   'donnees-restaurant-1.json': r'''{
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "donnees-restaurant-1.json",
-    "title": "Données des changements restaurant.* (révision restaurant-1, lots R-1 et R-2 ; RESTAURANT-1 §3). Rendues aux seuls clients à qui restaurant.v1 est accordée. R-1 : critiques ; R-2 (salle, table, menu, categorie) : non critiques.",
+    "title": "Données des changements restaurant.* (révision restaurant-1, lots R-1 à R-3 ; RESTAURANT-1 §3). Rendues aux seuls clients à qui restaurant.v1 est accordée. R-1 : critiques ; R-2 (salle, table, menu, categorie) et R-3 (poste, routage) : non critiques.",
     "$defs": {
         "restaurant.point_de_vente": {
             "description": "Point de vente de la boutique (clé = son uuid). Le mode du terminal en dépend : Boutique, Service de table ou Restaurant.",
@@ -2128,7 +2136,8 @@ const contractV2Schemas = <String, String>{
                 "fuseau",
                 "impression_mode",
                 "repli_premier_poste_actif",
-                "assistant"
+                "assistant",
+                "annulation_envoye_responsable"
             ],
             "additionalProperties": false,
             "properties": {
@@ -2214,6 +2223,10 @@ const contractV2Schemas = <String, String>{
                             "maximum": 100
                         }
                     }
+                },
+                "annulation_envoye_responsable": {
+                    "type": "boolean",
+                    "description": "Lot R-3 (§4.3 bis, décision Q3) : vrai = annuler un article déjà envoyé exige toujours l'autorisation d'un responsable, même pour un opérateur qui a `resto_modifier_envoye` (comme ECAS). restaurant.offline_sent_change_requires_approver, éteint par défaut."
                 }
             }
         },
@@ -2351,7 +2364,7 @@ const contractV2Schemas = <String, String>{
             }
         },
         "restaurant.categorie": {
-            "description": "Réglages restaurant d'une catégorie (clé = uuid de la catégorie ; réponse de B à Q16) : onglets de la caisse. Publié pour chaque catégorie qui a des réglages restaurant ; sans entité, la catégorie est visible, sans parent ni poste. `poste_uuid` sert au routage à partir de R-3 (postes publiés avec R-3).",
+            "description": "Réglages restaurant d'une catégorie (clé = uuid de la catégorie ; réponse de B à Q16) : onglets de la caisse. Publié pour chaque catégorie qui a des réglages restaurant ; sans entité, la catégorie est visible, sans parent ni poste. `poste_uuid` : poste de la catégorie (`restaurant.poste`, lot R-3).",
             "type": "object",
             "required": [
                 "parent_uuid",
@@ -2386,6 +2399,122 @@ const contractV2Schemas = <String, String>{
                     "minimum": 0
                 },
                 "visible": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "restaurant.poste": {
+            "description": "Poste de production de la boutique (clé = uuid du poste ; RESTAURANT-1 §3.8, lot R-3). Un poste peut avoir `ecran` ET `papier` : il reçoit alors le bon sur les deux. Ni adresse ni port d'imprimante, ni jeton d'afficheur : réglages locaux de la caisse. Un poste inactif reste publié (actif = faux).",
+            "type": "object",
+            "required": [
+                "code",
+                "nom",
+                "type",
+                "flux",
+                "ecran",
+                "papier",
+                "ordre",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{1,40}$",
+                    "description": "Code du poste ; la caisse le normalise (majuscules, caractères admis) pour former `numero_jour`."
+                },
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "type": {
+                    "type": "string",
+                    "maxLength": 20,
+                    "description": "Type du web (kitchen, bar, counter…), indicatif."
+                },
+                "flux": {
+                    "enum": [
+                        "preparation",
+                        "handover"
+                    ],
+                    "description": "preparation : new → in_progress → ready → served ; handover : new → served. Un bon d'ANNULATION ou vidé suit le flux d'accusé (new → served)."
+                },
+                "ecran": {
+                    "type": "boolean"
+                },
+                "papier": {
+                    "type": "boolean"
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "restaurant.routage": {
+            "description": "Routage d'un produit vers un poste (clé = uuid du produit ; RESTAURANT-1 §3.9, lot R-3), calculé comme StationResolver : réglage du produit (`none` : rien ne part ; `station` : son poste s'il est actif), sinon poste actif de sa catégorie, sans catégorie parente ni repli sur un premier poste. La caisse utilise `poste_effectif_uuid` ; désactiver un poste republie les produits concernés.",
+            "type": "object",
+            "required": [
+                "routage",
+                "poste_uuid",
+                "categorie_poste_uuid",
+                "poste_effectif_uuid",
+                "visible",
+                "ordre",
+                "favori"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "routage": {
+                    "enum": [
+                        "station",
+                        "none",
+                        "inherit"
+                    ]
+                },
+                "poste_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "categorie_poste_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "poste_effectif_uuid": {
+                    "description": "Résultat de StationResolver à la publication ; null = rien ne part.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "visible": {
+                    "type": "boolean"
+                },
+                "ordre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "favori": {
                     "type": "boolean"
                 }
             }
@@ -2816,6 +2945,9 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/resto_commande"
+        },
+        {
+            "$ref": "#/$defs/resto_bons_etats"
         }
     ],
     "$defs": {
@@ -4168,7 +4300,7 @@ const contractV2Schemas = <String, String>{
                 },
                 "envoye": {
                     "$ref": "commun.json#/$defs/quantite",
-                    "description": "Quantité nette annoncée aux postes (Σ ajouts − Σ annulations des bons). 0 en R-2."
+                    "description": "Quantité nette annoncée aux postes (Σ ajouts − Σ annulations des bons reçus)."
                 },
                 "reglee": {
                     "$ref": "commun.json#/$defs/quantite",
@@ -4357,7 +4489,7 @@ const contractV2Schemas = <String, String>{
             }
         },
         "bon": {
-            "description": "Bon de production (RESTAURANT-1 §4.4), créé une fois par la caisse maîtresse. Reçu en R-2 sans être intégré : un fait qui porte des bons part en arbitrage `restaurant.hors_lot` (lot R-3), conservé et rejouable.",
+            "description": "Bon de production (RESTAURANT-1 §4.4), créé une fois par la caisse maîtresse, immuable : uuid, clé (commande, poste, numero) et contenu. Intégré à partir du lot R-3 : `numero` = plus grand numéro de (commande, poste) + 1, `premier_envoi` ⇔ numero = 1, un bon par poste et par envoi, quantités = ce qui reste à annoncer (envoi) ou ce qui part de l'envoyé net (annulation), `empreinte_contenu` recalculée par le serveur. Sinon `restaurant.bon_incoherent` ; même uuid, autre empreinte : `restaurant.bon_modifie`.",
             "type": "object",
             "required": [
                 "bon_uuid",
@@ -4387,7 +4519,7 @@ const contractV2Schemas = <String, String>{
                 "numero_jour": {
                     "type": "string",
                     "pattern": "^[A-Z0-9]{1,10}-[0-9]{8}-[0-9]{4,6}$",
-                    "description": "Compteur du poste et du jour, d'après ECAS : CUI-20261107-0001."
+                    "description": "Compteur du poste et du jour de la caisse, d'après ECAS : CODE-AAAAMMJJ-nnnn (code du poste normalisé : majuscules, caractères admis, 10 au plus). Gardé tel quel ; un doublon est noté, jamais refusé."
                 },
                 "type": {
                     "enum": [
@@ -4501,7 +4633,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -4590,7 +4722,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -4657,7 +4789,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -4727,7 +4859,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -4736,7 +4868,7 @@ const contractV2Schemas = <String, String>{
             }
         },
         "resto_commande_annulation": {
-            "description": "Annulation de la commande. `bons` : bons d'ANNULATION (R-3) ; non vide en R-2 = arbitrage restaurant.hors_lot.",
+            "description": "Annulation de la commande. Avec des articles annoncés aux postes : droit `resto_modifier_envoye` ou autorisation `resto_annuler_commande` (ou `resto_modifier_envoye`), motif de 3 caractères au moins, et un bon d'ANNULATION couvrant l'envoyé net de chaque article annoncé (lot R-3).",
             "type": "object",
             "required": [
                 "maitre_generation",
@@ -4797,7 +4929,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -4857,7 +4989,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -4866,7 +4998,7 @@ const contractV2Schemas = <String, String>{
             }
         },
         "resto_commande_envoi": {
-            "description": "Lot R-3 : reçu et conservé, arbitré restaurant.hors_lot en R-2.",
+            "description": "Lot R-3 : chaque bon annonce à son poste la part non encore envoyée de ses lignes ; les lignes annoncées passent `sent` sur le poste du bon. Une ligne en attente dite `sent` sans bon est figée sans bon (article sans poste, ou envoi en production éteint). `bons` vide si `envoi_production` est éteint.",
             "type": "object",
             "required": [
                 "maitre_generation",
@@ -4927,7 +5059,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -4936,7 +5068,7 @@ const contractV2Schemas = <String, String>{
             }
         },
         "resto_commande_annulation_ligne": {
-            "description": "Lot R-3 : reçu et conservé, arbitré restaurant.hors_lot en R-2.",
+            "description": "Lot R-3 : réduire ou annuler un article envoyé (statut `sent`). Droit `resto_modifier_envoye`, ou autorisation `resto_modifier_envoye` d'un approbateur (toujours exigée si `restaurant.reglages.annulation_envoye_responsable`) ; `motif` de 3 caractères au moins. Un bon d'ANNULATION pour ce qui part de l'envoyé net (envoyé − quantité restante), aucun si la ligne n'a jamais été annoncée.",
             "type": "object",
             "required": [
                 "maitre_generation",
@@ -5005,7 +5137,7 @@ const contractV2Schemas = <String, String>{
                     "type": "array",
                     "maxItems": 5,
                     "items": {
-                        "$ref": "#/$defs/autorisation"
+                        "$ref": "#/$defs/autorisation_restaurant"
                     }
                 },
                 "etat": {
@@ -5014,7 +5146,7 @@ const contractV2Schemas = <String, String>{
             }
         },
         "contenu_resto_commande": {
-            "description": "Un fait sur une commande et son état résultant (RESTAURANT-1 §4.3). Révision R-2 : ouverture, lignes, prefacture, transfert_table, annulation, cloture ; envoi et annulation_ligne reçus pour R-3. Les autres actions du §4.3 arrivent avec leur lot.",
+            "description": "Un fait sur une commande et son état résultant (RESTAURANT-1 §4.3). Révisions R-2 (ouverture, lignes, prefacture, transfert_table, annulation, cloture) et R-3 (envoi, annulation_ligne). Les autres actions du §4.3 arrivent avec leur lot.",
             "oneOf": [
                 {
                     "$ref": "#/$defs/resto_commande_ouverture"
@@ -5084,6 +5216,304 @@ const contractV2Schemas = <String, String>{
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_resto_commande"
+                }
+            }
+        },
+        "autorisation_restaurant": {
+            "description": "Autorisation hors ligne d'une opération restaurant (RESTAURANT-1 §4.3 bis, décision Q3 ; lot R-3) : celle de la 2.1, plus les types restaurant, admis seulement avec restaurant.v1. La caisse a vérifié localement le code de 8 chiffres de l'approbateur (preuve `code_local|<horodatage>`) ; le serveur revérifie à l'intégration son rôle (manager ou assistant manager), sa propre permission et les plafonds de l'assistant.",
+            "type": "object",
+            "required": [
+                "type",
+                "approbateur_id",
+                "motif",
+                "preuve"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "type": {
+                    "enum": [
+                        "remise",
+                        "survente",
+                        "prix_manuel",
+                        "resto_modifier_envoye",
+                        "resto_offrir",
+                        "resto_annuler_commande"
+                    ]
+                },
+                "approbateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "motif": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                },
+                "preuve": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "description": "Preuve locale de l'autorisation (jamais un code ni son empreinte)."
+                }
+            }
+        },
+        "evenement_bon": {
+            "description": "Un fait sur un bon déjà envoyé (RESTAURANT-1 §4.5).",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": [
+                        "evenement_uuid",
+                        "type",
+                        "bon_uuid",
+                        "de",
+                        "vers",
+                        "le",
+                        "source"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Statut du bon (afficheur ou caisse). Le statut ne recule jamais : un `vers` déjà atteint est noté sans effet ; un saut hors flux est appliqué et noté.",
+                    "properties": {
+                        "evenement_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "type": {
+                            "const": "statut"
+                        },
+                        "bon_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "de": {
+                            "enum": [
+                                "new",
+                                "in_progress",
+                                "ready"
+                            ]
+                        },
+                        "vers": {
+                            "enum": [
+                                "in_progress",
+                                "ready",
+                                "served"
+                            ]
+                        },
+                        "le": {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        },
+                        "source": {
+                            "enum": [
+                                "afficheur",
+                                "caisse"
+                            ]
+                        }
+                    }
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "evenement_uuid",
+                        "type",
+                        "bon_uuid",
+                        "tentative_uuid",
+                        "cible",
+                        "resultat",
+                        "secours",
+                        "le"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Résultat d'une tentative de livraison : `accuse` (l'afficheur a confirmé ce bon), `transmis` (octets partis, sans preuve de papier), `non_envoye` (échec certain avant tout octet : seul cas qui permet le secours), `a_verifier` (issue inconnue : alerte, jamais de relance automatique).",
+                    "properties": {
+                        "evenement_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "type": {
+                            "const": "livraison"
+                        },
+                        "bon_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "tentative_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "cible": {
+                            "enum": [
+                                "ecran_poste",
+                                "imprimante_poste",
+                                "imprimante_caisse"
+                            ]
+                        },
+                        "resultat": {
+                            "enum": [
+                                "accuse",
+                                "transmis",
+                                "non_envoye",
+                                "a_verifier"
+                            ]
+                        },
+                        "secours": {
+                            "type": "boolean"
+                        },
+                        "le": {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    }
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "evenement_uuid",
+                        "type",
+                        "bon_uuid",
+                        "duplicata_uuid",
+                        "cible",
+                        "motif",
+                        "operateur_id",
+                        "le"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Réimpression demandée par un opérateur (DUPLICATA).",
+                    "properties": {
+                        "evenement_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "type": {
+                            "const": "duplicata"
+                        },
+                        "bon_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "duplicata_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "cible": {
+                            "enum": [
+                                "ecran_poste",
+                                "imprimante_poste",
+                                "imprimante_caisse"
+                            ]
+                        },
+                        "motif": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 500
+                        },
+                        "operateur_id": {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        },
+                        "le": {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    }
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "evenement_uuid",
+                        "type",
+                        "bon_uuid",
+                        "tentative_uuid",
+                        "constat",
+                        "operateur_id",
+                        "le"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Vérification sur place d'une tentative `a_verifier`.",
+                    "properties": {
+                        "evenement_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "type": {
+                            "const": "verification"
+                        },
+                        "bon_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "tentative_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "constat": {
+                            "enum": [
+                                "sorti",
+                                "non_sorti"
+                            ]
+                        },
+                        "operateur_id": {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        },
+                        "le": {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    }
+                }
+            ]
+        },
+        "contenu_resto_bons_etats": {
+            "description": "États des bons remontés par lot (RESTAURANT-1 §4.5, lot R-3) : pour la vue distante et l'audit, jamais pour piloter la livraison locale. Un `evenement_uuid` déjà vu est ignoré ; un bon pas encore reçu laisse l'opération `recue` (`restaurant.attente_bon`), rejouée à l'intégration de sa commande.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "evenements"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle les faits ont été créés."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "evenements": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/evenement_bon"
+                    }
+                }
+            }
+        },
+        "resto_bons_etats": {
+            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.5, lot R-3) : seule la caisse maîtresse émet ce type, au plus un lot toutes les 10 s, vidé à la clôture. Sans la capacité : rejet_protocole capacite_absente.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "resto_bons_etats"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_resto_bons_etats"
                 }
             }
         }
