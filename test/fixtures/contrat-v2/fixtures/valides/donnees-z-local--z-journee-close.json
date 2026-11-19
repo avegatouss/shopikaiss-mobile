@@ -1,0 +1,19 @@
+{
+    "statut": "close",
+    "sessions_closes": [],
+    "sessions_ouvertes": [],
+    "point_de_vente_uuid": null,
+    "point_de_vente_nom": null,
+    "terminaux": [
+        "11111111-2222-4333-8444-555555555555",
+        "11111111-2222-4333-8444-666666666666"
+    ],
+    "fuseau": "Africa/Abidjan",
+    "date_exploitation": "2026-11-19",
+    "dernier_z": {
+        "numero": 41,
+        "date_exploitation": "2026-11-18",
+        "cloture_le": "2026-11-18T21:05:00Z"
+    },
+    "sessions_omises": 0
+}

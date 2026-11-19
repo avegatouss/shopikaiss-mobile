@@ -39,6 +39,12 @@
         },
         {
             "$ref": "#/$defs/resto_remboursement"
+        },
+        {
+            "$ref": "#/$defs/edition_pre_x"
+        },
+        {
+            "$ref": "#/$defs/edition_pre_z"
         }
     ],
     "$defs": {
@@ -851,11 +857,22 @@
                             ],
                             "maxLength": 500,
                             "description": "Obligatoire si le compté diffère de l'attendu : sinon a_arbitrer."
+                        },
+                        "detail": {
+                            "description": "Lot Z local (README §12), facultatif : bloc de détail que le terminal a imprimé sur son Z de session (DetailCloture, version 1). Absent ou null : le serveur calcule le sien. Conservé tel quel pour le duplicata ; comparé au calcul du serveur, écart noté, jamais refusé.",
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "donnees-z-local-1.json#/$defs/detail_cloture"
+                                }
+                            ]
                         }
                     }
                 }
             },
-            "description": "Clôture de la session du terminal, comptée à l'aveugle (REVISION-2.1 §3.3, capacité session.cloture). L'opérateur doit détenir caisse_cloturer."
+            "description": "Clôture de la session du terminal, comptée à l'aveugle (REVISION-2.1 §3.3, capacité session.cloture). L'opérateur doit détenir caisse_cloturer. Lot Z local : champ facultatif contenu.detail."
         },
         "panier_suspendre": {
             "type": "object",
@@ -1748,7 +1765,7 @@
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": []
+                    "properties": {}
                 },
                 "motif": {
                     "type": [
@@ -2104,7 +2121,7 @@
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": []
+                    "properties": {}
                 },
                 "motif": {
                     "type": [
@@ -2605,7 +2622,7 @@
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": []
+                    "properties": {}
                 },
                 "motif": {
                     "type": [
@@ -3567,6 +3584,215 @@
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_resto_remboursement"
+                }
+            }
+        },
+        "contenu_edition_pre_x": {
+            "type": "object",
+            "required": [
+                "session_uuid",
+                "version",
+                "aveugle",
+                "resume"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Session serveur, ou UUID de l’ouverture_session locale."
+                },
+                "version": {
+                    "enum": [
+                        "detailed",
+                        "short"
+                    ]
+                },
+                "aveugle": {
+                    "type": "boolean",
+                    "description": "Pré-X à l’aveugle (sans VOIR_RAPPORTS) : ni théorique, ni contrôle par moyen, ni écart."
+                },
+                "resume": {
+                    "description": "Résumé de ce qui a été imprimé, pour l’audit.",
+                    "type": "object",
+                    "required": [
+                        "tickets",
+                        "chiffre_affaires"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "tickets": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "chiffre_affaires": {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    }
+                }
+            }
+        },
+        "edition_pre_x": {
+            "description": "Lot Z local (README §12), capacité z.local : audit d’un pré-X imprimé hors ligne (même nom que l’audit du web). Non critique : ni argent ni stock, jamais refusé, ne bloque pas la clôture. Idempotent par uuid.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "edition_pre_x"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_edition_pre_x"
+                }
+            }
+        },
+        "contenu_edition_pre_z": {
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "date_exploitation",
+                "version",
+                "sessions",
+                "sessions_locales",
+                "partielle",
+                "resume"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "z.journee.point_de_vente_uuid de la journée imprimée."
+                },
+                "date_exploitation": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "version": {
+                    "enum": [
+                        "detailed",
+                        "short"
+                    ]
+                },
+                "sessions": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    },
+                    "description": "Sessions closes publiées reprises dans le pré-Z."
+                },
+                "sessions_locales": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    },
+                    "description": "Sessions du terminal ajoutées par lui (non encore synchronisées ou ouvertes)."
+                },
+                "partielle": {
+                    "type": "boolean",
+                    "description": "Vrai si le pré-Z portait la mention « journée partielle »."
+                },
+                "resume": {
+                    "description": "Résumé de ce qui a été imprimé, pour l’audit.",
+                    "type": "object",
+                    "required": [
+                        "tickets",
+                        "chiffre_affaires"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "tickets": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "chiffre_affaires": {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    }
+                }
+            }
+        },
+        "edition_pre_z": {
+            "description": "Lot Z local (README §12), capacité z.local : audit d’un pré-Z de la journée imprimé hors ligne (même nom que l’audit du web). Non critique : ni argent ni stock, jamais refusé. Idempotent par uuid. La clôture de la journée reste au serveur.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "edition_pre_z"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_edition_pre_z"
                 }
             }
         }

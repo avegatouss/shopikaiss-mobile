@@ -28,10 +28,11 @@ class V2SyncReport {
 /// journal de changements, accusé. Chaque étape est idempotente : une coupure à n'importe quel moment se reprend en
 /// relançant [run], sans perte ni doublon.
 class V2Sync {
-  V2Sync(this.client, this.store);
+  V2Sync(this.client, this.store, {DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
 
   final CaisseV2Client client;
   final V2Store store;
+  final DateTime Function() _clock;
 
   /// Pages d'instantané retéléchargées au plus (même contenu immuable) avant d'abandonner la préparation.
   static const pageAttempts = 3;
@@ -67,12 +68,16 @@ class V2Sync {
           ((state['capacites_serveur'] as List?)?.contains(CaisseV2Client.restaurantCapability) ?? false);
       // Première obtention de `client.lecture` : le journal ne redonne pas les clients déjà publiés.
       bool shared(String capability) => client.capabilities.contains(capability) && ((state['capacites_serveur'] as List?)?.contains(capability) ?? false);
+      // Lot Z local : `z.session` et `z.journee`, seulement avec la forme 2.1 (README §12.2).
+      store.zLocal = contract21 && shared(CaisseV2Client.zLocalCapability);
       final revision = '${contract21 ? '2.1' : '2.0'}'
           '${shared(CaisseV2Client.customerReadCapability) ? '+clients' : ''}${shared(CaisseV2Client.sharedCartCapability) ? '+paniers' : ''}${shared(CaisseV2Client.lotsCapability) ? '+lots' : ''}'
           '${shared(CaisseV2Client.ticketModelsCapability) ? '+tickets' : ''}${shared(CaisseV2Client.passesCapability) ? '+passes' : ''}'
           // `restaurant3` : postes et routage (R-3) connus ; `restaurant4` : canaux (R-4) ; `restaurant5` : promotions et
-          // remises par client (R-5). Un nouvel instantané les reçoit.
-          '${store.restaurant ? '+restaurant5' : ''}';
+          // remises par client (R-5) ; `restaurant6` : interface simplifiée (lot Z local). Un nouvel instantané les reçoit.
+          '${store.restaurant ? '+restaurant6' : ''}'
+          // `zlocal1` : première annonce de `z.local`, instantané demandé pour recevoir l'état courant (§12.2).
+          '${store.zLocal ? '+zlocal1' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {
@@ -82,14 +87,22 @@ class V2Sync {
       await _push(report);
       await _reconcile(report);
       await _pull(report);
+      if (report.blockedBy == null) {
+        await store.write(V2Keys.journalAt, _clock().toUtc().toIso8601String());
+        await store.write(V2Keys.journalFailed, null);
+      } else {
+        await store.write(V2Keys.journalFailed, report.blockedBy);
+      }
       // Journal lu jusqu'au bout après l'/etat : les politiques de cette version sont appliquées.
       if (report.blockedBy == null) await store.write(V2Keys.policiesVersion, (state['versions'] as Map)['politiques'] as String);
       await _acknowledge();
     } on V2Failure catch (failure) {
       report.failure = failure;
+      await store.write(V2Keys.journalFailed, failure.code);
       if (failure.kind == V2FailureKind.unauthorized) await store.write(V2Keys.revoked, failure.code);
     } on V2Incompatible catch (e) {
       report.blockedBy = e.what;
+      await store.write(V2Keys.journalFailed, e.what);
       await store.write(V2Keys.blocked, e.what);
     }
     return report;

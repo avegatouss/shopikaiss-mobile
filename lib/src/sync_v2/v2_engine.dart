@@ -10,6 +10,7 @@ import '../passes/pass_rules.dart';
 import '../offline/web_rules.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
+import '../restaurant/resto_interface.dart';
 import '../restaurant/resto_promotions.dart';
 
 import '../offline/api.dart';
@@ -64,6 +65,9 @@ class V2Engine extends CaisseEngine {
 
   /// Restaurant du point de vente, reconstruit à chaque synchronisation ; null hors `restaurant.v1`.
   RestoContext? _resto;
+
+  /// Interface simplifiée du point de vente (`restaurant.interface:<uuid du point de vente>`), défauts sans entité.
+  RestoInterface _restoInterface = RestoInterface.defaults;
 
   /// Lignes des paniers de règlement rendus par [restoCart] : commande et ligne de commande de chacune (par identité).
   final Map<CartLine, (String, String)> _restoCartLines = Map.identity();
@@ -200,10 +204,11 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.ticketModelsCapability,
           CaisseV2Client.passesCapability,
           if (announceRestaurant) CaisseV2Client.restaurantCapability,
+          CaisseV2Client.zLocalCapability,
         ],
       ],
     );
-    _sync = V2Sync(_client!, v2);
+    _sync = V2Sync(_client!, v2, clock: () => now);
     _token = await v2.read(V2Keys.token);
     _client!.token = _token;
     revoked = _token == null && await v2.read(V2Keys.revoked) != null;
@@ -217,6 +222,7 @@ class V2Engine extends CaisseEngine {
     final revision = await v2.read(V2Keys.contractRevision) ?? '';
     v2.contract21 = contract21 && revision.startsWith('2.1');
     v2.restaurant = v2.contract21 && announceRestaurant && revision.contains('+restaurant');
+    v2.zLocal = v2.contract21 && revision.contains('+zlocal');
     await _rebuild();
     await _count();
     notifyListeners();
@@ -449,6 +455,9 @@ class V2Engine extends CaisseEngine {
 
   @override
   RestoContext? get restaurant => _resto;
+
+  @override
+  RestoInterface get restaurantInterface => _restoInterface;
 
   @override
   String? restaurantBlocker(Operator operator) => _restaurantBlocker(operator);
@@ -990,11 +999,14 @@ class V2Engine extends CaisseEngine {
     }
     final session = _sessionUuid!;
     final uuid = operationUuid ?? _newUuid();
+    // Lot Z local : le bloc de détail du Z de session, figé ici et imprimé tel quel (README §12.5).
+    final detail = zLocalSupported ? await _closingDetail() : null;
     final operation = await _record(uuid, 'cloture_session', operator, (_) => {
       'session_uuid': session,
       'compte': cash,
       'comptage': others.isEmpty ? null : [for (final c in others) c.toJson()],
       'commentaire': remark.isEmpty ? null : remark,
+      'detail': ?detail,
     });
     await v2.write(V2Keys.closingOperation, uuid);
     await v2.write(V2Keys.localSession, null);
@@ -1002,6 +1014,34 @@ class V2Engine extends CaisseEngine {
     await _afterWrite();
     return operation;
   });
+
+  /// Lot Z local accordé par le serveur et reçu dans la projection (`z.local` avec `contrat.2_1`).
+  bool get zLocalSupported => v2.zLocal && _serverOffers(CaisseV2Client.zLocalCapability);
+
+  /// Bloc de détail de la session ouverte, au format du contrat, tel que le Z de session l'imprimera ; null s'il ne
+  /// peut être calculé ou n'est pas conforme (la clôture part alors sans détail : le serveur calcule le sien).
+  Future<Map<String, dynamic>?> _closingDetail() async {
+    final facts = await closureFacts();
+    final s = snapshot;
+    final open = facts?.openSession;
+    if (facts == null || s == null || open == null) return null;
+    final detail = detailToContract(sessionDetail(facts, open, ZContext.of(s)));
+    return v2.validator.validate(detail, r'donnees-z-local-1.json#/$defs/detail_cloture').isEmpty ? detail : null;
+  }
+
+  /// Audit d'une édition provisoire (`edition_pre_x`, `edition_pre_z`) : seulement avec `z.local`, jamais bloquant.
+  @override
+  Future<void> recordEdition(Operator operator, ClosureDocument document) async {
+    final type = document.editionType;
+    final content = document.edition;
+    if (type == null || content == null || !paired || !zLocalSupported) return;
+    try {
+      await serialized(() => _record(_newUuid(), type, operator, (_) => content));
+      await _afterWrite();
+    } on OfflineRefusal {
+      // Audit seulement : une édition non conforme n'empêche ni l'impression ni la clôture.
+    }
+  }
 
   @override
   Future<OfflineOperation?> lastClosure() async {
@@ -1014,10 +1054,12 @@ class V2Engine extends CaisseEngine {
   Future<ClosureFacts?> closureFacts() async {
     if (!paired) return null;
     // Ordre chronologique, opérations rejetées exclues (comme l'attendu de la clôture).
+    final rows = (await v2.operationRows()).reversed.toList();
     final operations = [
-      for (final row in (await v2.operationRows()).reversed)
+      for (final row in rows)
         if (row['etat'] != V2OperationState.rejected) row['operation'] as Map,
     ];
+    final states = {for (final row in rows) if ((row['operation'] as Map)['type'] == 'cloture_session') '${(row['operation'] as Map)['uuid']}': row['etat'] as String};
     final session = snapshot?.session;
     final server = session == null ? null : (await v2.entities('session'))['session:${_device['terminal_uuid']}'];
     final open = session == null ? null : {'session_uuid': session['session_uuid'], 'operateur_id': session['operateur_id'], 'ouverte_le': server?['session_uuid'] == session['session_uuid'] ? server!['ouverte_le'] : null};
@@ -1028,12 +1070,35 @@ class V2Engine extends CaisseEngine {
       if (product?.category case final String c when c.isNotEmpty) categories[e.key] = c;
       names[e.key] = product?.name ?? '${e.value['nom'] ?? ''}';
     }
+    final sessions = sessionsFromOperations(operations, openSession: open);
+    for (final s in sessions) {
+      if (s.closure != null) s.closureState = states['${s.closure!['uuid']}'];
+    }
+    // Lot Z local : fond et retours en ligne de la session (z.session), journée du point de vente (z.journee).
+    final terminal = _device['terminal_uuid'] as String?;
+    Map? day;
+    if (zLocalSupported) {
+      applyZSession(sessions, (await v2.entities('z.session'))['z_session:$terminal']);
+      day = (await v2.entities('z.journee')).values.where((d) => ((d['terminaux'] as List?) ?? const []).contains(terminal)).firstOrNull;
+    }
     return ClosureFacts(
-      sessions: sessionsFromOperations(operations, openSession: open),
+      sessions: sessions,
       openSessionUuid: sessionOpen ? _sessionUuid : null,
       categories: categories,
       productNames: names,
+      zDay: day,
+      terminalUuid: terminal,
+      journalStale: await _journalStale(),
     );
+  }
+
+  /// Dernière lecture du journal échouée, absente ou plus vieille que trois fois `delais.changements_secondes`.
+  Future<bool> _journalStale() async {
+    if (await v2.read(V2Keys.journalFailed) != null) return true;
+    final at = DateTime.tryParse(await v2.read(V2Keys.journalAt) ?? '');
+    if (at == null) return true;
+    final seconds = ((_state?['delais'] as Map?)?['changements_secondes'] as int?) ?? 60;
+    return now.difference(at) > Duration(seconds: 3 * seconds);
   }
 
   bool _serverOffers(String capability) => (_state?['capacites_serveur'] as List?)?.contains(capability) ?? false;
@@ -1688,6 +1753,8 @@ class V2Engine extends CaisseEngine {
     final passSettings = (await v2.entities('pass_reglages'))[_device['boutique_uuid']];
     _passSettings = passSettings == null ? null : PassSettings(passSettings);
     _resto = await _loadRestaurant();
+    final pointOfSale = _resto?.pointOfSaleUuid;
+    _restoInterface = RestoInterface.fromJson(pointOfSale == null ? null : (await v2.entities('restaurant.interface'))['interface:$pointOfSale']);
     final categories = await v2.entities('categorie');
     String? categoryOf(Map<String, dynamic> product) {
       final category = categories[product['categorie_uuid']];

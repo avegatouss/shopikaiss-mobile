@@ -1,0 +1,33 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000073",
+    "type": "edition_pre_z",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 59,
+    "cree_le": "2026-11-19T12:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000105"
+    },
+    "contenu": {
+        "point_de_vente_uuid": "8b000000-0000-4000-8000-000000000001",
+        "date_exploitation": "2026-11-19",
+        "version": "short",
+        "sessions": [
+            "5e55a0d1-0000-4000-8000-000000000002"
+        ],
+        "sessions_locales": [
+            "5e55a0d1-0000-4000-8000-000000000001"
+        ],
+        "partielle": true,
+        "resume": {
+            "tickets": 2,
+            "chiffre_affaires": 5000
+        }
+    },
+    "empreinte": "7d5474049ace1de1f2e386b1d6578d66e0fcf8b1a0c3719f6b3b3f4fdeb3627e"
+}

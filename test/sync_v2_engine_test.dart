@@ -310,7 +310,7 @@ void main() {
     await e.load('https://boutique.exemple.ci');
     expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
     await e.sync();
-    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant5'));
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant6'));
     final ctx = e.restaurant!;
     expect([ctx.master, ctx.stations.keys.toSet(), ctx.routes[fakeSavon], ctx.sendLabel, ctx.lastTicketNumbers[cuisine]], [true, {cuisine, bar}, cuisine, 'Envoyer', 'CUI-20261118-0007']);
     final ops = {for (final o in e.snapshot!.operators) o.id: o};
@@ -616,7 +616,7 @@ void main() {
     await e.load('https://boutique.exemple.ci');
     expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
     await e.sync();
-    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant5'));
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant6'));
     final ctx = e.restaurant!;
     expect([ctx.production, ctx.restaurantProfile, ctx.tableService, ctx.sendLabel, [for (final c in ctx.channels) c.code]],
         [true, true, false, 'Valider', ['ancien', 'sur_place', 'emporter', 'livraison']]);
@@ -955,7 +955,7 @@ void main() {
     await e.load('https://boutique.exemple.ci');
     expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
     await e.sync();
-    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant5'), reason: 'nouvel instantané : les promotions déjà publiées sont reçues');
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant6'), reason: 'nouvel instantané : les promotions déjà publiées sont reçues');
     expect({for (final p in e.restaurant!.promotions) p.uuid: p.name}, {happyUuid: 'Happy hour bar', bxgyUuid: '2 achetés, 1 offert'});
     expect(e.restaurant!.categoryParents[cocktails], bar);
     final awa = e.snapshot!.operators.firstWhere((o) => o.id == 7);

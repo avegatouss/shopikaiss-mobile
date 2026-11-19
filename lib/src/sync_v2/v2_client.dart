@@ -121,6 +121,10 @@ class CaisseV2Client {
   /// `resto_commande` et vente avec `commande`. Accordée seulement avec `contrat.2_1` et `session.cloture`.
   static const restaurantCapability = 'restaurant.v1';
 
+  /// Lot « Z local » (README §12) : types `z.session` et `z.journee`, `cloture_session.contenu.detail`, opérations
+  /// `edition_pre_x` et `edition_pre_z`. Accordée seulement avec `contrat.2_1`.
+  static const zLocalCapability = 'z.local';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;
