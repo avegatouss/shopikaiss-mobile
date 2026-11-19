@@ -597,15 +597,16 @@ String _day(DateTime date) {
 
 /// Contexte d'impression tiré du référentiel : boutique, terminal, moyens, caissiers.
 class ZContext {
-  ZContext({required this.storeName, required this.terminalName, required this.methods, required this.operatorName, this.currency = 'FCFA'});
+  ZContext({required this.storeName, required this.terminalName, required this.methods, required this.operatorName, this.currency = 'FCFA', this.publishedCashCodes = const {}});
 
   /// Contexte depuis le référentiel du terminal.
-  factory ZContext.of(Snapshot snapshot) => ZContext(
+  factory ZContext.of(Snapshot snapshot, {Set<String> publishedCashCodes = const {}}) => ZContext(
     storeName: snapshot.store.name.isNotEmpty ? snapshot.store.name : snapshot.store.legalName,
     terminalName: snapshot.terminal.name,
     methods: snapshot.methods,
     operatorName: (id) => snapshot.operatorById(id)?.name ?? '',
     currency: snapshot.store.currency,
+    publishedCashCodes: publishedCashCodes,
   );
 
   final String storeName;
@@ -614,8 +615,12 @@ class ZContext {
   final String Function(int? id) operatorName;
   final String currency;
 
+  /// Codes des moyens publiés avec `especes` vrai, locaux ou non au terminal : un remboursement saisi en ligne avec un
+  /// moyen espèces non local reste compté en espèces (réponse 19 de A : le booléen fait foi, pas le texte du code).
+  final Set<String> publishedCashCodes;
+
   Map<String, String> get methodNames => {for (final m in methods) m.code: m.name};
-  Set<String> get cashCodes => {for (final m in methods) if (m.isCash) m.code};
+  Set<String> get cashCodes => {for (final m in methods) if (m.isCash) m.code, ...publishedCashCodes};
   String get cashCode => cashCodes.firstOrNull ?? 'especes';
 }
 
@@ -671,7 +676,7 @@ List<Map<String, dynamic>> _methodControl(List<ClosureSession> sessions, ZContex
   ];
 }
 
-const _localMention = 'Caisse locale : chiffres de ce terminal. Le Z de la boutique fait foi après synchronisation.';
+const _localMention = 'Ventes de ce terminal seulement. Le Z de la boutique fait foi après synchronisation.';
 
 /// Bloc de détail d'une session tel que le Z de session l'imprime (et que `cloture_session.contenu.detail` le fige).
 Map<String, dynamic> sessionDetail(ClosureFacts facts, ClosureSession session, ZContext context) =>
