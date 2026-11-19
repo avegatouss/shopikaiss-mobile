@@ -7,6 +7,7 @@ import 'package:bcrypt/bcrypt.dart';
 import '../passes/pass_rules.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
+import '../restaurant/resto_interface.dart';
 import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -255,6 +256,10 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Restaurant du point de vente du terminal (profil, caisse maîtresse, salles, tables) ; null hors restaurant.
   RestoContext? get restaurant => null;
 
+  /// Interface simplifiée de la caisse restaurant (`restaurant.interface`, lot Z local) : couverts, libellé d'envoi,
+  /// navigation de la carte ; valeurs par défaut sans entité reçue.
+  RestoInterface get restaurantInterface => RestoInterface.defaults;
+
   /// Pourquoi [operator] ne peut pas prendre de commande sur ce terminal, ou null s'il le peut (caisse maîtresse, profil
   /// Service de table, droit `caisse_table`).
   String? restaurantBlocker(Operator operator) => 'Restaurant non disponible sur ce terminal.';
@@ -337,7 +342,8 @@ abstract class CaisseEngine extends EngineNotifier {
   Future<int> restoRefundAmount(String saleUuid, String type, Map<String, int> quantities) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Remboursement restaurant (`resto_remboursement`) : `retour` en espèces ou `annulation` sur les moyens d'origine.
-  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) =>
+  /// [operationUuid] : identifiant de l'opération de remboursement (rejeu sans double par l'adaptateur), sinon tiré.
+  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval, String? operationUuid}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   // ---------------------------------------------------------------- gestes sur une commande (R-4)
@@ -377,8 +383,22 @@ abstract class CaisseEngine extends EngineNotifier {
   Future<void> restoVerifyTicket(Operator operator, String ticketUuid, {required bool printed}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
-  /// Réimpression d'un bon (DUPLICATA) avec un motif.
-  Future<RestoOutcome> restoDuplicateTicket(Operator operator, String ticketUuid, String reason) =>
+  /// Réimpression d'un bon (DUPLICATA) avec un motif ; null : confiée à [restoDeferredPrinter], résultat à venir.
+  Future<RestoOutcome?> restoDuplicateTicket(Operator operator, String ticketUuid, String reason) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Hôte séparé de l'interface (Windows) : un bon destiné à une cible de [restoDeferredTargets] est confié à ce crochet,
+  /// qui le conserve durablement et rend aussitôt (jamais d'attente de l'impression) ; le résultat revient plus tard par
+  /// [restoDeferredOutcome]. Null : impression directe ([restoRegisterPrinter], [restoStationPrinter]).
+  Future<void> Function(RestoDeferredPrint job)? restoDeferredPrinter;
+
+  /// Cibles confiées à [restoDeferredPrinter] : l'imprimante de la caisse ; l'imprimante de poste si l'hôte l'ajoute.
+  Set<RestoTarget> restoDeferredTargets = {RestoTarget.imprimanteCaisse};
+
+  /// Résultat d'une impression différée, noté au journal des bons (livraison ou duplicata) ; une livraison `non_envoye`
+  /// reprend la chaîne de secours du bon, sauf si une autre tentative du même bon est encore en cours ([inFlight]).
+  /// Rejouer le même résultat ne note rien de plus.
+  Future<void> restoDeferredOutcome(Operator operator, RestoDeferredPrint job, RestoOutcome outcome, {Set<RestoTarget> inFlight = const {}}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Adresses locales des imprimantes de poste (`ip` ou `ip:port`), par poste.
@@ -404,6 +424,7 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Encaisse toute la commande (vente v2 avec `commande` de type `full`), puis la clôt. [lines] : panier rendu par
   /// [restoCart] ou [restoCartItems], inchangé. Profil Restaurant (R-4) : une partie du reste (`items`), ou tout le reste
   /// partagé en [shares] (`shares`, chaque paiement dans une part et une seule) ; la commande se clôt une fois soldée.
+  /// [operationUuid] : identifiant de la vente (encaissement idempotent, comme [recordSale]).
   Future<OfflineOperation> restoSettle(
     Operator operator,
     String orderUuid,
@@ -411,6 +432,7 @@ abstract class CaisseEngine extends EngineNotifier {
     List<CartPayment> payments, {
     String? draftUuid,
     List<RestoShare>? shares,
+    String? operationUuid,
   }) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Profil Restaurant (R-4) : ouvre une commande sur le canal [channelCode] (table si le canal l'exige, référence
@@ -487,6 +509,20 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Faits de clôture lus dans la file du terminal (sessions, ventes, retours, clôtures) pour imprimer pré-X, Z et pré-Z
   /// sans réseau ; null : documents locaux non disponibles sur ce terminal.
   Future<ClosureFacts?> closureFacts() async => null;
+
+  /// Document de clôture prêt à imprimer ([ZKind.preX], [ZKind.session], [ZKind.preZ]), calculé sans réseau à partir
+  /// de [closureFacts] ; null : documents locaux non disponibles. Lève [ClosureUnavailable] s'il n'y a pas de session à
+  /// imprimer. Commun à Android et à l'hôte Windows (qui rend `ticket`).
+  Future<ClosureDocument?> closureDocument(String kind, String version, {bool duplicate = false}) async {
+    final facts = await closureFacts();
+    final s = snapshot;
+    if (facts == null || s == null) return null;
+    return buildClosureDocument(facts, ZContext.of(s), kind: kind, version: version, now: now, duplicate: duplicate);
+  }
+
+  /// Audit d'une édition provisoire imprimée (pré-X, pré-Z ; lot Z local) : une opération par impression, avec son
+  /// propre UUID. Sans effet ici ; ne lève jamais (l'audit ne bloque ni l'impression ni la clôture).
+  Future<void> recordEdition(Operator operator, ClosureDocument document) async {}
 
   /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
   bool get customersSupported => false;

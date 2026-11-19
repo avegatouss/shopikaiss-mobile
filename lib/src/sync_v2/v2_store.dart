@@ -83,6 +83,11 @@ class V2Keys {
   /// Z restaurant rendu par le serveur (`details.z_restaurant` : clôture de session ou de registre), par opération.
   static const zRestaurantPrefix = 'v2.zr.';
   static const imageWindow = 'v2.images_plage';
+
+  /// Dernière lecture complète du journal (horodatage UTC) et échec de la dernière tentative (lot Z local : mention
+  /// « journée partielle » du pré-Z, README §12.4.3).
+  static const journalAt = 'v2.journal_le';
+  static const journalFailed = 'v2.journal_echec';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
@@ -102,7 +107,15 @@ const knownRestaurantTypes = {
   'restaurant.poste', 'restaurant.routage',
   'restaurant.canal', // R-4 (profil Restaurant)
   'restaurant.promotion', 'restaurant.remise_client', // R-5 (non critiques)
+  'restaurant.interface', // lot Z local (non critique, README §12.8)
 };
+
+/// Types du lot « Z local » (donnees-z-local-1.json), connus quand `z.local` est accordée.
+const knownZLocalTypes = {'z.session', 'z.journee'};
+
+/// Types non critiques dont une donnée non conforme est ignorée (l'entité n'est pas appliquée) au lieu d'arrêter le
+/// journal : ils ne servent qu'à l'impression et à l'affichage, avec des valeurs par défaut.
+const lenientV2Types = {'z.session', 'z.journee', 'restaurant.interface'};
 
 /// Résultat de l'application d'une page du journal.
 class V2ApplyResult {
@@ -147,7 +160,12 @@ class V2Store {
   /// Capacité `restaurant.v1` accordée (avec la forme 2.1) : types `restaurant.*` du R-1 et du R-2.
   bool restaurant = false;
 
-  Set<String> get knownTypes => contract21 ? {...knownV2Types, ...knownV2Types21, if (restaurant) ...knownRestaurantTypes} : knownV2Types;
+  /// Capacité `z.local` accordée (avec la forme 2.1) : types `z.session` et `z.journee`.
+  bool zLocal = false;
+
+  Set<String> get knownTypes => contract21
+      ? {...knownV2Types, ...knownV2Types21, if (restaurant) ...knownRestaurantTypes, if (zLocal) ...knownZLocalTypes}
+      : knownV2Types;
 
   static String _now() => DateTime.now().toUtc().toIso8601String();
 
@@ -190,15 +208,20 @@ class V2Store {
   /// reflétées dans les projections de l'instantané (`couverture.integrees`) voient leurs mouvements couverts ; celles
   /// reçues non intégrées gardent leur consommation. Ventes, brouillons et file ne sont pas touchés.
   Future<void> replaceProjection(List<Map<String, dynamic>> entities, Map<String, dynamic> manifest) => db.transaction((txn) async {
+    final ignored = <Map<String, dynamic>>{};
     for (final e in entities) {
       if (!knownTypes.contains(e['type']) && e['critique'] == true) throw V2Incompatible(e['type'] as String);
       final error = _invalidData(e);
-      if (error != null) throw V2Incompatible(error);
+      if (error != null && lenientV2Types.contains(e['type'])) {
+        ignored.add(e);
+      } else if (error != null) {
+        throw V2Incompatible(error);
+      }
     }
     await txn.delete('v2_entites');
     final batch = txn.batch();
     for (final e in entities) {
-      if (!knownTypes.contains(e['type'])) continue;
+      if (!knownTypes.contains(e['type']) || ignored.contains(e)) continue;
       batch.insert('v2_entites', {'type': e['type'], 'cle': e['cle'], 'revision': e['revision'], 'donnees': jsonEncode(e['donnees'])},
           conflictAlgorithm: ConflictAlgorithm.replace);
     }
@@ -221,11 +244,12 @@ class V2Store {
     for (final rawGroup in page['groupes'] as List) {
       final changes = [for (final c in (rawGroup as Map)['changements'] as List) Map<String, dynamic>.from(c as Map)];
       String? blocker;
+      final ignored = <Map<String, dynamic>>{};
       for (final c in changes) {
         if (!knownTypes.contains(c['type'])) {
           if (c['critique'] == true) blocker = c['type'] as String;
         } else if (_invalidData(c) != null) {
-          blocker = c['type'] as String;
+          lenientV2Types.contains(c['type']) ? ignored.add(c) : blocker = c['type'] as String;
         }
         if (blocker != null) break;
       }
@@ -234,7 +258,7 @@ class V2Store {
         return V2ApplyResult(applied, blockedBy: blocker);
       }
       for (final c in changes) {
-        if (knownTypes.contains(c['type'])) await _applyChange(txn, c);
+        if (knownTypes.contains(c['type']) && !ignored.contains(c)) await _applyChange(txn, c);
       }
       applied++;
     }
@@ -252,7 +276,19 @@ class V2Store {
     if (type == 'restaurant.reglages' && change['donnees'] is Map && !(change['donnees'] as Map).containsKey('annulation_envoye_responsable')) {
       change['donnees'] = {...(change['donnees'] as Map).cast<String, dynamic>(), 'annulation_envoye_responsable': false};
     }
-    final file = type.startsWith('restaurant.') ? 'donnees-restaurant-1.json' : (contract21 ? 'donnees-2.1.json' : 'donnees.json');
+    // Interface restaurant (§12.8) : une valeur inconnue (serveur plus récent) vaut la valeur par défaut.
+    if (type == 'restaurant.interface' && change['donnees'] is Map) {
+      final d = (change['donnees'] as Map).cast<String, dynamic>();
+      change['donnees'] = {
+        ...d,
+        if (d['demander_couverts'] is! bool) 'demander_couverts': true,
+        if (!const {'send', 'hold', 'hold_short'}.contains(d['libelle_envoi'])) 'libelle_envoi': 'send',
+        if (!const {'chips', 'tiles', 'families'}.contains(d['navigation_carte'])) 'navigation_carte': 'chips',
+      };
+    }
+    final file = type.startsWith('restaurant.')
+        ? 'donnees-restaurant-1.json'
+        : (type.startsWith('z.') ? 'donnees-z-local-1.json' : (contract21 ? 'donnees-2.1.json' : 'donnees.json'));
     final errors = validator.validate(change['donnees'], '$file#/\$defs/$type');
     return errors.isEmpty ? null : '$type ${change['cle']} : ${errors.first}';
   }

@@ -1,0 +1,26 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000072",
+    "type": "edition_pre_x",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 58,
+    "cree_le": "2026-11-19T12:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000105"
+    },
+    "contenu": {
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+        "version": "detailed",
+        "aveugle": true,
+        "resume": {
+            "tickets": 2,
+            "chiffre_affaires": 5000
+        }
+    },
+    "empreinte": "056ab895f3579cb6d6e2c8b61471624457718e73f03ebb7aa2cbe66450c74993"
+}

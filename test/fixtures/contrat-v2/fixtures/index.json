@@ -824,6 +824,116 @@
             "fichier": "valides/operation--vente-commande-offerte-sans-paiement.json",
             "schema": "operation.json",
             "valide": true
+        },
+        {
+            "fichier": "valides/donnees-z-local--detail-cloture.json",
+            "schema": "donnees-z-local-1.json#/$defs/detail_cloture",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-z-local--z-session.json",
+            "schema": "donnees-z-local-1.json#/$defs/z.session",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-z-local--z-session-fond-inconnu.json",
+            "schema": "donnees-z-local-1.json#/$defs/z.session",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-z-local--z-session-fond-negatif.json",
+            "schema": "donnees-z-local-1.json#/$defs/z.session",
+            "valide": false,
+            "erreur_attendue": "fond_initial : doit correspondre à exactement une variante"
+        },
+        {
+            "fichier": "invalides/donnees-z-local--z-session-retour-sans-lignes.json",
+            "schema": "donnees-z-local-1.json#/$defs/z.session",
+            "valide": false,
+            "erreur_attendue": "lignes : obligatoire"
+        },
+        {
+            "fichier": "valides/donnees-z-local--z-journee.json",
+            "schema": "donnees-z-local-1.json#/$defs/z.journee",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-z-local--z-journee-close.json",
+            "schema": "donnees-z-local-1.json#/$defs/z.journee",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-z-local--z-journee-statut-inconnu.json",
+            "schema": "donnees-z-local-1.json#/$defs/z.journee",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "invalides/donnees-z-local--detail-montant-nombre.json",
+            "schema": "donnees-z-local-1.json#/$defs/detail_cloture",
+            "valide": false,
+            "erreur_attendue": "type attendu string"
+        },
+        {
+            "fichier": "invalides/donnees-z-local--detail-version-2.json",
+            "schema": "donnees-z-local-1.json#/$defs/detail_cloture",
+            "valide": false,
+            "erreur_attendue": "valeur attendue 1"
+        },
+        {
+            "fichier": "invalides/donnees-z-local--detail-quantite-sans-decimales.json",
+            "schema": "donnees-z-local-1.json#/$defs/detail_cloture",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "valides/operation--cloture-session-detail-local.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--edition-pre-x.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--edition-pre-z.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--edition-pre-x-version-inconnue.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "invalides/operation--edition-pre-z-date-avec-heure.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/operation--cloture-session-detail-montant-decimal.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "contenu.detail : doit correspondre à exactement une variante"
+        },
+        {
+            "fichier": "valides/donnees--restaurant-interface.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.interface",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-interface-defauts.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.interface",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-interface-navigation-inconnue.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.interface",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
         }
     ]
 }

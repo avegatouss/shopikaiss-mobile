@@ -1,5 +1,6 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commit : 6dd94825 (feat/restaurant-r5, restaurant-1 lots R-1 à R-5, démo et main web 903abe6d)
+Commit : c3610bbb (integration/tbc, lot « Z local » README §12 + restaurant.interface, 174 fixtures, 15 schémas ;
+empreintes vérifiées contre _coordination/caisse-autonome/z-local-c3610bbb/SHA256SUMS.txt). Précédent : 6dd94825 (R-5).
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.
