@@ -126,6 +126,14 @@ void main() {
     await expectLater(host.call(HostCommand.restaurantView), throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'operator_required')));
   });
 
+  test('closure documents require a logged-in operator and never enqueue a closure', () async {
+    final before = (await store.operations()).length;
+    await expectLater(host.call(HostCommand.cashClosureDocument, arguments: {'kind': 'pre-x', 'version': 'detailed'}), throwsA(isA<HostFailure>()));
+    await host.call(HostCommand.logout);
+    await expectLater(host.call(HostCommand.cashClosureDocument, arguments: {'kind': 'pre-x', 'version': 'detailed'}), throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'operator_required')));
+    expect((await store.operations()).length, before);
+  });
+
   Future<void> prepare() async {
     final view = await host.call(HostCommand.view);
     final product = (view['products'] as List).first as Map;

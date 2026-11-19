@@ -4,6 +4,7 @@ import '../../offline/money.dart';
 import 'host_server.dart';
 import 'protocol.dart';
 import 'restaurant_projection.dart';
+import 'closure_document.dart';
 
 /// Transport adaptation only; business rules stay in B's shared engine.
 class BEngineAdapter implements WindowsEngineAdapter {
@@ -17,6 +18,18 @@ class BEngineAdapter implements WindowsEngineAdapter {
     Map<String, dynamic> arguments,
     String? operationId,
   ) async {
+    if (command == HostCommand.cashClosureDocument) {
+      final status = await inner.execute('status', const {}, null);
+      if (status['operator'] == null) {
+        throw const HostFailure('operator_required', 'Identifiez le caissier pour consulter les documents.');
+      }
+      final operator = inner.engine.snapshot?.operatorById((status['operator'] as Map)['id'] as int);
+      if (operator == null ||
+          (arguments['kind'] == 'pre-z' && !inner.engine.hasRight(operator, 'caisse_cloturer'))) {
+        throw const HostFailure('document_forbidden', 'Vous ne pouvez pas éditer ce document sur ce poste.');
+      }
+      return localClosureDocument(inner.engine, arguments);
+    }
     if (command == HostCommand.restaurantView) {
       final status = await inner.execute('status', const {}, null);
       if (status['operator'] == null) {

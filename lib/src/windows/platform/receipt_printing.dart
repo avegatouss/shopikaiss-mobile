@@ -121,6 +121,7 @@ class ReceiptPrinting {
   static Future<String> printLines(
     List<String> lines, {
     bool compact = false,
+    Uint8List? escposBytes,
   }) async {
     if (lines.isEmpty || lines.length > 10000) {
       throw const FormatException('Ticket invalide');
@@ -141,7 +142,7 @@ class ReceiptPrinting {
     if (mode == 'raw') {
       final outcome = await const RawReceiptPrinter().send(
         matching.first.name,
-        offlineTicketBytes(lines, compact: compact),
+        escposBytes ?? offlineTicketBytes(lines, compact: compact),
       );
       if (outcome == RawPrintOutcome.transmitted) {
         return 'Ticket ESC/POS transmis au spouleur. Vérifiez le papier et la coupe.';
