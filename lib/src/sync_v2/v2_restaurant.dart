@@ -700,8 +700,17 @@ extension _V2Restaurant on V2Engine {
   });
 
   /// Une cible : écran du poste (afficheur, absent d'Android : échec certain), imprimante du poste (adresse locale), ou
-  /// imprimante de la caisse.
-  Future<RestoOutcome> _restoSendTo(RestoTicket ticket, RestoStation station, RestoTarget target, {bool duplicate = false}) async {
+  /// imprimante de la caisse. Null : tentative [attempt] confiée à [restoDeferredPrinter] (hôte Windows), résultat à venir.
+  Future<RestoOutcome?> _restoSendTo(
+    RestoTicket ticket,
+    RestoStation station,
+    RestoTarget target, {
+    bool duplicate = false,
+    String? attempt,
+    String kind = 'livraison',
+    bool fallback = false,
+    Operator? operator,
+  }) async {
     final ctx = _resto!;
     final order = (await _restoTracks())[ticket.orderUuid]?.order;
     final text = ticket.printLines(
@@ -711,6 +720,30 @@ extension _V2Restaurant on V2Engine {
       columns: restoTicketColumns,
       duplicate: duplicate,
     );
+    final deferred = restoDeferredPrinter;
+    if (deferred != null && attempt != null && restoDeferredTargets.contains(target) && target != RestoTarget.ecranPoste) {
+      final address = target == RestoTarget.imprimantePoste ? _restoPrinters[station.uuid] : null;
+      if (target == RestoTarget.imprimantePoste && address == null) return RestoOutcome.nonEnvoye;
+      try {
+        await deferred(RestoDeferredPrint(
+          uuid: attempt,
+          kind: kind,
+          ticketUuid: ticket.uuid,
+          orderUuid: ticket.orderUuid,
+          stationUuid: station.uuid,
+          stationName: station.name,
+          target: target,
+          address: address,
+          fallback: fallback,
+          operatorId: operator?.id,
+          lines: text,
+        ));
+        return null;
+      } catch (_) {
+        // Travail peut-être conservé : jamais de secours qui risquerait un bon en double.
+        return RestoOutcome.aVerifier;
+      }
+    }
     try {
       switch (target) {
         case RestoTarget.ecranPoste:
@@ -761,22 +794,86 @@ extension _V2Restaurant on V2Engine {
     for (final ticket in tickets) {
       final station = ctx.stations[ticket.stationUuid];
       if (station == null) continue;
-      final attempts = <RestoAttempt>[];
-      for (var plan = RestoDelivery.next(station, attempts); plan.isNotEmpty; plan = RestoDelivery.next(station, attempts)) {
-        for (final (target, fallback) in plan) {
-          final outcome = await _restoSendTo(ticket, station, target);
-          attempts.add(RestoAttempt(target, outcome, fallback: fallback));
-          await _restoJournalAdd(operator, {
-            'type': 'livraison',
-            'bon_uuid': ticket.uuid,
-            'tentative_uuid': _newUuid(),
-            'cible': target.code,
-            'resultat': outcome.code,
-            'secours': fallback,
-            'le': _restoStamp(),
-          });
+      await _restoDeliverTicket(operator, ticket, station, <RestoAttempt>[]);
+    }
+    await _restoFlush();
+    notifyListeners();
+  }
+
+  /// Suite du plan de livraison d'un bon après [attempts] ; une cible confiée à l'hôte ([restoDeferredPrinter]) arrête
+  /// le plan : son résultat le reprend ([_restoDeferredOutcome]).
+  Future<void> _restoDeliverTicket(Operator operator, RestoTicket ticket, RestoStation station, List<RestoAttempt> attempts) async {
+    for (var plan = RestoDelivery.next(station, attempts); plan.isNotEmpty; plan = RestoDelivery.next(station, attempts)) {
+      var deferred = false;
+      for (final (target, fallback) in plan) {
+        final attempt = _newUuid();
+        final outcome = await _restoSendTo(ticket, station, target, attempt: attempt, fallback: fallback, operator: operator);
+        if (outcome == null) {
+          deferred = true;
+          continue;
         }
+        attempts.add(RestoAttempt(target, outcome, fallback: fallback));
+        await _restoJournalAdd(operator, {
+          'type': 'livraison',
+          'bon_uuid': ticket.uuid,
+          'tentative_uuid': attempt,
+          'cible': target.code,
+          'resultat': outcome.code,
+          'secours': fallback,
+          'le': _restoStamp(),
+        });
       }
+      if (deferred) return;
+    }
+  }
+
+  /// Résultat d'une impression confiée à l'hôte : noté au journal (livraison) ou sur le duplicata ; une livraison en échec
+  /// certain reprend la chaîne de secours, sauf si une autre tentative du bon est encore en cours ([inFlight]). Une
+  /// tentative déjà notée ne l'est pas deux fois.
+  Future<void> _restoDeferredOutcome(Operator operator, RestoDeferredPrint job, RestoOutcome outcome, {Set<RestoTarget> inFlight = const {}}) async {
+    final ctx = _resto ?? (throw const OfflineRefusal(_unavailable));
+    if (job.kind == 'duplicata') {
+      await serialized(() async {
+        final journal = await _restoJournalRead();
+        for (final e in journal) {
+          if ((e['e'] as Map)['type'] == 'duplicata' && (e['e'] as Map)['duplicata_uuid'] == job.uuid) e['x'] = outcome.code;
+        }
+        await _restoJournalWrite(journal);
+      });
+      notifyListeners();
+      return;
+    }
+    final mine = [
+      for (final e in await _restoJournalRead())
+        if ((e['e'] as Map)['type'] == 'livraison' && (e['e'] as Map)['bon_uuid'] == job.ticketUuid) e['e'] as Map,
+    ];
+    if (mine.any((e) => e['tentative_uuid'] == job.uuid)) return;
+    await _restoJournalAdd(operator, {
+      'type': 'livraison',
+      'bon_uuid': job.ticketUuid,
+      'tentative_uuid': job.uuid,
+      'cible': job.target.code,
+      'resultat': outcome.code,
+      'secours': job.fallback,
+      'le': _restoStamp(),
+    });
+    final station = ctx.stations[job.stationUuid];
+    final ticket = outcome == RestoOutcome.nonEnvoye
+        ? (await _restoTicketViews(orderUuid: job.orderUuid)).where((t) => t.ticket.uuid == job.ticketUuid).firstOrNull?.ticket
+        : null;
+    if (station != null && ticket != null) {
+      final attempts = [
+        for (final e in mine)
+          RestoAttempt(
+            RestoTarget.values.firstWhere((t) => t.code == e['cible']),
+            RestoOutcome.values.firstWhere((o) => o.code == e['resultat']),
+            fallback: e['secours'] == true,
+          ),
+        RestoAttempt(job.target, outcome, fallback: job.fallback),
+        // Tentative encore en cours : comptée comme incertaine, le plan attend son résultat.
+        for (final t in inFlight) RestoAttempt(t, RestoOutcome.aVerifier),
+      ];
+      await _restoDeliverTicket(operator, ticket, station, attempts);
     }
     await _restoFlush();
     notifyListeners();
@@ -845,27 +942,29 @@ extension _V2Restaurant on V2Engine {
 
   /// Réimpression demandée par un opérateur (DUPLICATA, autre identifiant) : imprimante du poste si elle est réglée,
   /// sinon celle de la caisse.
-  Future<RestoOutcome> _restoDuplicate(Operator operator, String ticketUuid, String reason) async {
+  Future<RestoOutcome?> _restoDuplicate(Operator operator, String ticketUuid, String reason) async {
     final ctx = _requireResto(operator);
     final motive = reason.trim();
     if (motive.length < 3 || motive.length > 500) throw const OfflineRefusal('Indiquez le motif de la réimpression (3 à 500 caractères).');
     final view = (await _restoTicketViews()).where((t) => t.ticket.uuid == ticketUuid).firstOrNull ?? (throw const OfflineRefusal('Bon introuvable sur ce terminal.'));
     final station = ctx.stations[view.ticket.stationUuid] ?? (throw const OfflineRefusal('Poste de ce bon inconnu sur ce terminal.'));
     var target = station.paper && _restoPrinters.containsKey(station.uuid) ? RestoTarget.imprimantePoste : RestoTarget.imprimanteCaisse;
-    var outcome = await _restoSendTo(view.ticket, station, target, duplicate: true);
+    final duplicate = _newUuid();
+    var outcome = await _restoSendTo(view.ticket, station, target, duplicate: true, attempt: duplicate, kind: 'duplicata', operator: operator);
     if (outcome == RestoOutcome.nonEnvoye && target == RestoTarget.imprimantePoste) {
       target = RestoTarget.imprimanteCaisse;
-      outcome = await _restoSendTo(view.ticket, station, target, duplicate: true);
+      outcome = await _restoSendTo(view.ticket, station, target, duplicate: true, attempt: duplicate, kind: 'duplicata', operator: operator);
     }
+    // Confié à l'hôte (null) : le duplicata est noté maintenant, son résultat local à son retour.
     await _restoJournalAdd(operator, {
       'type': 'duplicata',
       'bon_uuid': ticketUuid,
-      'duplicata_uuid': _newUuid(),
+      'duplicata_uuid': duplicate,
       'cible': target.code,
       'motif': motive,
       'operateur_id': '${operator.id}',
       'le': _restoStamp(),
-    }, localOutcome: outcome.code);
+    }, localOutcome: outcome?.code);
     await _restoFlush();
     notifyListeners();
     return outcome;
@@ -1181,6 +1280,7 @@ extension _V2Restaurant on V2Engine {
     List<CartPayment> payments, {
     String? draftUuid,
     List<RestoShare>? shares,
+    String? operationUuid,
   }) async {
     final ctx = _requireResto(operator);
     final tracks = await _restoTracks();
@@ -1221,7 +1321,7 @@ extension _V2Restaurant on V2Engine {
         // Envoi impossible (commande bloquée…) : la vente reste permise, la commande garde ses articles en attente.
       }
     }
-    final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid,
+    final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid, operationUuid: operationUuid,
         extras: SaleExtras(
           globalDiscount: order.globalDiscount,
           order: OrderSettlement(
@@ -1449,7 +1549,7 @@ extension _V2Restaurant on V2Engine {
   /// autorisation `remboursement` d'un responsable pour ce montant ; motif obligatoire. Le serveur recalcule le montant
   /// (`restaurant.remboursement_incoherent` s'il diffère, rien n'est remboursé) et attend la vente si elle n'est pas
   /// encore intégrée (`restaurant.attente_reglement`).
-  Future<OfflineOperation> _restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) =>
+  Future<OfflineOperation> _restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval, String? operationUuid}) =>
       serialized(() async {
         final blocker = _restoRefundBlocker(operator);
         if (blocker != null) throw OfflineRefusal(blocker);
@@ -1473,7 +1573,7 @@ extension _V2Restaurant on V2Engine {
           if (approval.amount != amount) throw const OfflineRefusal('Le montant a changé depuis l’autorisation : faites-la de nouveau.');
           authorizations = [approval.toJson()];
         }
-        final operation = await _record(_newUuid(), _refundType, operator, (_) => {
+        final operation = await _record(operationUuid ?? _newUuid(), _refundType, operator, (_) => {
           'maitre_generation': ctx.generation,
           'point_de_vente_uuid': ctx.pointOfSaleUuid,
           'vente_ref': {'operation_uuid': saleUuid},

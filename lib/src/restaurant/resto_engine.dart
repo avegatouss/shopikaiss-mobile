@@ -1397,6 +1397,72 @@ enum RestoOutcome {
   final String code;
 }
 
+/// Impression confiée à un autre processus (hôte Windows : le moteur ne voit pas l'imprimante de la caisse, l'interface
+/// imprime) : la tentative [uuid] est en cours tant que son résultat n'est pas rendu au moteur ; elle n'est jamais
+/// relancée, une issue inconnue (`a_verifier`) se vérifie sur place.
+class RestoDeferredPrint {
+  const RestoDeferredPrint({
+    required this.uuid,
+    required this.kind,
+    required this.ticketUuid,
+    required this.orderUuid,
+    required this.stationUuid,
+    required this.stationName,
+    required this.target,
+    this.address,
+    this.fallback = false,
+    this.operatorId,
+    required this.lines,
+  });
+
+  factory RestoDeferredPrint.fromJson(Map m) => RestoDeferredPrint(
+    uuid: m['uuid'] as String,
+    kind: m['kind'] as String,
+    ticketUuid: m['ticket_uuid'] as String,
+    orderUuid: m['order_uuid'] as String,
+    stationUuid: m['station_uuid'] as String,
+    stationName: m['station_name'] as String,
+    target: RestoTarget.values.firstWhere((t) => t.code == m['target']),
+    address: m['address'] as String?,
+    fallback: m['fallback'] == true,
+    operatorId: m['operator_id'] as int?,
+    lines: (m['lines'] as List).cast<String>(),
+  );
+
+  /// Identifiant de la tentative (`tentative_uuid` d'une livraison, `duplicata_uuid` d'un duplicata).
+  final String uuid;
+
+  /// `livraison` ou `duplicata`.
+  final String kind;
+  final String ticketUuid;
+  final String orderUuid;
+  final String stationUuid;
+  final String stationName;
+  final RestoTarget target;
+
+  /// Adresse locale de l'imprimante du poste ([RestoTarget.imprimantePoste]) ; null pour la caisse.
+  final String? address;
+  final bool fallback;
+  final int? operatorId;
+
+  /// Texte du bon, tel qu'il doit sortir (jamais recomposé par l'interface).
+  final List<String> lines;
+
+  Map<String, dynamic> toJson() => {
+    'uuid': uuid,
+    'kind': kind,
+    'ticket_uuid': ticketUuid,
+    'order_uuid': orderUuid,
+    'station_uuid': stationUuid,
+    'station_name': stationName,
+    'target': target.code,
+    'address': address,
+    'fallback': fallback,
+    'operator_id': operatorId,
+    'lines': lines,
+  };
+}
+
 class RestoAttempt {
   const RestoAttempt(this.target, this.outcome, {this.fallback = false});
 

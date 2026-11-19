@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
@@ -7,9 +8,16 @@ import '../offline/models.dart';
 import '../offline/money.dart';
 import '../offline/ticket.dart';
 import '../offline/web_rules.dart';
+import '../restaurant/resto_context.dart';
+import '../restaurant/resto_engine.dart';
+import '../sync_v2/decimal6.dart';
+
+part 'register_adapter_resto.dart';
 
 /// Version de l'interface de commandes du moteur (C-REQ-001). Toute rupture incrémente ce numéro.
-const registerAdapterVersion = 1;
+/// 2 : commandes restaurant (`restaurantView`, `resto*`) et pont d'impression des bons (docs/livraison-caisse-autonome/
+/// ADAPTATEUR-RESTAURANT-B.md).
+const registerAdapterVersion = 2;
 
 /// Refus d'une commande. [notCommitted] : il est CERTAIN que rien n'a été enregistré (règle refusée avant écriture) ;
 /// toute autre exception d'une commande d'encaissement doit être traitée comme un résultat inconnu.
@@ -51,6 +59,14 @@ class AdapterFailure implements Exception {
 ///
 /// Paniers en attente : un seul panier courant ; les autres sont suspendus, conservés sur le terminal et repris par
 /// leur identifiant. Un panier encaissé est consommé par la transaction de la vente (une seule vente par panier).
+///
+/// Restaurant (version 2, capacité `restaurant.v1`) : restaurantView, restoOrder, restoTickets, restoApprovalInfo,
+/// restoRegister, restoSettledSales, restoRefundPreview, restoPrepareSettlement en lecture ; restoOpen, restoOpenOnChannel,
+/// restoEditLines, restoStaffLines, restoSend, restoPrebill, restoTransfer, restoMoveLines, restoMerge, restoCoversAndServer,
+/// restoValidateCustomer, restoCancelLine, restoCancel, restoOffer, restoDiscountLine, restoDiscountOrder, restoSettle,
+/// restoClose, restoRegisterOpen, restoRegisterClose, restoRefund, restoVerifyTicket, restoDuplicateTicket,
+/// restoSetPrinterAddress en écriture (caissier identifié, identifiant d'opération, rejeu sans double) ; restoPrintJobs,
+/// restoPrintStart, restoPrintResult pour les bons imprimés par l'interface (hôte Windows).
 class LocalRegisterAdapter {
   LocalRegisterAdapter(this.engine, {this.paperWidth = 80, String Function()? newUuid}) : _newUuid = newUuid ?? (() => const Uuid().v4());
 
@@ -77,19 +93,36 @@ class LocalRegisterAdapter {
   bool _syncing = false;
   Future<void> _queue = Future.value();
 
+  /// Règlement restaurant préparé (`restoPrepareSettlement`), en mémoire : un hôte redémarré le refait.
+  _RestoSettlement? _restoSettlementPrepared;
+
+  /// Travaux d'impression confiés à l'interface pendant la commande en cours (réponse `print_jobs`).
+  final List<String> _restoNewJobs = [];
+
+  /// Vrai si l'adaptateur a branché le pont d'impression des bons sur le moteur.
+  bool _restoPrintBridge = false;
+
   /// Restaure le panier conservé le plus récent (les autres restent conservés, rien n'est effacé).
   Future<void> start() async {
     if (_started) return;
     final current = (await engine.openDrafts()).where((d) => d.content['suspendu'] != true).firstOrNull;
     _draft = current == null ? _Draft(_newUuid()) : _Draft.fromStored(current);
     engine.addListener(_engineChanged);
+    // Hôte sans imprimante de caisse joignable (Windows : l'interface imprime) : les bons lui sont confiés par une file
+    // durable ; un acquittement conservé mais pas encore journalisé repasse au moteur.
+    if (engine.restoRegisterPrinter == null && engine.restoDeferredPrinter == null) {
+      engine.restoDeferredPrinter = _restoEnqueue;
+      _restoPrintBridge = true;
+    }
     _started = true;
+    await _restoJournalizePending();
   }
 
   /// Attend la synchronisation en cours (jamais interrompue au milieu d'une écriture), puis se détache du moteur.
   Future<void> close() async {
     await _syncTask;
     await _queue;
+    if (_restoPrintBridge) engine.restoDeferredPrinter = null;
     engine.removeListener(_engineChanged);
     await _changes.close();
   }
@@ -230,6 +263,8 @@ class LocalRegisterAdapter {
         scheduleSynchronization();
         return {'scheduled': true};
       default:
+        final restaurant = _restoCommand(command, args, operationId);
+        if (restaurant != null) return restaurant;
         throw AdapterFailure('commande_inconnue', 'Commande locale non reconnue : $command.');
     }
   }
