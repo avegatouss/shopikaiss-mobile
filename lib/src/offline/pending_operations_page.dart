@@ -82,10 +82,15 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
                   'creation_client' => 'Nouveau client : ${o.content['nom']}',
                   'retour' => 'Retour (${formatFcfa((o.content['montant'] as num?)?.toInt() ?? 0)} rendus)',
                   'cloture_session' => 'Clôture de session (compté ${formatFcfa((o.content['compte'] as num?)?.toInt() ?? 0)})',
+                  'resto_registre_ouvre' => 'Ouverture du registre (${o.content['date_metier']})',
+                  'resto_registre_clos' => 'Clôture du registre (Z local n° ${(o.content['z_local'] as Map?)?['numero']})',
                   _ => 'Ouverture de session (fond ${formatFcfa((o.content['fond'] as num?)?.toInt() ?? 0)})',
                 }),
                 subtitle: Text('${two(d.day)}/${two(d.month)} ${two(d.hour)}:${two(d.minute)} · $label${switch (o.content['z']) {
                   final Map z => ' · théorique ${formatFcfa(z['theorique'] as int)}, écart ${formatFcfa(z['ecart'] as int)}',
+                  _ => '',
+                }}${switch (o.content['z_restaurant']) {
+                  final Map z => ' · Z restaurant n° ${z['numero']}',
                   _ => '',
                 }}'),
                 trailing: !o.isSale

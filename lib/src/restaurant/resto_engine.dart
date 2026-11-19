@@ -608,9 +608,24 @@ class RestoEngine {
     return m == null ? null : (m.group(1)!, int.parse(m.group(2)!));
   }
 
-  /// Ouverture : commande vide, en attente (Service de table : table obligatoire).
-  RestoResult open({required String prefix, required String businessDay, required String profile, String? tableUuid, int? covers, String? serverId, String? menuUuid}) {
+  /// Ouverture : commande vide, en attente (Service de table : table obligatoire). Profil Restaurant (R-4) : canal
+  /// obligatoire, table et référence selon le canal (vérifiés par l'appelant), étape initiale null.
+  RestoResult open({
+    required String prefix,
+    required String businessDay,
+    required String profile,
+    String? tableUuid,
+    int? covers,
+    String? serverId,
+    String? menuUuid,
+    String? channel,
+    String? externalReference,
+    String? customerName,
+  }) {
     if (profile == 'TABLE_SERVICE' && tableUuid == null) throw const RestoRefusal('Choisissez la table de la commande.');
+    if (profile == 'PRODUCTION' && (channel == null || channel.isEmpty)) throw const RestoRefusal('Choisissez le canal de la commande.');
+    if ((externalReference?.length ?? 0) > 80) throw const RestoRefusal('Référence trop longue (80 caractères au plus).');
+    if ((customerName?.length ?? 0) > 160) throw const RestoRefusal('Nom du client trop long (160 caractères au plus).');
     if (covers != null && (covers < 1 || covers > 500)) throw const RestoRefusal('Nombre de couverts invalide (1 à 500).');
     final day = businessDay.replaceAll('-', '');
     final sequence = counters.next('commande|$day');
@@ -624,7 +639,12 @@ class RestoEngine {
       menuUuid: menuUuid,
       covers: covers,
       serverId: serverId,
-      stage: RestoStage.waiting,
+      channel: profile == 'PRODUCTION' ? channel : null,
+      externalReference: _clean(externalReference),
+      customerName: _clean(customerName),
+      // Règle ServiceStage du web : `waiting` au Service de table, null au Restaurant (la préaddition la passe
+      // `bill_printed`).
+      stage: profile == 'TABLE_SERVICE' ? RestoStage.waiting : null,
     );
     return _record(order, 'ouverture', const {});
   }
@@ -667,6 +687,7 @@ class RestoEngine {
       if (quantities.containsKey(uuid) && quantities[uuid] != line.quantity) {
         final quantity = quantities[uuid]!;
         if (quantity <= 0) throw const RestoRefusal('Quantité invalide : retirez l’article.');
+        if (quantity < line.settled) throw RestoRefusal('« ${line.label} » est déjà en partie réglé : sa quantité ne descend plus sous le réglé.');
         // Une ligne envoyée ne change plus par `lignes` (contrat §4.3) : on ajoute l'article à nouveau, ou on annule avec
         // un motif.
         if (line.status == RestoLineStatus.sent) {
@@ -688,6 +709,7 @@ class RestoEngine {
       final line = next.line(uuid);
       if (!line.active) continue;
       if (line.sent > 0 || line.status == RestoLineStatus.sent) throw RestoRefusal('« ${line.label} » est déjà envoyé : annulez-le avec un motif.');
+      if (line.settled > 0) throw RestoRefusal('« ${line.label} » est déjà réglé : il ne se retire plus.');
       line.status = RestoLineStatus.cancelled;
       removedUuids.add(uuid);
     }
@@ -786,6 +808,20 @@ class RestoEngine {
     return _record(next, 'envoi', {'bons': [for (final t in tickets) t.toJson()]}, tickets: tickets);
   }
 
+  /// « Valider » (action `validation`, R-4) quand l'envoi en production est éteint : les lignes en attente sont figées
+  /// (`sent`) sans aucun bon, comme `OrderService::send` du web. L'envoyé net ne change pas.
+  RestoResult validate(RestoOrder order) {
+    _requireOpen(order);
+    final next = order.copy();
+    final waiting = [for (final l in next.lines) if (l.toSend > 0) l];
+    if (waiting.isEmpty) throw const RestoRefusal('Rien de nouveau à valider.');
+    if (waiting.length > 100) throw const RestoRefusal('Validez au plus 100 articles à la fois.');
+    for (final l in waiting) {
+      l.status = RestoLineStatus.sent;
+    }
+    return _record(next, 'validation', {'lignes': [for (final l in waiting) l.uuid]});
+  }
+
   /// Annulation d'une quantité envoyée (lot R-3) : seulement sur une ligne `sent`, motif d'au moins 3 caractères ; droit
   /// `resto_modifier_envoye` ou autorisation d'un approbateur, vérifiés par l'appelant et joints en [authorizations]. Bon
   /// d'ANNULATION pour ce qui part de l'envoyé net (envoyé − quantité restante), aucun si la ligne n'a jamais été annoncée.
@@ -800,6 +836,7 @@ class RestoEngine {
     if (line.status != RestoLineStatus.sent) throw const RestoRefusal('Article pas encore envoyé : retirez-le ou changez sa quantité.');
     if (quantity <= 0 || quantity > line.quantity) throw const RestoRefusal('Quantité à annuler invalide.');
     final remaining = line.quantity - quantity;
+    if (remaining < line.settled) throw const RestoRefusal('La partie réglée d’un article ne s’annule pas.');
     final announced = line.sent > remaining ? line.sent - remaining : 0;
     final tickets = <RestoTicket>[];
     if (announced > 0) {
@@ -842,6 +879,8 @@ class RestoEngine {
     }
     if (announced.isNotEmpty && motive.length < 3) throw const RestoRefusal('Des articles sont déjà envoyés : indiquez le motif de l’annulation (3 caractères au moins).');
     if (cancellationReasonRequired && motive.isEmpty) throw const RestoRefusal('Indiquez le motif de l’annulation de la commande.');
+    // Profil Restaurant (R-4, OrderModificationService::cancelOrder) : motif de 3 caractères toujours exigé.
+    if (order.profile == 'PRODUCTION' && motive.length < 3) throw const RestoRefusal('Indiquez le motif de l’annulation (3 caractères au moins).');
     if (next.activeLines.any((l) => l.settled > 0)) throw const RestoRefusal('Des articles sont déjà réglés : la commande ne s’annule plus.');
     final ordered = announced.entries.toList()..sort((a, b) => stations[a.key]!.order.compareTo(stations[b.key]!.order));
     final tickets = [

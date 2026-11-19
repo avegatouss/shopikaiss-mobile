@@ -649,10 +649,20 @@ class SaleExtras {
 
 /// Règlement complet d'une commande restaurant par une vente : chaque ligne du panier règle une ligne de la commande.
 class OrderSettlement {
-  OrderSettlement({required this.orderUuid, required this.settlementUuid, required Map<CartLine, String> lineOf}) : lineOf = Map.identity()..addAll(lineOf);
+  OrderSettlement({required this.orderUuid, required this.settlementUuid, required Map<CartLine, String> lineOf, this.type = 'full', this.shares, this.label})
+    : lineOf = Map.identity()..addAll(lineOf);
 
   final String orderUuid;
   final String settlementUuid;
+
+  /// `full`, `items` ou `shares` (R-4 : `items` et `shares` au profil Restaurant seulement).
+  final String type;
+
+  /// Parts d'un règlement `shares` (`commande.parts`), null sinon.
+  final List<Map<String, dynamic>>? shares;
+
+  /// Libellé du règlement (`commande.libelle`), 120 caractères au plus.
+  final String? label;
 
   /// Ligne de commande de chaque ligne du panier (par identité).
   final Map<CartLine, String> lineOf;

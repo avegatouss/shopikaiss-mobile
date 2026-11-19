@@ -25,6 +25,7 @@ import 'ticket.dart';
 import 'web_rules.dart';
 
 part 'restaurant_screen.dart';
+part 'restaurant_production_screen.dart';
 
 const _offline = Color(0xFFB45309);
 
@@ -156,8 +157,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final rules = _snapshot?.rules;
     _probe = Timer.periodic(Duration(seconds: rules?.probeSeconds ?? 20), (_) => _tryOnline(automatic: true));
     if (rules != null && !rules.pinRequired) _operator = _snapshot!.operatorById(_snapshot!.lastOperatorId);
-    // TBC : un point de vente Service de table ouvre directement la salle après la connexion.
-    _floor = _engine.restaurant?.tableService ?? false;
+    // TBC : un point de vente restaurant (Service de table ou Restaurant) ouvre directement son écran après la connexion.
+    _floor = _engine.restaurant?.restaurantProfile ?? false;
     _refreshSold();
     _refreshSuspended();
   }
@@ -883,12 +884,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     : _operator == null
                     ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() {
                           _operator = o;
-                          _floor = (_engine.restaurant?.tableService ?? false) && _cart.isEmpty;
+                          _floor = (_engine.restaurant?.restaurantProfile ?? false) && _cart.isEmpty;
                         })))
                     : !_engine.sessionOpen
                     ? _scrollable(_SessionOpening(engine: _engine, operator: _operator!, onOpened: () => setState(() {})))
                     : _floor && (_engine.restaurant?.tableService ?? false)
                     ? _RestaurantFloor(host: this)
+                    : _floor && (_engine.restaurant?.production ?? false)
+                    ? _RestaurantBoard(host: this)
                     : _register(snapshot),
               ),
             ],
@@ -992,12 +995,16 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             },
           ),
           const SizedBox(width: 8),
-          if (_engine.restaurant?.tableService ?? false) ...[
+          if (_engine.restaurant?.restaurantProfile ?? false) ...[
             SegmentedButton<bool>(
               showSelectedIcon: false,
               style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              segments: const [
-                ButtonSegment(value: true, icon: Icon(Icons.table_restaurant, size: 18), label: Text('Salle')),
+              segments: [
+                ButtonSegment(
+                  value: true,
+                  icon: const Icon(Icons.table_restaurant, size: 18),
+                  label: Text((_engine.restaurant?.production ?? false) ? 'Commandes' : 'Salle'),
+                ),
                 ButtonSegment(value: false, icon: Icon(Icons.point_of_sale, size: 18), label: Text('Caisse')),
               ],
               selected: {_floor},
@@ -1015,6 +1022,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             // Comme au web : le mode d'un panier repris est figé.
             action(_tier.cart ? 'Tarif détail' : 'Tarif gros', Icons.sell_outlined, _shared == null ? _toggleWholesale : null),
           action('Session de caisse', Icons.point_of_sale, canClose ? _closeSession : null),
+          if (operator != null && (_engine.restaurant?.restaurantProfile ?? false)) action('Registre', Icons.event_note, () => _restoRegisterDialog(this)),
           action(_look.hideSoftKeyboard ? 'Clavier masqué' : 'Clavier affiché', _look.hideSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard, () {
             setState(() => _look.hideSoftKeyboard = !_look.hideSoftKeyboard);
             unawaited(widget.session.save());
@@ -1060,6 +1068,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         setState(() => _operator = null);
       } else if (choice == 'cloture') {
         _closeSession();
+      } else if (choice == 'registre') {
+        _restoRegisterDialog(this);
       } else if (choice == 'images') {
         _editImageWindow();
       } else if (choice == 'site') {
@@ -1076,6 +1086,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
       if (_operator != null && _engine.canCloseSession(_operator!))
         PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
+      if (_operator != null && (_engine.restaurant?.restaurantProfile ?? false))
+        const PopupMenuItem(value: 'registre', child: Text('Registre (journée)')),
       if (_operator != null)
         PopupMenuItem(
           value: 'caissier',

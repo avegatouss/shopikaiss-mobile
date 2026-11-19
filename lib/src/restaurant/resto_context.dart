@@ -159,6 +159,7 @@ class RestoContext {
     this.stations = const {},
     this.routes = const {},
     this.lastTicketNumbers = const {},
+    this.channels = const [],
   });
 
   final String? pointOfSaleUuid;
@@ -197,6 +198,17 @@ class RestoContext {
 
   bool get tableService => profile == 'TABLE_SERVICE';
 
+  /// Canaux publiés (`restaurant.canal`, profil Restaurant, R-4), actifs ou non, dans l'ordre de la boutique.
+  final List<RestoChannel> channels;
+
+  /// Profil Restaurant (`PRODUCTION`, R-4) : commandes par canal, règlements `full`, `items` et `shares`.
+  bool get production => profile == 'PRODUCTION';
+
+  /// Point de vente restaurant (Service de table ou Restaurant) : l'écran restaurant s'ouvre après le PIN.
+  bool get restaurantProfile => tableService || production;
+
+  RestoChannel? channel(String? code) => channels.where((c) => c.code == code).firstOrNull;
+
   /// Libellé de l'action d'envoi : « Envoyer » vers les postes, « Valider » quand l'envoi en production est éteint.
   String get sendLabel => settings.sendToProduction ? 'Envoyer' : 'Valider';
 
@@ -232,4 +244,108 @@ class RestoOrderView {
 
   /// Bons de la commande à vérifier sur place (livraison d'issue inconnue) ou jamais livrés.
   final int ticketsToCheck;
+}
+
+/// Canal de vente du profil Restaurant (`restaurant.canal`, RESTAURANT-1 §3.6) : sur place, à emporter, livraison…
+class RestoChannel {
+  const RestoChannel({
+    required this.uuid,
+    required this.code,
+    required this.name,
+    required this.kind,
+    this.requiresTable = false,
+    this.requiresReference = false,
+    this.tracksDelivery = false,
+    this.order = 0,
+    this.active = true,
+  });
+
+  factory RestoChannel.fromJson(String uuid, Map m) => RestoChannel(
+    uuid: uuid,
+    code: m['code'] as String,
+    name: m['nom'] as String,
+    kind: m['type'] as String,
+    requiresTable: m['exige_table'] == true,
+    requiresReference: m['exige_reference'] == true,
+    tracksDelivery: m['suivi_livraison'] == true,
+    order: m['ordre'] as int? ?? 0,
+    active: m['actif'] == true,
+  );
+
+  final String uuid;
+
+  /// Code porté par la commande (`etat.canal`).
+  final String code;
+  final String name;
+
+  /// `dine_in`, `takeaway`, `delivery`… (`restaurant_channels.kind`).
+  final String kind;
+
+  /// Table obligatoire ; sinon la commande n'a pas de table.
+  final bool requiresTable;
+
+  /// Référence externe obligatoire (plateforme de livraison…).
+  final bool requiresReference;
+
+  /// Suivi de livraison : la vente reste possible hors ligne, le suivi est restreint (`restaurant.livraison`).
+  final bool tracksDelivery;
+  final int order;
+  final bool active;
+}
+
+/// Part d'un règlement `shares` (`commande.parts[]`) : son montant et les index des paiements de la vente qui la
+/// composent.
+class RestoShare {
+  const RestoShare({required this.label, required this.amount, required this.payments});
+
+  final String label;
+  final int amount;
+  final List<int> payments;
+
+  Map<String, dynamic> toJson() => {'libelle': label, 'montant': amount, 'paiements': payments};
+}
+
+/// Journée du registre de ce terminal (`resto_registre_ouvre` / `resto_registre_clos`, RESTAURANT-1 §4.7).
+class RestoRegisterView {
+  const RestoRegisterView({
+    required this.uuid,
+    required this.businessDay,
+    required this.openedAt,
+    this.note,
+    this.closed = false,
+    this.closedAt,
+    this.zLocalNumber,
+    this.salesTotal = 0,
+    this.serverState,
+    this.serverMessage,
+    this.waiting = false,
+    this.serverZNumber,
+  });
+
+  final String uuid;
+  final String businessDay;
+  final DateTime openedAt;
+  final String? note;
+
+  /// Clôture enregistrée sur ce terminal (remontée ou non).
+  final bool closed;
+  final DateTime? closedAt;
+
+  /// Z local de la clôture (`z_local.numero`).
+  final int? zLocalNumber;
+
+  /// Ventes de ce terminal depuis l'ouverture (`z_local.total_ventes` à la clôture).
+  final int salesTotal;
+
+  /// État serveur de la dernière opération du registre (`a_envoyer`, `recue`, `integree`, `a_arbitrer`…).
+  final String? serverState;
+  final String? serverMessage;
+
+  /// Clôture en attente des règlements (`restaurant.attente_reglement`) : le serveur la rejoue seul.
+  final bool waiting;
+
+  /// Numéro du Z registre du serveur (`details.z_restaurant.numero`), une fois la clôture intégrée.
+  final int? serverZNumber;
+
+  bool get open => !closed;
 }

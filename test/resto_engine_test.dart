@@ -31,7 +31,7 @@ void main() {
 
   test('envoi par différence : un bon par poste, AJOUT ensuite, numéros par commande et du jour', () {
     final e = engine();
-    var r = e.open(prefix: 'pf_', businessDay: '2026-11-07', profile: 'PRODUCTION', tableUuid: 't1', covers: 2);
+    var r = e.open(prefix: 'pf_', businessDay: '2026-11-07', profile: 'PRODUCTION', channel: 'sur_place', tableUuid: 't1', covers: 2);
     expect(r.order.localNumber, 'PF-20261107-L0001');
     r = e.addLine(r.order, productUuid: 'poulet', label: 'Poulet braisé', quantity: 2 * unit, unitPrice: 4000, routing: const RestoRouting(categoryStationUuid: 'p-cuisine'), comment: 'sans piment');
     final poulet = r.order.lines.single.uuid;
@@ -57,7 +57,7 @@ void main() {
     expect(r.event.version, 7);
 
     // Une autre commande du jour : numéro de commande 1 sur ce poste, mais numéro du jour 3.
-    var other = e.open(prefix: 'PF', businessDay: '2026-11-07', profile: 'PRODUCTION');
+    var other = e.open(prefix: 'PF', businessDay: '2026-11-07', profile: 'PRODUCTION', channel: 'emporter');
     other = e.addLine(other.order, productUuid: 'poulet', label: 'Poulet braisé', quantity: unit, unitPrice: 4000, routing: const RestoRouting(categoryStationUuid: 'p-cuisine'));
     final first = e.send(other.order).tickets.single;
     expect([first.number, first.dayNumber, first.firstSend, other.order.localNumber], [1, 'CUI-20261107-0003', true, 'PF-20261107-L0002']);
@@ -65,7 +65,7 @@ void main() {
 
   test('bon immuable : même uuid et même empreinte sur toutes les cibles', () {
     final e = engine();
-    var r = e.open(prefix: 'PF', businessDay: '2026-11-07', profile: 'PRODUCTION');
+    var r = e.open(prefix: 'PF', businessDay: '2026-11-07', profile: 'PRODUCTION', channel: 'emporter');
     r = e.addLine(r.order, productUuid: 'p', label: 'Plat', quantity: unit, unitPrice: 1000, routing: const RestoRouting(categoryStationUuid: 'p-cuisine'));
     final bon = e.send(r.order).tickets.single;
     expect(bon.toJson()['empreinte_contenu'], bon.fingerprint);
@@ -205,6 +205,41 @@ void main() {
     expect(() => e.cancelOrder(r.order, ' '), throwsA(isA<RestoRefusal>()));
     r = e.cancelOrder(r.order, 'Client parti');
     expect([r.event.reason, r.event.state['statut'], r.event.state['totaux']], ['Client parti', 'cancelled', {'brut': 0, 'remises': 0, 'a_payer': 0, 'regle': 0}]);
+  });
+
+  test('R-4 profil Restaurant : canal obligatoire, étape initiale null, « Valider » = `validation`, annulation avec motif, réglé protégé', () {
+    final e = engine(send: false);
+    expect(() => e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION'), throwsA(isA<RestoRefusal>()), reason: 'canal obligatoire');
+    var r = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: 'emporter', externalReference: ' UB-77 ', customerName: 'Awa');
+    expect([r.event.action, r.event.state['canal'], r.event.state['etape'], r.event.state['table_uuid'], r.event.state['reference_externe'], r.event.state['client_nom']],
+        ['ouverture', 'emporter', null, null, 'UB-77', 'Awa']);
+    // Le Service de table garde son canal null et son étape `waiting`.
+    final table = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'TABLE_SERVICE', tableUuid: 't1', channel: 'emporter');
+    expect([table.event.state['canal'], table.event.state['etape']], [null, 'waiting']);
+    r = e.editLines(r.order, added: [
+      const RestoNewLine(productUuid: 'pizza', label: 'Pizza', quantity: 2 * unit, unitPrice: 5000),
+      const RestoNewLine(productUuid: 'biere', label: 'Bière', quantity: unit, unitPrice: 1500),
+    ]);
+    expect(r.event.state['etape'], isNull, reason: 'une modification ne crée pas d’étape au Restaurant');
+    final [pizza, biere] = [for (final l in r.order.lines) l.uuid];
+    r = e.validate(r.order);
+    expect([r.event.action, r.event.fact, r.tickets, r.order.lines.every((l) => l.status == RestoLineStatus.sent && l.sent == 0)],
+        ['validation', {'lignes': [pizza, biere]}, isEmpty, true]);
+    expect(() => e.validate(r.order), throwsA(isA<RestoRefusal>()), reason: 'rien de nouveau à valider');
+    r = e.prebill(r.order);
+    expect(r.event.state['etape'], 'bill_printed');
+    // Une pizza réglée (règlement par articles) : la partie réglée ne s'annule ni ne se retire.
+    r.order.line(pizza).settled = unit;
+    expect(() => e.cancelLine(r.order, pizza, 2 * unit, 'Erreur'), throwsA(isA<RestoRefusal>()));
+    expect(() => e.cancelOrder(r.order, 'Client parti'), throwsA(isA<RestoRefusal>()));
+    r = e.cancelLine(r.order, pizza, unit, 'Erreur');
+    expect([r.order.line(pizza).quantity, r.event.state['lignes'][0]['reglee']], [unit, '1.000000']);
+    // Annulation d'une commande du Restaurant : motif de 3 caractères toujours exigé.
+    var other = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: 'sur_place', tableUuid: 't2');
+    expect(() => e.cancelOrder(other.order, null), throwsA(isA<RestoRefusal>()));
+    expect(() => e.cancelOrder(other.order, 'ok'), throwsA(isA<RestoRefusal>()));
+    other = e.cancelOrder(other.order, 'Doublon');
+    expect([other.event.reason, other.event.state['statut']], ['Doublon', 'cancelled']);
   });
 
   test('livraison : toutes les cibles du poste, secours seulement sur échec certain, jamais de relance « à vérifier »', () {
