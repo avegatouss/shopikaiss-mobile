@@ -16,6 +16,7 @@ import '../offline/engine.dart';
 import '../offline/models.dart';
 import '../offline/store.dart';
 import '../offline/ticket.dart';
+import '../offline/x_z_report.dart';
 import 'contract_schemas.dart';
 import 'schema_validator.dart';
 import 'decimal6.dart';
@@ -901,6 +902,32 @@ class V2Engine extends CaisseEngine {
     final uuid = await v2.read(V2Keys.closingOperation);
     final row = uuid == null ? null : await v2.operation(uuid);
     return row == null ? null : _view(row);
+  }
+
+  @override
+  Future<ClosureFacts?> closureFacts() async {
+    if (!paired) return null;
+    // Ordre chronologique, opérations rejetées exclues (comme l'attendu de la clôture).
+    final operations = [
+      for (final row in (await v2.operationRows()).reversed)
+        if (row['etat'] != V2OperationState.rejected) row['operation'] as Map,
+    ];
+    final session = snapshot?.session;
+    final server = session == null ? null : (await v2.entities('session'))['session:${_device['terminal_uuid']}'];
+    final open = session == null ? null : {'session_uuid': session['session_uuid'], 'operateur_id': session['operateur_id'], 'ouverte_le': server?['session_uuid'] == session['session_uuid'] ? server!['ouverte_le'] : null};
+    final categories = <String, String>{};
+    final names = <String, String>{};
+    for (final e in _products.entries) {
+      final product = snapshot?.byId(_ids[e.key] ?? -1);
+      if (product?.category case final String c when c.isNotEmpty) categories[e.key] = c;
+      names[e.key] = product?.name ?? '${e.value['nom'] ?? ''}';
+    }
+    return ClosureFacts(
+      sessions: sessionsFromOperations(operations, openSession: open),
+      openSessionUuid: sessionOpen ? _sessionUuid : null,
+      categories: categories,
+      productNames: names,
+    );
   }
 
   bool _serverOffers(String capability) => (_state?['capacites_serveur'] as List?)?.contains(capability) ?? false;
