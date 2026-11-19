@@ -263,7 +263,8 @@ abstract class CaisseEngine extends EngineNotifier {
   Future<List<RestoOrderView>> restaurantOrders({bool all = false}) async => const [];
 
   /// Ouvre une commande à [tableUuid] (version 1, vide, en attente).
-  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+  /// [customer] : client cité à l'ouverture seulement (lot R-5, porte la remise client).
+  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers, Customer? customer}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Une validation de l'opérateur = une version : articles ajoutés ([added], prix du catalogue figés), quantités ou
   /// commentaires changés, articles retirés.
@@ -297,7 +298,8 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Responsables qui peuvent autoriser l'annulation d'un envoyé de [amount] F pour [cashier] ; [type] : autre geste
   /// (`resto_offrir`, `remise`, R-4) et [percent] : remise en % arrondi au supérieur (plafond de l'assistant).
-  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) async => const [];
+  /// [refund] : `retour` ou `annulation` pour l'autorisation `remboursement` (lot R-5).
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent, String? refund}) async => const [];
 
   /// Vérifie le code de 8 chiffres de [approver] et rend l'autorisation à joindre à l'annulation (ou au geste [type]).
   Future<RestoApproval> restoAuthorize({
@@ -308,7 +310,35 @@ abstract class CaisseEngine extends EngineNotifier {
     required int amount,
     String type = 'resto_modifier_envoye',
     int? percent,
+    String? refund,
   }) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  // ---------------------------------------------------------------- tarif du personnel, remboursement (R-5)
+
+  /// Remise totale de [added] au tarif du personnel de l'employé [staffId] (montant de l'autorisation `remise`) ;
+  /// [OfflineRefusal] si le tarif ne s'applique pas à un article maintenant.
+  Future<int> restoStaffDiscount(String orderUuid, int staffId, List<(CartLine, String?)> added) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Une version `lignes` : [added] servis à l'employé [staffId] au tarif du personnel ; motif obligatoire, droit `remise`
+  /// ou [approval] (`remise`) pour la remise totale.
+  Future<RestoOrderView> restoStaffLines(Operator operator, String orderUuid, int staffId, List<(CartLine, String?)> added, {required String reason, RestoApproval? approval}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Ventes de cette caisse qui ont réglé une commande du Restaurant (la plus récente d'abord) et leurs remboursements.
+  Future<List<RestoSettledSale>> restoSettledSales() async => const [];
+
+  /// Pourquoi [operator] ne peut pas rembourser une vente restaurant, ou null.
+  String? restoRefundBlocker(Operator operator) => 'Restaurant non disponible sur ce terminal.';
+
+  /// [type] (`retour`, `annulation`) exige-t-il l'autorisation `remboursement` d'un responsable pour [operator] ?
+  bool restoRefundNeedsApproval(Operator operator, String type) => true;
+
+  /// Montant rendu : `retour` des [quantities] (ligne de vente → millionièmes de l'unité de base), ou `annulation`.
+  Future<int> restoRefundAmount(String saleUuid, String type, Map<String, int> quantities) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Remboursement restaurant (`resto_remboursement`) : `retour` en espèces ou `annulation` sur les moyens d'origine.
+  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   // ---------------------------------------------------------------- gestes sur une commande (R-4)
 
@@ -385,7 +415,7 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Profil Restaurant (R-4) : ouvre une commande sur le canal [channelCode] (table si le canal l'exige, référence
   /// externe si le canal l'exige).
-  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) =>
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers, String? customerUuid}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Panier d'un règlement par articles (profil Restaurant) : [quantities] par ligne de commande (millionièmes), au plus

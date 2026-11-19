@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_engine.dart';
+import 'package:shopikaiss_terminal/src/restaurant/resto_staff.dart';
 
 void main() {
   const cuisine = RestoStation(uuid: 'p-cuisine', code: 'cui', name: 'Cuisine', paper: true, order: 1);
@@ -165,8 +166,9 @@ void main() {
     expect(r.event.state['lignes'][0], {
       'ligne_uuid': pizza, 'produit_uuid': 'pizza', 'conditionnement_uuid': null, 'lot_uuid': null, 'libelle': 'Pizza margherita', 'quantite': '1.000000',
       'coefficient': '1.000000', 'prix_unitaire': 5000, 'remise': 0, 'tarif': 'standard', 'statut': 'pending', 'poste_uuid': null,
-      'commentaire': 'Bien cuite', 'parent_ligne_uuid': null, 'envoye': '0.000000', 'reglee': '0.000000',
+      'commentaire': 'Bien cuite', 'parent_ligne_uuid': null, 'envoye': '0.000000', 'reglee': '0.000000', 'promotion_uuid': null, 'personnel_id': null,
     });
+    expect(r.event.state.containsKey('remise_globale_source') && r.event.state['remise_globale_source'] == null, isTrue, reason: 'R-5 : toujours envoyé, même à null');
     expect(() => e.editLines(r.order), throwsA(isA<RestoRefusal>()), reason: 'aucune version vide');
     r = e.prebill(r.order);
     expect([r.event.state['etape'], r.event.state['prefactures'], r.event.fact], ['bill_printed', 1, {'numero_local': 'PFSALLE-20261107-L0001'}]);
@@ -424,5 +426,122 @@ void main() {
     expect(() => e.validateCustomer(r.order), throwsA(isA<RestoRefusal>()));
     final production = e.open(prefix: 'PF', businessDay: '2026-11-17', profile: 'PRODUCTION', channel: 'sur_place', tableUuid: 't1').order..prebills = 1;
     expect(() => e.validateCustomer(production), throwsA(isA<RestoRefusal>()));
+  });
+
+  // ---------------------------------------------------------------- lot R-5
+
+  RestoEngine r5({Map<String, int> customers = const {}, int? Function(RestoLine line)? reprice}) {
+    ids = 0;
+    return RestoEngine(
+      newUuid: () => 'u${++ids}',
+      now: () => DateTime.utc(2026, 11, 18, 19, 12),
+      stations: const {},
+      counters: RestoCounters(),
+      sendToStations: false,
+      customerDiscounts: customers,
+      reprice: reprice,
+    );
+  }
+
+  test('R-5 remise client : floor(après remises de ligne × taux), recalculée à chaque fait, figée par une remise manuelle', () {
+    final e = r5(customers: {'awa': 10});
+    var r = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: 'sur_place', tableUuid: 't1', customerUuid: 'awa', customerName: 'Awa');
+    expect([r.event.state['client_uuid'], r.event.state['remise_globale'], r.event.state['remise_globale_source']], ['awa', 0, null]);
+    r = e.editLines(r.order, added: const [RestoNewLine(productUuid: 'pizza', label: 'Pizza margherita', quantity: unit, unitPrice: 5000)]);
+    // Forme de la fixture `operation--resto-commande-remise-client` : 500 F de remise client sur 5 000 F.
+    expect([r.event.state['remise_globale'], r.event.state['remise_globale_source'], r.event.state['totaux']],
+        [500, 'customer', {'brut': 5000, 'remises': 500, 'a_payer': 4500, 'regle': 0}]);
+    final pizza = r.order.lines.single.uuid;
+    r = e.editLines(r.order, added: const [RestoNewLine(productUuid: 'biere', label: 'Bière', quantity: unit, unitPrice: 1555)]);
+    expect(r.order.globalDiscount, 655, reason: 'arrondi vers le bas : 6 555 × 10 %');
+    r = e.discountLine(r.order, pizza, percent: false, value: 1000, reason: 'Attente');
+    expect([r.order.globalDiscount, r.order.globalDiscountSource], [555, 'customer'], reason: 'après remises de ligne');
+    r = e.prebill(r.order);
+    expect(r.order.globalDiscount, 555);
+    // Retirer la remise client est un geste manuel : elle n'est plus reposée.
+    r = e.discountOrder(r.order, 0);
+    expect([r.order.globalDiscount, r.event.state['remise_globale_source']], [0, 'manual']);
+    r = e.editLines(r.order, added: const [RestoNewLine(productUuid: 'eau', label: 'Eau', quantity: unit, unitPrice: 500)]);
+    expect([r.order.globalDiscount, r.order.globalDiscountSource], [0, 'manual']);
+    // Relu de la file : la source suit l'état.
+    expect(RestoOrder.fromState(r.order.uuid, r.event.version, r.event.state).globalDiscountSource, 'manual');
+  });
+
+  test('R-5 remise client figée par un règlement ; sans client ni taux : aucune ; état R-4 avec remise jamais recalculé', () {
+    final e = r5(customers: {'awa': 20});
+    var r = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: 'emporter', customerUuid: 'awa');
+    r = e.editLines(r.order, added: const [RestoNewLine(productUuid: 'pizza', label: 'Pizza', quantity: 2 * unit, unitPrice: 5000)]);
+    expect(r.order.globalDiscount, 2000);
+    final paid = r.order.copy()..lines.single.settled = unit;
+    r = e.editLines(paid, added: const [RestoNewLine(productUuid: 'eau', label: 'Eau', quantity: unit, unitPrice: 500)]);
+    expect([r.order.globalDiscount, r.order.globalDiscountSource], [2000, 'customer'], reason: 'un règlement fige la remise');
+    final frozen = r.order.copy()..discountFrozen = true;
+    frozen.lines.first.settled = 0;
+    expect(e.editLines(frozen, added: const [RestoNewLine(productUuid: 'eau', label: 'Eau', quantity: unit, unitPrice: 500)]).order.globalDiscount, 2000,
+        reason: 'règlement annulé depuis : la remise reste figée (comme le serveur)');
+    // Client sans taux publié (réglage éteint) : aucune remise.
+    var other = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: 'emporter', customerUuid: 'koffi');
+    other = e.editLines(other.order, added: const [RestoNewLine(productUuid: 'pizza', label: 'Pizza', quantity: unit, unitPrice: 5000)]);
+    expect([other.order.globalDiscount, other.event.state['remise_globale_source']], [0, null]);
+    // État d'un client R-4 (sans `remise_globale_source`) avec une remise : manuelle, jamais recalculée.
+    final legacy = Map<String, dynamic>.of(other.event.state)
+      ..remove('remise_globale_source')
+      ..['client_uuid'] = 'awa'
+      ..['remise_globale'] = 300;
+    final reread = RestoOrder.fromState(other.order.uuid, other.event.version, legacy);
+    expect([reread.discountFrozen, e.prebill(reread).order.globalDiscount], [true, 300]);
+  });
+
+  test('R-5 tarif du personnel : promotion `staff`, employé servi, motif exigé, remise suivie à la quantité ; forme de la fixture', () {
+    final staff = RestoPromotion.fromJson('b0000000-0000-4000-8000-000000000503', {
+      'nom': 'Repas du personnel', 'categorie': 'staff', 'type': 'pourcentage', 'pourcentage': '50.000000', 'montant': null, 'achetes': null, 'offerts': null,
+      'priorite': 0, 'jours': <int>[], 'heure_debut': null, 'heure_fin': null, 'du': null, 'au': null, 'canaux': <String>[], 'salles': <String>[],
+      'produits': <String>[], 'categories': <String>[], 'max_par_personnel': '1.000000',
+    });
+    final e = r5(reprice: (line) => staff.discountFor(line.unitPrice, line.quantity, coefficient: line.coefficient));
+    var r = e.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: 'sur_place', tableUuid: 't1');
+    final item = RestoNewLine(
+      productUuid: 'c0000000-0000-4000-8000-000000000101', label: 'Pizza margherita', quantity: unit, unitPrice: 5000,
+      discount: staff.discountFor(5000, unit), pricing: 'staff', promotionUuid: staff.uuid, staffId: '12',
+    );
+    expect(() => e.editLines(r.order, added: [item]), throwsA(isA<RestoRefusal>()), reason: 'motif exigé');
+    const approval = {'type': 'remise', 'approbateur_id': '3', 'motif': 'Repas du personnel', 'preuve': 'code_local|2026-11-18T19:11:40Z'};
+    r = e.editLines(r.order, added: [item], reason: 'Vente personnel pour Koffi', authorizations: const [approval]);
+    expect([r.event.reason, r.event.authorizations], ['Vente personnel pour Koffi', [approval]]);
+    final line = r.event.state['lignes'][0] as Map;
+    expect([line['tarif'], line['remise'], line['promotion_uuid'], line['personnel_id']], ['staff', 2500, staff.uuid, '12']);
+    // Une quantité changée garde la promotion de la ligne : la remise suit.
+    r = e.changeQuantity(r.order, r.order.lines.single.uuid, 2 * unit);
+    expect([r.order.lines.single.discount, r.event.state['lignes'][0]['tarif'], r.event.reason, r.event.authorizations], [5000, 'staff', null, isEmpty]);
+    expect(RestoOrder.fromState(r.order.uuid, r.event.version, r.event.state).lines.single.toJson(), r.event.state['lignes'][0], reason: 'relu à l’identique');
+  });
+
+  test('R-5 promotions publiées : fenêtre après minuit, jours ISO, période, lieux, cibles, remises arrondies ; choix priorité puis remise', () {
+    RestoPromotion promo(String uuid, Map<String, dynamic> m, [int rank = 0]) => RestoPromotion.fromJson(uuid, {
+      'nom': uuid, 'categorie': 'staff', 'type': 'pourcentage', 'pourcentage': '10.000000', 'montant': null, 'achetes': null, 'offerts': null, 'priorite': 0,
+      'jours': <int>[], 'heure_debut': null, 'heure_fin': null, 'du': null, 'au': null, 'canaux': <String>[], 'salles': <String>[], 'produits': <String>[],
+      'categories': <String>[], 'max_par_personnel': null, ...m,
+    }, rank: rank);
+    // Fenêtre 22:00 → 02:00 le vendredi (5) : samedi 01:30 compte pour vendredi.
+    final night = promo('nuit', {'heure_debut': '22:00:00', 'heure_fin': '02:00:00', 'jours': [5]});
+    expect(night.activeAt(DateTime.utc(2026, 11, 21, 1, 30)), isTrue, reason: 'samedi 01:30, fenêtre ouverte vendredi');
+    expect(night.activeAt(DateTime.utc(2026, 11, 21, 23, 0)), isFalse, reason: 'samedi soir');
+    expect(night.activeAt(DateTime.utc(2026, 11, 20, 21, 59)), isFalse);
+    expect(promo('p', {'du': '2026-11-19', 'au': '2026-11-30'}).activeAt(DateTime.utc(2026, 11, 18, 12)), isFalse);
+    expect(promo('p', {'canaux': ['sur_place'], 'salles': ['s1']}).placed(channel: 'sur_place', room: null), isFalse, reason: 'sans table, pas de salle');
+    expect(promo('p', {'categories': ['plats']}).targets('pizza', category: 'pizzas', parentCategory: 'plats'), isTrue);
+    expect(promo('p', {'produits': ['biere']}).targets('pizza', category: 'pizzas'), isFalse);
+    expect(promo('p', {'pourcentage': '33.333333'}).discountFor(1000, unit), 333);
+    expect(promo('p', {'type': 'montant', 'pourcentage': null, 'montant': 800}).discountFor(1000, 2 * unit, coefficient: 6 * unit), 2000, reason: 'au plus le brut');
+    expect(promo('p', {'type': 'prix_special', 'pourcentage': null, 'montant': 700}).discountFor(1000, 3 * unit), 900);
+    expect(promo('p', {'type': 'x_achetes_y_offerts', 'pourcentage': null, 'achetes': 2, 'offerts': 1}).discountFor(1000, 3 * unit), 0);
+    final best = restoStaffPrice([
+      promo('faible', {'pourcentage': '20.000000'}, 0),
+      promo('forte', {'pourcentage': '50.000000'}, 1),
+      promo('prioritaire', {'pourcentage': '5.000000', 'priorite': 2, 'produits': ['biere']}, 2),
+    ], at: DateTime.utc(2026, 11, 18, 12), productUuid: 'pizza', unitPrice: 5000, quantity: unit);
+    expect([best?.promotion.uuid, best?.discount], ['forte', 2500]);
+    expect(restoStaffPrice([night], at: DateTime.utc(2026, 11, 18, 12), productUuid: 'pizza', unitPrice: 5000, quantity: unit), isNull);
+    expect(RestoPromotion.wallClock(DateTime.utc(2026, 11, 18, 23, 30), 'Africa/Lagos'), DateTime.utc(2026, 11, 19, 0, 30));
   });
 }

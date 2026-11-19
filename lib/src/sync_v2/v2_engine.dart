@@ -456,7 +456,7 @@ class V2Engine extends CaisseEngine {
   Future<List<RestoOrderView>> restaurantOrders({bool all = false}) => _restaurantOrders(all: all);
 
   @override
-  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers}) => _restoOpen(operator, tableUuid, covers: covers);
+  Future<RestoOrderView> restoOpen(Operator operator, String tableUuid, {int? covers, Customer? customer}) => _restoOpen(operator, tableUuid, covers: covers, customer: customer);
 
   @override
   Future<RestoOrderView> restoEditLines(
@@ -497,8 +497,8 @@ class V2Engine extends CaisseEngine {
   bool restoApprovalRequired(Operator operator) => _restoApprovalRequired(operator);
 
   @override
-  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) =>
-      _restoApprovers(cashier, amount, type: type, percent: percent);
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent, String? refund}) =>
+      _restoApprovers(cashier, amount, type: type, percent: percent, refund: refund);
 
   @override
   Future<RestoApproval> restoAuthorize({
@@ -509,7 +509,31 @@ class V2Engine extends CaisseEngine {
     required int amount,
     String type = 'resto_modifier_envoye',
     int? percent,
-  }) => _restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount, type: type, percent: percent);
+    String? refund,
+  }) => _restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount, type: type, percent: percent, refund: refund);
+
+  @override
+  Future<int> restoStaffDiscount(String orderUuid, int staffId, List<(CartLine, String?)> added) => _restoStaffDiscount(orderUuid, staffId, added);
+
+  @override
+  Future<RestoOrderView> restoStaffLines(Operator operator, String orderUuid, int staffId, List<(CartLine, String?)> added, {required String reason, RestoApproval? approval}) =>
+      _restoStaffLines(operator, orderUuid, staffId, added, reason: reason, approval: approval);
+
+  @override
+  Future<List<RestoSettledSale>> restoSettledSales() => _restoSettledSales();
+
+  @override
+  String? restoRefundBlocker(Operator operator) => _restoRefundBlocker(operator);
+
+  @override
+  bool restoRefundNeedsApproval(Operator operator, String type) => _restoRefundNeedsApproval(operator, type);
+
+  @override
+  Future<int> restoRefundAmount(String saleUuid, String type, Map<String, int> quantities) => _restoRefundAmount(saleUuid, type, quantities);
+
+  @override
+  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) =>
+      _restoRefund(operator, saleUuid, type, quantities, reason, approval: approval);
 
   @override
   bool restoNeedsApproval(Operator operator, String type) => _restoNeedsApproval(operator, type);
@@ -574,8 +598,8 @@ class V2Engine extends CaisseEngine {
   }) => _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid, shares: shares);
 
   @override
-  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) =>
-      _restoOpenOnChannel(operator, channelCode, tableUuid: tableUuid, reference: reference, customerName: customerName, covers: covers);
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers, String? customerUuid}) =>
+      _restoOpenOnChannel(operator, channelCode, tableUuid: tableUuid, reference: reference, customerName: customerName, covers: covers, customerUuid: customerUuid);
 
   @override
   Future<List<CartLine>> restoCartItems(String orderUuid, Map<String, int> quantities) => _restoCart(orderUuid, quantities: quantities);
@@ -906,6 +930,16 @@ class V2Engine extends CaisseEngine {
           }
         case 'retour':
           expected.update(cash, (v) => v - (content['montant'] as int), ifAbsent: () => -(content['montant'] as int));
+        case 'resto_remboursement':
+          // Lot R-5 : un retour sort des espèces ; une annulation rend chaque paiement de la vente sur son moyen.
+          final sale = content['type'] == 'annulation' ? ((await v2.operation((content['vente_ref'] as Map)['operation_uuid'] as String))?['operation'] as Map?) : null;
+          final back = sale == null
+              ? {cash: content['montant'] as int}
+              : {for (final p in ((sale['contenu'] as Map)['paiements'] as List).cast<Map>()) p['moyen'] as String: 0};
+          for (final p in sale == null ? const <Map>[] : ((sale['contenu'] as Map)['paiements'] as List).cast<Map>()) {
+            back[p['moyen'] as String] = back[p['moyen'] as String]! + (p['montant'] as int);
+          }
+          back.forEach((method, amount) => expected.update(method, (v) => v - amount, ifAbsent: () => -amount));
         case 'ouverture_session':
           expected.update(cash, (v) => v + (content['fond'] as int), ifAbsent: () => content['fond'] as int);
           return expected;
@@ -936,6 +970,10 @@ class V2Engine extends CaisseEngine {
     if (_resto != null) await _restoFlushLocked(force: true);
     if (!_serverOffers(CaisseV2Client.sessionCloseCapability) || !saleExtrasSupported) throw const OfflineRefusal('Clôture non disponible sur ce terminal : clôturez en ligne.');
     _requireRight(operator, 'caisse_cloturer', 'clôturer la session');
+    // Lot R-5 : un remboursement restaurant à arbitrer porte de l'argent : il bloque la clôture (le serveur la refuserait).
+    if ((await v2.operationsOfType('resto_remboursement')).any((r) => r['etat'] == V2OperationState.arbitration)) {
+      throw const OfflineRefusal('Un remboursement restaurant attend l’arbitrage de la boutique : faites-le traiter avant de clôturer la session.');
+    }
     if (cash < 0 || others.any((c) => c.amount < 0)) throw const OfflineRefusal('Montant compté invalide.');
     final remark = comment?.trim() ?? '';
     if (remark.length > 500) throw const OfflineRefusal('Commentaire trop long (500 caractères au plus).');

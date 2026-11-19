@@ -118,10 +118,10 @@ class _RestaurantFloorState extends State<_RestaurantFloor> {
     if (view == null) {
       final blocker = _engine.restaurantBlocker(operator);
       if (blocker != null) return widget.host._refuse(blocker, title: 'Commande impossible');
-      final covers = await _askCovers(table);
-      if (covers == null || !mounted) return;
+      final choice = await _askCovers(table);
+      if (choice == null || !mounted) return;
       try {
-        view = await _engine.restoOpen(operator, table.uuid, covers: covers == 0 ? null : covers);
+        view = await _engine.restoOpen(operator, table.uuid, covers: choice.covers == 0 ? null : choice.covers, customer: choice.client);
       } on OfflineRefusal catch (e) {
         return widget.host._refuse(e.message, title: 'Commande impossible');
       }
@@ -131,28 +131,46 @@ class _RestaurantFloorState extends State<_RestaurantFloor> {
     await _reload();
   }
 
-  /// Couverts à l'ouverture : 0 = non renseigné.
-  Future<int?> _askCovers(RestoTable table) async {
+  /// Couverts à l'ouverture (0 = non renseigné) et client connu, cité à l'ouverture seulement (lot R-5, remise client).
+  Future<({int covers, Customer? client})?> _askCovers(RestoTable table) async {
     var covers = table.capacity ?? 0;
-    return showDialog<int>(
+    Customer? client;
+    final discounts = _engine.restaurant?.customerDiscounts ?? const <String, int>{};
+    return showDialog<({int covers, Customer? client})>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) => AlertDialog(
           title: Text('Ouvrir ${table.name}'),
-          content: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton.filledTonal(onPressed: covers > 0 ? () => setDialog(() => covers--) : null, icon: const Icon(Icons.remove)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Text(covers == 0 ? '—' : '$covers couvert${covers > 1 ? 's' : ''}', style: const TextStyle(fontSize: 20)),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton.filledTonal(onPressed: covers > 0 ? () => setDialog(() => covers--) : null, icon: const Icon(Icons.remove)),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 20),
+                    child: Text(covers == 0 ? '—' : '$covers couvert${covers > 1 ? 's' : ''}', style: const TextStyle(fontSize: 20)),
+                  ),
+                  IconButton.filledTonal(onPressed: covers < 500 ? () => setDialog(() => covers++) : null, icon: const Icon(Icons.add)),
+                ],
               ),
-              IconButton.filledTonal(onPressed: covers < 500 ? () => setDialog(() => covers++) : null, icon: const Icon(Icons.add)),
+              if (_engine.customersSupported)
+                ListTile(
+                  key: const ValueKey('resto-client'),
+                  leading: const Icon(Icons.person_search_outlined),
+                  title: Text(client?.name ?? 'Client enregistré (facultatif)'),
+                  subtitle: client == null ? null : Text((discounts[client!.uuid] ?? 0) > 0 ? 'Remise client ${discounts[client!.uuid]} %' : 'Sans remise client'),
+                  onTap: () async {
+                    final picked = await _restoPickClient(context, _engine, discounts);
+                    if (picked != null) setDialog(() => client = picked.$1);
+                  },
+                ),
             ],
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
-            FilledButton(onPressed: () => Navigator.pop(context, covers), child: const Text('Ouvrir la commande')),
+            FilledButton(onPressed: () => Navigator.pop(context, (covers: covers, client: client)), child: const Text('Ouvrir la commande')),
           ],
         ),
       ),
@@ -596,10 +614,23 @@ class _SentCancelDialogState extends State<_SentCancelDialog> {
 /// Geste sur une commande (lot R-4) : offrir un article, remise d'un article (montant ou pourcentage) ou de la commande ;
 /// motif obligatoire, puis, si l'opérateur n'a pas le droit, code de 8 chiffres d'un responsable (même mécanique que
 /// [_SentCancelDialog]).
-enum _Gesture { offer, lineDiscount, orderDiscount }
+/// Lot R-5 : [staff] (tarif du personnel, autorisation `remise` pour la remise totale) et [refund] (remboursement d'une
+/// vente, autorisation `remboursement`) : montant connu, motif (prérempli) et responsable seulement.
+enum _Gesture { offer, lineDiscount, orderDiscount, staff, refund }
 
 class _GestureDialog extends StatefulWidget {
-  const _GestureDialog({required this.engine, required this.operator, required this.gesture, required this.title, required this.base, this.ceiling, this.current = 0});
+  const _GestureDialog({
+    required this.engine,
+    required this.operator,
+    required this.gesture,
+    required this.title,
+    required this.base,
+    this.ceiling,
+    this.current = 0,
+    this.initialReason,
+    this.refund,
+    this.description,
+  });
 
   final CaisseEngine engine;
   final Operator operator;
@@ -615,6 +646,15 @@ class _GestureDialog extends StatefulWidget {
   /// Remise de commande actuelle (0 : aucune à retirer).
   final int current;
 
+  /// Motif prérempli (« Vente personnel pour … »).
+  final String? initialReason;
+
+  /// Remboursement : `retour` ou `annulation`.
+  final String? refund;
+
+  /// Texte du geste (tarif du personnel, remboursement).
+  final String? description;
+
   @override
   State<_GestureDialog> createState() => _GestureDialogState();
 }
@@ -629,23 +669,31 @@ class _GestureDialogState extends State<_GestureDialog> {
   String? _error;
   bool _busy = false;
 
-  String get _type => widget.gesture == _Gesture.offer ? 'resto_offrir' : 'remise';
-  bool get _needsApproval => widget.engine.restoNeedsApproval(widget.operator, _type);
+  String get _type => switch (widget.gesture) {
+    _Gesture.offer => 'resto_offrir',
+    _Gesture.refund => 'remboursement',
+    _ => 'remise',
+  };
+  bool get _fixed => widget.gesture == _Gesture.offer || widget.gesture == _Gesture.staff || widget.gesture == _Gesture.refund;
+  bool get _needsApproval => widget.gesture == _Gesture.refund
+      ? widget.engine.restoRefundNeedsApproval(widget.operator, widget.refund ?? 'retour')
+      : widget.engine.restoNeedsApproval(widget.operator, _type);
   int get _entered => int.tryParse(_value.text.trim().replaceAll(' ', '')) ?? 0;
 
   /// Montant du geste en francs (plafonds de l'assistant).
   int get _amount => switch (widget.gesture) {
-    _Gesture.offer => widget.base,
+    _Gesture.offer || _Gesture.staff || _Gesture.refund => widget.base,
     _Gesture.lineDiscount => _percent ? widget.base * _entered ~/ 100 : _entered,
     _Gesture.orderDiscount => _entered,
   };
 
   /// Pourcentage de la remise arrondi au supérieur (null pour un offert, sans plafond de pourcentage).
-  int? get _percentValue => widget.gesture == _Gesture.offer ? null : (_percent ? _entered : RestoEngine.percentOf(_amount, widget.base));
+  int? get _percentValue => _fixed ? null : (_percent ? _entered : RestoEngine.percentOf(_amount, widget.base));
 
   @override
   void initState() {
     super.initState();
+    _reason.text = widget.initialReason ?? '';
     _loadApprovers();
   }
 
@@ -659,7 +707,7 @@ class _GestureDialogState extends State<_GestureDialog> {
 
   Future<void> _loadApprovers() async {
     if (!_needsApproval) return;
-    final list = await widget.engine.restoApprovers(widget.operator, _amount, type: _type, percent: _percentValue);
+    final list = await widget.engine.restoApprovers(widget.operator, _amount, type: _type, percent: _percentValue, refund: widget.refund);
     if (!mounted) return;
     setState(() {
       _approvers = list;
@@ -668,7 +716,7 @@ class _GestureDialogState extends State<_GestureDialog> {
   }
 
   Future<void> _confirm() async {
-    if (widget.gesture != _Gesture.offer) {
+    if (!_fixed) {
       final value = _entered;
       if (value < 1 || (_percent && value > 100)) return setState(() => _error = _percent ? 'Pourcentage de 1 à 100.' : 'Saisissez un montant d’au moins 1 F.');
       if (_amount < 1 || (widget.ceiling == null && _amount > widget.base)) return setState(() => _error = 'La remise doit être comprise entre 1 F et ${formatFcfa(widget.base)}.');
@@ -691,6 +739,7 @@ class _GestureDialogState extends State<_GestureDialog> {
           amount: _amount,
           type: _type,
           percent: _percentValue,
+          refund: widget.refund,
         );
       } on OfflineRefusal catch (e) {
         _code.clear();
@@ -700,7 +749,7 @@ class _GestureDialogState extends State<_GestureDialog> {
         });
       }
     }
-    if (mounted) Navigator.pop(context, (percent: _percent, value: widget.gesture == _Gesture.offer ? widget.base : _entered, reason: reason, approval: approval));
+    if (mounted) Navigator.pop(context, (percent: _percent, value: _fixed ? widget.base : _entered, reason: reason, approval: approval));
   }
 
   @override
@@ -716,6 +765,7 @@ class _GestureDialogState extends State<_GestureDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (widget.gesture == _Gesture.offer) Text('Article offert : ${formatFcfa(widget.base)} de remise, quantité inchangée.'),
+              if (widget.description != null) Text(widget.description!),
               if (widget.gesture == _Gesture.lineDiscount)
                 Wrap(
                   spacing: 8,
@@ -730,7 +780,7 @@ class _GestureDialogState extends State<_GestureDialog> {
                     }),
                   ],
                 ),
-              if (widget.gesture != _Gesture.offer)
+              if (!_fixed)
                 TextField(
                   key: const ValueKey('gesture-value'),
                   controller: _value,
@@ -781,7 +831,15 @@ class _GestureDialogState extends State<_GestureDialog> {
             onPressed: _busy ? null : () => Navigator.pop(context, (percent: false, value: 0, reason: '', approval: null)),
             child: const Text('Retirer la remise'),
           ),
-        FilledButton(onPressed: _busy ? null : _confirm, child: Text(widget.gesture == _Gesture.offer ? 'Offrir' : 'Appliquer la remise')),
+        FilledButton(
+          onPressed: _busy ? null : _confirm,
+          child: Text(switch (widget.gesture) {
+            _Gesture.offer => 'Offrir',
+            _Gesture.staff => 'Appliquer le tarif',
+            _Gesture.refund => 'Rembourser',
+            _ => 'Appliquer la remise',
+          }),
+        ),
       ],
     );
   }
@@ -814,6 +872,9 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
   RestoOrderView? _view;
   bool _busy = false;
   String? _category;
+
+  /// Lot R-5 : « Vente personnel » en cours (employé servi) : les articles ajoutés sont à son tarif.
+  Operator? _staff;
 
   CaisseEngine get _engine => widget.host._engine;
   Operator get _operator => widget.host._operator!;
@@ -895,6 +956,8 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
   }
 
   Future<void> _save() async {
+    final staff = _staff;
+    if (staff != null && _added.isNotEmpty) return _saveStaff(staff);
     final ok = await _run(
       () => _engine.restoEditLines(
         _operator,
@@ -1079,6 +1142,92 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     ],
   );
 
+  // ---------------------------------------------------------------- tarif du personnel et remise client (R-5)
+
+  /// « Vente personnel » : l'employé servi ; les articles ajoutés ensuite sont à son tarif (droit Remise ou responsable,
+  /// motif « Vente personnel pour … » à l'enregistrement).
+  Future<void> _startStaff() async {
+    final staff = await showDialog<Operator>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Vente personnel pour…'),
+        children: [
+          for (final o in widget.host._snapshot?.operators ?? const <Operator>[])
+            SimpleDialogOption(onPressed: () => Navigator.pop(context, o), child: Text(o.name, style: const TextStyle(fontSize: 16))),
+        ],
+      ),
+    );
+    if (staff == null || !mounted) return;
+    setState(() => _staff = staff);
+    widget.host._toast('Vente personnel pour ${staff.name} : les articles ajoutés sont à son tarif.');
+  }
+
+  /// Articles ajoutés au tarif du personnel : les autres changements d'abord (leur version), puis une version de ces articles,
+  /// motif prérempli et responsable si l'opérateur n'a pas le droit Remise (pour la remise totale).
+  Future<void> _saveStaff(Operator staff) async {
+    final added = [for (final d in _added) (d.line, d.comment)];
+    final int discount;
+    try {
+      discount = await _engine.restoStaffDiscount(widget.orderUuid, staff.id, added);
+    } on OfflineRefusal catch (e) {
+      return _refuse(e.message, title: 'Tarif du personnel impossible');
+    }
+    if (!mounted) return;
+    final result = await showDialog<({bool percent, int value, String reason, RestoApproval? approval})>(
+      context: context,
+      builder: (_) => _GestureDialog(
+        engine: _engine,
+        operator: _operator,
+        gesture: _Gesture.staff,
+        title: 'Tarif du personnel',
+        base: discount,
+        initialReason: 'Vente personnel pour ${staff.name}',
+        description: '${added.length} article${added.length > 1 ? 's' : ''} pour ${staff.name} : ${formatFcfa(discount)} de remise.',
+      ),
+    );
+    if (result == null || !mounted) return;
+    if (_quantities.isNotEmpty || _removed.isNotEmpty) {
+      final ok = await _run(() => _engine.restoEditLines(_operator, widget.orderUuid, quantities: Map.of(_quantities), removed: Set.of(_removed)), title: 'Commande non enregistrée');
+      if (!ok || !mounted) return;
+      setState(() {
+        _quantities.clear();
+        _removed.clear();
+      });
+    }
+    final ok = await _run(
+      () => _engine.restoStaffLines(_operator, widget.orderUuid, staff.id, added, reason: result.reason, approval: result.approval),
+      title: 'Tarif du personnel impossible',
+    );
+    if (ok && mounted) setState(_added.clear);
+  }
+
+  /// Remise du client cité à l'ouverture : taux, montant recalculé tant qu'aucune remise manuelle ni aucun règlement ne
+  /// l'a figée ; la retirer est une remise manuelle (droit Remise).
+  Future<void> _customerDiscount(RestoOrder order) async {
+    final percent = _engine.restaurant?.customerDiscounts[order.customerUuid] ?? 0;
+    final active = order.globalDiscountSource == 'customer' && order.globalDiscount > 0;
+    final withdraw = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Remise client'),
+        content: Text([
+          'Client : ${order.customerName ?? 'client de la commande'}',
+          percent > 0 ? 'Remise du client : $percent %' : 'Aucune remise pour ce client.',
+          if (active) 'Remise de la commande : ${formatFcfa(order.globalDiscount)}, recalculée à chaque modification.',
+          if (!active && order.globalDiscountSource == 'manual') 'Une remise manuelle remplace la remise client.',
+          if (!active && order.discountFrozen) 'La commande a déjà un règlement : sa remise ne change plus.',
+        ].join('\n')),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Fermer')),
+          if (active && !order.discountFrozen)
+            TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Retirer la remise client')),
+        ],
+      ),
+    );
+    if (withdraw != true || !mounted) return;
+    await _run(() => _engine.restoDiscountOrder(_operator, widget.orderUuid, 0), title: 'Remise impossible');
+  }
+
   /// Remise de la commande (plafonnée) ou son retrait.
   Future<void> _orderDiscount(RestoOrder order) async {
     final result = await _gesture(_Gesture.orderDiscount, 'Remise sur la commande', RestoEngine.orderDiscountBase(order),
@@ -1232,6 +1381,8 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
       'deplacer' => _moveLines(order),
       'fusionner' => _merge(),
       'couverts' => _coversAndServer(order),
+      'personnel' => _startStaff(),
+      'remise_client' => _customerDiscount(order),
       _ => _run(() => _engine.restoValidateCustomer(_operator, widget.orderUuid), title: 'Validation impossible'),
     },
     itemBuilder: (_) => [
@@ -1239,6 +1390,9 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
       if (order.activeLines.isNotEmpty) const PopupMenuItem(value: 'deplacer', child: Text('Déplacer des articles')),
       const PopupMenuItem(value: 'fusionner', child: Text('Fusionner avec une table')),
       const PopupMenuItem(value: 'couverts', child: Text('Couverts et serveur')),
+      // Lot R-5 : rouverts à la caisse maîtresse (`fonctions_restreintes` ne les contient plus).
+      if (_engine.restaurant?.staffPricing ?? false) const PopupMenuItem(value: 'personnel', child: Text('Tarif personnel')),
+      if (order.customerUuid != null || order.globalDiscountSource == 'customer') const PopupMenuItem(value: 'remise_client', child: Text('Remise client')),
       if (order.profile == 'TABLE_SERVICE' && order.prebills > 0 && order.stage != RestoStage.customerValidated)
         const PopupMenuItem(value: 'validation', child: Text('Validée par le client')),
     ],
@@ -1472,7 +1626,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
           children: [
             Chip(label: Text(order.isOpen ? _stageLabel(order.stage) : (order.status == 'settled' ? 'Réglée' : 'Annulée'))),
             if (order.covers != null) Chip(label: Text('${order.covers} couverts')),
-            if (order.globalDiscount > 0) Chip(label: Text('Remise ${formatFcfa(order.globalDiscount)}')),
+            if (order.globalDiscount > 0) Chip(label: Text('${order.globalDiscountSource == 'customer' ? 'Remise client' : 'Remise'} ${formatFcfa(order.globalDiscount)}')),
             if (order.prebills > 0) Chip(label: Text('${order.prebills} préfacture${order.prebills > 1 ? 's' : ''}')),
             if (order.isOpen && order.activeLines.any((l) => l.settled > 0)) const Chip(label: Text('Réglée en partie')),
             if (order.externalReference != null) Chip(label: Text('Réf. ${order.externalReference}')),
@@ -1480,6 +1634,17 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
             if (view.pendingVersions > 0) Chip(avatar: const Icon(Icons.cloud_upload_outlined, size: 16), label: Text('${view.pendingVersions} à transmettre')),
           ],
         ),
+        if (_staff != null && editable)
+          Card(
+            key: const ValueKey('resto-vente-personnel'),
+            color: Colors.purple.shade50,
+            child: ListTile(
+              leading: const Icon(Icons.badge_outlined),
+              title: Text('Vente personnel pour ${_staff!.name}'),
+              subtitle: const Text('Les articles ajoutés sont à son tarif.'),
+              trailing: TextButton(onPressed: () => setState(() => _staff = null), child: const Text('Terminer')),
+            ),
+          ),
         if (view.serverMessage != null)
           Card(
             color: view.waiting ? Colors.blue.shade50 : Colors.orange.shade50,
@@ -1494,7 +1659,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               subtitle: Text([
                 '${Decimal6.label(_quantities[l.uuid] ?? l.quantity)} x ${formatFcfa(l.unitPrice)}',
                 if (l.status == RestoLineStatus.sent) _engine.restaurant?.settings.sendToProduction == true && l.sent > 0 ? 'Envoyé' : 'Validé',
-                if (l.free) 'Offert' else if (l.discount > 0) 'Remise ${formatFcfa(l.discount)}',
+                if (l.free) 'Offert' else if (l.pricing == 'staff') 'Tarif personnel −${formatFcfa(l.discount)}' else if (l.discount > 0) 'Remise ${formatFcfa(l.discount)}',
                 if (l.comment != null) l.comment!,
               ].join(' · ')),
               trailing: !editable || !l.active

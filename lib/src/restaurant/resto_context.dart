@@ -1,4 +1,7 @@
 import 'resto_engine.dart';
+import 'resto_staff.dart';
+
+export 'resto_staff.dart' show RestoPromotion, restoStaffPrice;
 
 /// Réglages restaurant résolus pour le point de vente (`restaurant.reglages`, RESTAURANT-1 §3.3).
 class RestoSettings {
@@ -165,6 +168,9 @@ class RestoContext {
     this.routes = const {},
     this.lastTicketNumbers = const {},
     this.channels = const [],
+    this.staffPromotions = const [],
+    this.customerDiscounts = const {},
+    this.categoryParents = const {},
   });
 
   final String? pointOfSaleUuid;
@@ -211,6 +217,18 @@ class RestoContext {
 
   /// Point de vente restaurant (Service de table ou Restaurant) : l'écran restaurant s'ouvre après le PIN.
   bool get restaurantProfile => tableService || production;
+
+  /// Lot R-5 : promotions du tarif du personnel publiées (`restaurant.promotion`, catégorie `staff`), profil Restaurant.
+  final List<RestoPromotion> staffPromotions;
+
+  /// Lot R-5 : taux de remise par client (`restaurant.remise_client`), vide si le réglage de la boutique est éteint.
+  final Map<String, int> customerDiscounts;
+
+  /// Catégorie parente restaurant de chaque catégorie (`restaurant.categorie.parent_uuid`), cibles des promotions.
+  final Map<String, String?> categoryParents;
+
+  /// Le tarif du personnel est proposé : profil Restaurant (comme au web) avec au moins une promotion du personnel.
+  bool get staffPricing => production && staffPromotions.isNotEmpty;
 
   RestoChannel? channel(String? code) => channels.where((c) => c.code == code).firstOrNull;
 
@@ -353,4 +371,66 @@ class RestoRegisterView {
   final int? serverZNumber;
 
   bool get open => !closed;
+}
+
+/// Ligne d'une vente réglant une commande : quantité vendue et encore remboursable, en unité de base (millionièmes).
+class RestoSaleLine {
+  const RestoSaleLine({required this.lineUuid, required this.label, required this.sold, required this.remaining});
+
+  /// `ligne_uuid` de la vente (cité par `resto_remboursement.lignes`).
+  final String lineUuid;
+  final String label;
+  final int sold;
+  final int remaining;
+}
+
+/// Remboursement d'une vente (`retour` de la caisse ou `resto_remboursement`, lot R-5) et sa remontée.
+class RestoRefundView {
+  const RestoRefundView({required this.uuid, required this.type, required this.amount, required this.reason, required this.state, this.message, this.waiting = false});
+
+  final String uuid;
+
+  /// `retour` (espèces) ou `annulation` (moyens d'origine).
+  final String type;
+  final int amount;
+  final String reason;
+
+  /// État serveur (`a_envoyer`, `recue`, `integree`, `a_arbitrer`…).
+  final String state;
+
+  /// Message du serveur tant que le remboursement n'est pas intégré (`restaurant.remboursement_incoherent`…).
+  final String? message;
+
+  /// Vente pas encore intégrée (`restaurant.attente_reglement`) : le serveur le rejoue seul.
+  final bool waiting;
+
+  /// À arbitrer par la boutique (rien n'a été remboursé côté serveur) : bloque la clôture de session.
+  bool get toArbitrate => state == 'a_arbitrer';
+}
+
+/// Vente de cette caisse qui a réglé une commande du Restaurant : ce qui reste remboursable et ses remboursements.
+class RestoSettledSale {
+  const RestoSettledSale({
+    required this.saleUuid,
+    required this.number,
+    required this.orderUuid,
+    required this.orderNumber,
+    required this.at,
+    required this.total,
+    required this.lines,
+    this.refunds = const [],
+  });
+
+  final String saleUuid;
+  final String number;
+  final String orderUuid;
+  final String orderNumber;
+  final DateTime at;
+  final int total;
+  final List<RestoSaleLine> lines;
+  final List<RestoRefundView> refunds;
+
+  bool get cancelled => refunds.any((r) => r.type == 'annulation');
+  int get refunded => refunds.fold<int>(0, (sum, r) => sum + r.amount);
+  bool get refundable => !cancelled && lines.any((l) => l.remaining > 0) && refunded < total;
 }
