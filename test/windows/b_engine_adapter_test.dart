@@ -123,7 +123,17 @@ void main() {
     expect(result['available'], false);
     expect((await store.operations()).length, before);
     await host.call(HostCommand.logout);
-    await expectLater(host.call(HostCommand.restaurantView), throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'operator_required')));
+    await expectLater(host.call(HostCommand.restaurantView), throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'caissier_requis')));
+  });
+
+  test('restaurant print queue remains readable when locked and writes require login', () async {
+    await host.call(HostCommand.logout);
+    final jobs = await host.call(HostCommand.restoPrintJobs);
+    expect(jobs['jobs'], isEmpty);
+    await expectLater(
+      host.call(HostCommand.restoOpen, arguments: {'table_uuid': 'unknown'}, operationId: nextId()),
+      throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'caissier_requis').having((e) => e.outcomeUnknown, 'certain refusal', false)),
+    );
   });
 
   test('closure documents require a logged-in operator and never enqueue a closure', () async {
