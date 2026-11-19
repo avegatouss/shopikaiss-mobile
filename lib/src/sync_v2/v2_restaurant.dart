@@ -129,7 +129,44 @@ extension _V2Restaurant on V2Engine {
       channels: [
         for (final e in (await v2.entities('restaurant.canal')).entries) RestoChannel.fromJson(e.key, e.value),
       ]..sort((a, b) => a.order != b.order ? a.order.compareTo(b.order) : a.name.compareTo(b.name)),
+      promotions: await _restoPromotions(),
+      categoryParents: {
+        for (final e in (await v2.entities('restaurant.categorie')).entries) e.key: e.value['parent_uuid'] as String?,
+      },
     );
+  }
+
+  /// Promotions actives publiées (`restaurant.promotion`, lot R-5), sauf si la boutique annonce encore la fonction
+  /// restreinte (`restaurant.promotions`, serveur antérieur au lot R-5). Ancienneté : révision de publication.
+  Future<List<RestoPromotion>> _restoPromotions() async {
+    final restricted = ((_state?['fonctions_restreintes'] as List?) ?? const []).cast<Map>().any((f) => f['fonction'] == 'restaurant.promotions');
+    if (restricted) return const [];
+    final revisions = await v2.revisions('restaurant.promotion');
+    return [
+      for (final e in (await v2.entities('restaurant.promotion')).entries)
+        RestoPromotion.fromJson(e.key, e.value, rank: BigInt.tryParse(revisions[e.key] ?? '')),
+    ];
+  }
+
+  /// Conditions des promotions figées à la saisie des lignes (`{ligne_uuid: {p: promotion_uuid, d: conditions}}`), pour
+  /// un changement de quantité ultérieur (`refreshLine` du web). Gardées tant que la commande de la ligne est ouverte.
+  static const _promotionTermsKey = 'v2.resto_promotions_figees';
+
+  Future<Map<String, RestoPromotion>> _restoPromotionTerms() async {
+    final raw = jsonDecode(await v2.read(_promotionTermsKey) ?? '{}') as Map;
+    return {
+      for (final e in raw.entries)
+        e.key as String: RestoPromotion.fromJson((e.value as Map)['p'] as String, (e.value as Map)['d'] as Map),
+    };
+  }
+
+  Future<void> _restoKeepPromotionTerms(Map<String, RestoPromotion> added, Map<String, _RestoTrack> tracks) async {
+    final open = {
+      for (final t in tracks.values)
+        if (t.order!.isOpen) ...[for (final l in t.order!.lines) l.uuid],
+    };
+    final terms = {...await _restoPromotionTerms(), ...added}..removeWhere((line, _) => !open.contains(line));
+    await v2.write(_promotionTermsKey, jsonEncode({for (final e in terms.entries) e.key: {'p': e.value.uuid, 'd': e.value.toJson()}}));
   }
 
   String? _restaurantBlocker(Operator operator) {
@@ -326,6 +363,13 @@ extension _V2Restaurant on V2Engine {
       sendToStations: ctx.settings.sendToProduction,
       vat: _restoVat,
       cancellationReasonRequired: ctx.settings.cancellationReason,
+      promotions: RestoPromotions(
+        promotions: ctx.promotions,
+        timezone: ctx.settings.timezone ?? _shopRules?['fuseau'] as String?,
+        categoryParents: ctx.categoryParents,
+        tableRooms: {for (final t in ctx.tables) t.uuid: t.roomUuid},
+        entryTerms: await _restoPromotionTerms(),
+      ),
     );
   }
 
@@ -346,7 +390,9 @@ extension _V2Restaurant on V2Engine {
     });
     if (approvals.isNotEmpty) await _restoLedgerAdd(approvals);
     await _afterWrite();
-    final track = (await _restoTracks())[result.order.uuid]!;
+    final tracks = await _restoTracks();
+    if (event.promotionTerms.isNotEmpty) await _restoKeepPromotionTerms(event.promotionTerms, tracks);
+    final track = tracks[result.order.uuid]!;
     return _restoView(track, await _paidOrders(), tickets: event.tickets);
   }
 
@@ -1048,6 +1094,7 @@ extension _V2Restaurant on V2Engine {
       coefficient: pack == null ? Decimal6.scale : Decimal6.parse(pack['coefficient'] as String),
       unitPrice: (pack?['prix'] ?? product['prix']) as int,
       comment: comment,
+      categoryUuid: product['categorie_uuid'] as String?,
     );
   }
 

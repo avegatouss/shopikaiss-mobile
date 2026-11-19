@@ -10,6 +10,7 @@ import '../passes/pass_rules.dart';
 import '../offline/web_rules.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
+import '../restaurant/resto_promotions.dart';
 
 import '../offline/api.dart';
 import '../offline/engine.dart';
