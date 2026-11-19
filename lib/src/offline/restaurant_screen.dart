@@ -865,7 +865,8 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
       return;
     }
     final reason = TextEditingController();
-    final required = _engine.restaurant?.settings.cancellationReason ?? false;
+    // Profil Restaurant (R-4) : motif toujours exigé.
+    final required = (_engine.restaurant?.settings.cancellationReason ?? false) || (_engine.restaurant?.production ?? false);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -892,27 +893,75 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     if (snapshot == null || view == null) return;
     if (_dirty) return _refuse('Enregistrez d’abord les modifications de la commande.', title: 'Encaissement impossible');
     if (!_engine.sessionOpen) return _refuse('Aucune session de caisse ouverte : ouvrez-la depuis la caisse.', title: 'Encaissement impossible');
+    // Profil Restaurant (R-4) : tout, par articles ou par parts ; le Service de table règle toujours tout.
+    final production = _engine.restaurant?.production ?? false;
+    final first = view.order.activeLines.every((l) => l.settled == 0);
+    _SettlePlan? plan;
+    if (production) {
+      final rest = [for (final l in view.order.activeLines) if (l.quantity > l.settled) l];
+      final restPayable = first ? view.payable : webTotals(
+        lineBases: [for (final l in rest) Decimal6.amount(l.unitPrice, l.quantity - l.settled)],
+        lineDiscounts: [for (final _ in rest) 0],
+        globalDiscount: 0,
+        vatRate: snapshot.store.vatRate,
+        vatIncluded: snapshot.store.vatIncluded,
+      ).payable;
+      plan = await showDialog<_SettlePlan>(context: context, builder: (_) => _SettleChoiceDialog(order: view.order, payable: restPayable));
+      if (plan == null || !mounted) return;
+    }
     final List<CartLine> lines;
     try {
-      lines = await _engine.restoCart(widget.orderUuid);
+      lines = plan?.items != null ? await _engine.restoCartItems(widget.orderUuid, plan!.items!) : await _engine.restoCart(widget.orderUuid);
       allocateLots(snapshot, lines);
     } on OfflineRefusal catch (e) {
       return _refuse(e.message, title: 'Encaissement impossible');
     }
     if (!mounted) return;
+    // À payer de ce règlement : celui de la commande pour tout régler d'un coup, sinon celui du panier rendu.
+    final payable = plan == null || (plan.mode == _SettleMode.all && first)
+        ? view.payable
+        : webTotals(
+            lineBases: [for (final l in lines) l.base],
+            lineDiscounts: [for (final l in lines) l.discount],
+            globalDiscount: 0,
+            vatRate: snapshot.store.vatRate,
+            vatIncluded: snapshot.store.vatIncluded,
+          ).payable;
     final compact = widget.host._compact;
-    final payments = compact
+    Future<List<CartPayment>?> pay(int amount) async => compact
         ? await Navigator.of(context).push<List<CartPayment>>(
-            MaterialPageRoute(fullscreenDialog: true, builder: (_) => _PaymentDialog(snapshot: snapshot, payable: view.payable, cashDue: _engine.cashDue, fullScreen: true)),
+            MaterialPageRoute(fullscreenDialog: true, builder: (_) => _PaymentDialog(snapshot: snapshot, payable: amount, cashDue: _engine.cashDue, fullScreen: true)),
           )
         : await showDialog<List<CartPayment>>(
             context: context,
             barrierDismissible: false,
-            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: view.payable, cashDue: _engine.cashDue),
+            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: amount, cashDue: _engine.cashDue),
           );
-    if (payments == null || !mounted) return;
+    final List<CartPayment> payments;
+    List<RestoShare>? shares;
+    if (payable == 0) {
+      // Commande à 0 F (entièrement offerte) : réglée sans paiement.
+      payments = const [];
+    } else if (plan?.mode == _SettleMode.shares) {
+      // Une part après l'autre : chaque paiement appartient à sa part.
+      payments = [];
+      shares = [];
+      for (final (i, amount) in _equalShares(payable, plan!.shares).indexed) {
+        if (amount <= 0) continue;
+        widget.host._toast('Part ${i + 1} sur ${plan.shares} : ${formatFcfa(amount)}');
+        final part = await pay(amount);
+        if (part == null || !mounted) return;
+        shares.add(RestoShare(label: 'Part ${i + 1}', amount: amount, payments: [for (var k = 0; k < part.length; k++) payments.length + k]));
+        payments.addAll(part);
+      }
+    } else {
+      final chosen = await pay(payable);
+      if (chosen == null || !mounted) return;
+      payments = chosen;
+    }
+    if (!mounted) return;
     OfflineOperation? operation;
-    final ok = await _run(() async => operation = await _engine.restoSettle(_operator, widget.orderUuid, lines, payments), title: 'Encaissement refusé');
+    final ok = await _run(() async => operation = await _engine.restoSettle(_operator, widget.orderUuid, lines, payments, shares: shares), title: 'Encaissement refusé');
     if (!ok || operation == null || !mounted) return;
     final session = widget.host.widget.session;
     if (session.hasPrinter && payments.any((p) => p.method.isCash)) unawaited(session.channel.openDrawer());
@@ -926,7 +975,10 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
         builder: (context, setDialog) => AlertDialog(
           icon: Icon(Icons.check_circle, color: _brand, size: 48),
           title: Text('Vente ${operation!.number}'),
-          content: Text(change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : 'Commande réglée et close.', style: const TextStyle(fontSize: 20)),
+          content: Text(
+            change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : (_view?.order.isOpen ?? false) ? 'Règlement enregistré : il reste à payer.' : 'Commande réglée et close.',
+            style: const TextStyle(fontSize: 20),
+          ),
           actions: [
             TextButton(
               onPressed: () async {
@@ -935,12 +987,13 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               },
               child: Text(printed ? 'Réimprimer' : 'Imprimer le ticket'),
             ),
-            FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Retour à la salle')),
+            FilledButton(onPressed: () => Navigator.pop(context), child: Text((_view?.order.isOpen ?? false) ? 'Retour à la commande' : 'Retour à la salle')),
           ],
         ),
       ),
     );
-    if (mounted) Navigator.pop(context);
+    // Règlement partiel (Restaurant) : on reste sur la commande pour la suite.
+    if (mounted && !(_view?.order.isOpen ?? false)) Navigator.pop(context);
   }
 
   @override
@@ -950,7 +1003,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     final ctx = _engine.restaurant;
     final blocker = _engine.restaurantBlocker(_operator);
     final editable = blocker == null && order != null && order.isOpen && !(view?.paid ?? false);
-    final table = ctx?.table(order?.tableUuid)?.name;
+    final table = ctx?.table(order?.tableUuid)?.name ?? ctx?.channel(order?.channel)?.name;
     return PopScope(
       canPop: !_dirty,
       onPopInvokedWithResult: (didPop, _) async {
@@ -979,7 +1032,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
                 icon: Badge(isLabelVisible: (view?.ticketsToCheck ?? 0) > 0, label: Text('${view?.ticketsToCheck ?? 0}'), child: const Icon(Icons.receipt_long_outlined)),
               ),
             if (editable) ...[
-              IconButton(tooltip: 'Transférer', onPressed: _busy || _dirty ? null : _transfer, icon: const Icon(Icons.swap_horiz)),
+              if (order.tableUuid != null) IconButton(tooltip: 'Transférer', onPressed: _busy || _dirty ? null : _transfer, icon: const Icon(Icons.swap_horiz)),
               IconButton(tooltip: 'Annuler la commande', onPressed: _busy || _dirty ? null : _cancel, icon: const Icon(Icons.delete_outline)),
             ],
             if (view?.paid ?? false)
@@ -1025,6 +1078,8 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
             Chip(label: Text(order.isOpen ? _stageLabel(order.stage) : (order.status == 'settled' ? 'Réglée' : 'Annulée'))),
             if (order.covers != null) Chip(label: Text('${order.covers} couverts')),
             if (order.prebills > 0) Chip(label: Text('${order.prebills} préfacture${order.prebills > 1 ? 's' : ''}')),
+            if (order.isOpen && order.activeLines.any((l) => l.settled > 0)) const Chip(label: Text('Réglée en partie')),
+            if (order.externalReference != null) Chip(label: Text('Réf. ${order.externalReference}')),
             if (view.serverNumber != null) Chip(label: Text('Serveur ${view.serverNumber}')),
             if (view.pendingVersions > 0) Chip(avatar: const Icon(Icons.cloud_upload_outlined, size: 16), label: Text('${view.pendingVersions} à transmettre')),
           ],
@@ -1202,12 +1257,20 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               ),
               const SizedBox(width: 8),
             ],
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
-              onPressed: _busy || view.order.activeLines.isEmpty ? null : _prebill,
-              icon: const Icon(Icons.receipt_outlined),
-              label: const Text('Préfacture'),
-            ),
+            // Petit téléphone : la préfacture en icône, pour que « Valider » et « Encaisser » tiennent sur la ligne.
+            if (widget.host._compact)
+              IconButton.outlined(
+                tooltip: 'Préfacture',
+                onPressed: _busy || view.order.activeLines.isEmpty ? null : _prebill,
+                icon: const Icon(Icons.receipt_outlined),
+              )
+            else
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                onPressed: _busy || view.order.activeLines.isEmpty ? null : _prebill,
+                icon: const Icon(Icons.receipt_outlined),
+                label: const Text('Préfacture'),
+              ),
             const SizedBox(width: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: _brand, minimumSize: const Size(0, 48)),

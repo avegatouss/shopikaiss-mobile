@@ -522,8 +522,33 @@ class V2Engine extends CaisseEngine {
   Future<List<CartLine>> restoCart(String orderUuid) => _restoCart(orderUuid);
 
   @override
-  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) =>
-      _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid);
+  Future<OfflineOperation> restoSettle(
+    Operator operator,
+    String orderUuid,
+    List<CartLine> lines,
+    List<CartPayment> payments, {
+    String? draftUuid,
+    List<RestoShare>? shares,
+  }) => _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid, shares: shares);
+
+  @override
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) =>
+      _restoOpenOnChannel(operator, channelCode, tableUuid: tableUuid, reference: reference, customerName: customerName, covers: covers);
+
+  @override
+  Future<List<CartLine>> restoCartItems(String orderUuid, Map<String, int> quantities) => _restoCart(orderUuid, quantities: quantities);
+
+  @override
+  Future<RestoRegisterView?> restoRegister() => _restoRegisterCurrent();
+
+  @override
+  String? restoRegisterBlocker(Operator operator) => _restoRegisterBlocker(operator);
+
+  @override
+  Future<RestoRegisterView> restoRegisterOpen(Operator operator, {String? note}) => _restoRegisterOpen(operator, note: note);
+
+  @override
+  Future<RestoRegisterView> restoRegisterClose(Operator operator, {String? note}) => _restoRegisterClose(operator, note: note);
 
   @override
   Future<RestoOrderView> restoClose(Operator operator, String orderUuid) => _restoCloseNow(operator, orderUuid);
@@ -1397,6 +1422,9 @@ class V2Engine extends CaisseEngine {
             approval: overLimit ? extras.approval : null,
             passages: passages,
             order: order == null ? null : (orderUuid: order.orderUuid, settlementUuid: order.settlementUuid),
+            orderType: order?.type ?? 'full',
+            orderParts: order?.shares,
+            orderLabel: order?.label,
           ),
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
@@ -1516,7 +1544,11 @@ class V2Engine extends CaisseEngine {
             if (content['client_nom'] != null) 'client_nom': content['client_nom'],
             if (content['tarif'] != null) 'tarif': content['tarif'],
           }
-        : {...content, if (await v2.read('${V2Keys.zPrefix}${op['uuid']}') case final z?) 'z': jsonDecode(z)};
+        : {
+            ...content,
+            if (await v2.read('${V2Keys.zPrefix}${op['uuid']}') case final z?) 'z': jsonDecode(z),
+            if (await v2.read('${V2Keys.zRestaurantPrefix}${op['uuid']}') case final z?) 'z_restaurant': jsonDecode(z),
+          };
     final finalState = state == V2OperationState.integrated || state == V2OperationState.resolved;
     return OfflineOperation(
       uuid: op['uuid'] as String,

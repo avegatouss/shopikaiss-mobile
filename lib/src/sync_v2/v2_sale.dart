@@ -91,6 +91,9 @@ class V2SaleBuilder {
     SaleApproval? approval,
     List<Map<String, dynamic>> passages = const [],
     ({String orderUuid, String settlementUuid})? order,
+    String orderType = 'full',
+    List<Map<String, dynamic>>? orderParts,
+    String? orderLabel,
   }) {
     if (!revision21 && !extras.isEmpty) throw const V2SaleInvalid('Remise globale, livraison et note : contrat 2.1 requis.');
     final orderLines = <Map<String, dynamic>>[];
@@ -156,6 +159,9 @@ class V2SaleBuilder {
       throw V2SaleInvalid(e.message);
     }
     if ((payments.isEmpty && totals.payable > 0) || payments.length > 10) throw const V2SaleInvalid('Entre 1 et 10 paiements par vente.');
+    // Vente à zéro sans paiement : seulement le règlement d'une commande de la caisse maîtresse (contrat R-5, commande
+    // entièrement offerte) ; une vente ordinaire garde au moins un paiement.
+    if (payments.isEmpty && order == null) throw const V2SaleInvalid('Entre 1 et 10 paiements par vente.');
     // Espèces (reçu renseigné) : le tiroir reçoit le montant arrondi ; montant = part exacte de la vente.
     int due(V2Payment p) => p.received == null || cashRounding == null ? p.amount : cashRound(p.amount, step: cashRounding.step, mode: cashRounding.mode);
     var paid = 0;
@@ -200,7 +206,14 @@ class V2SaleBuilder {
       if (passages.isNotEmpty) 'passages': passages,
       // Règlement complet d'une commande de la caisse maîtresse (RESTAURANT-1 §4.6, Service de table : `full`).
       if (order != null)
-        'commande': {'commande_uuid': order.orderUuid, 'reglement_uuid': order.settlementUuid, 'type': 'full', 'lignes': orderLines, 'parts': null, 'libelle': null},
+        'commande': {
+          'commande_uuid': order.orderUuid,
+          'reglement_uuid': order.settlementUuid,
+          'type': orderType,
+          'lignes': orderLines,
+          'parts': orderType == 'shares' ? orderParts : null,
+          'libelle': orderLabel,
+        },
     };
   }
 

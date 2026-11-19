@@ -334,9 +334,36 @@ abstract class CaisseEngine extends EngineNotifier {
   Future<List<CartLine>> restoCart(String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Encaisse toute la commande (vente v2 avec `commande` de type `full`), puis la clôt. [lines] : panier rendu par
-  /// [restoCart], inchangé.
-  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) =>
+  /// [restoCart] ou [restoCartItems], inchangé. Profil Restaurant (R-4) : une partie du reste (`items`), ou tout le reste
+  /// partagé en [shares] (`shares`, chaque paiement dans une part et une seule) ; la commande se clôt une fois soldée.
+  Future<OfflineOperation> restoSettle(
+    Operator operator,
+    String orderUuid,
+    List<CartLine> lines,
+    List<CartPayment> payments, {
+    String? draftUuid,
+    List<RestoShare>? shares,
+  }) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Profil Restaurant (R-4) : ouvre une commande sur le canal [channelCode] (table si le canal l'exige, référence
+  /// externe si le canal l'exige).
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Panier d'un règlement par articles (profil Restaurant) : [quantities] par ligne de commande (millionièmes), au plus
+  /// le reste à régler de chacune.
+  Future<List<CartLine>> restoCartItems(String orderUuid, Map<String, int> quantities) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Registre (journée) de cette caisse : le dernier ouvert, clos ou non ; null si aucun.
+  Future<RestoRegisterView?> restoRegister() async => null;
+
+  /// Pourquoi [operator] ne peut pas ouvrir ou clôturer le registre (caisse maîtresse, droit `resto_registre`), ou null.
+  String? restoRegisterBlocker(Operator operator) => 'Restaurant non disponible sur ce terminal.';
+
+  Future<RestoRegisterView> restoRegisterOpen(Operator operator, {String? note}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Clôture du registre et Z local (session close, commandes soldées).
+  Future<RestoRegisterView> restoRegisterClose(Operator operator, {String? note}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Clôt une commande déjà réglée par une vente de ce terminal (clôture interrompue).
   Future<RestoOrderView> restoClose(Operator operator, String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
