@@ -15,10 +15,13 @@ class MultiplePayments extends StatefulWidget {
 }
 
 class _PaymentRow {
+  final amountController = TextEditingController();
   String? method;
-  String amount = '';
+  String get amount => amountController.text;
+  set amount(String value) => amountController.text = value;
   String received = '';
   String reference = '';
+  bool balanceFirst = false;
 }
 
 class _MultiplePaymentsState extends State<MultiplePayments> {
@@ -43,6 +46,9 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
   void initState() {
     super.initState();
     rows.first.amount = c.paymentPayable?.toString() ?? '';
+    if (c.paymentMethods.isNotEmpty) {
+      rows.first.method = c.paymentMethods.first['code'] as String;
+    }
   }
 
   bool get editable => c.ready && c.uncertainOperation == null;
@@ -74,12 +80,20 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
           : null,
     );
     final amount = TextFormField(
-      initialValue: row.amount,
+      controller: row.amountController,
       enabled: editable,
       keyboardType: TextInputType.number,
       decoration: const InputDecoration(labelText: 'Montant (F CFA)'),
       onChanged: (value) {
-        row.amount = value;
+        // Redistribute only a previously complete two-way split. Invalid input
+        // is left for the engine to reject; never silently invent an amount.
+        if (row.balanceFirst && rows.length == 2 && identical(row, rows.last)) {
+          final total = c.paymentPayable;
+          final part = int.tryParse(value.trim());
+          if (total != null && part != null && part >= 0 && part <= total) {
+            rows.first.amount = (total - part).toString();
+          }
+        }
         changed();
       },
     );
@@ -120,6 +134,7 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
       onPressed: editable
           ? () {
               rows.remove(row);
+              row.amountController.dispose();
               changed();
             }
           : null,
@@ -201,6 +216,9 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
   @override
   void dispose() {
     timer?.cancel();
+    for (final row in rows) {
+      row.amountController.dispose();
+    }
     super.dispose();
   }
 
@@ -238,13 +256,14 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
               ),
               for (final row in rows) paymentRow(context, row),
               TextButton.icon(
-                onPressed:
-                    editable &&
-                        rows.length < 10 &&
-                        (remaining == null || remaining! > 0)
+                onPressed: editable && rows.length < 10
                     ? () {
                         rows.add(
-                          _PaymentRow()..amount = remaining?.toString() ?? '',
+                          _PaymentRow()
+                            ..balanceFirst = rows.length == 1 && remaining == 0
+                            ..amount = remaining == null
+                                ? ''
+                                : (remaining! > 0 ? remaining! : 0).toString(),
                         );
                         changed();
                       }
