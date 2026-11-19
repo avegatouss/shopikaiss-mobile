@@ -98,6 +98,7 @@ class RestoLine {
     this.settled = 0,
     this.promotionUuid,
     this.tariff,
+    this.staffId,
   }) : label = label.length > 160 ? label.substring(0, 160) : label;
 
   final String uuid;
@@ -130,11 +131,14 @@ class RestoLine {
   int settled;
 
   /// Lot R-5 : promotion appliquée à la saisie (`promotion_uuid`), null sinon ; un offert ou une remise manuelle la
-  /// retirent.
+  /// retirent. Le tarif du personnel est une promotion de catégorie `staff`.
   String? promotionUuid;
 
-  /// Lot R-5 : tarif de la promotion (`promotion`, `happy_hour`) ; null = tarif déduit (offert, remise, standard).
+  /// Lot R-5 : tarif de la promotion (`promotion`, `happy_hour`, `staff`) ; null = tarif déduit (offert, remise, standard).
   String? tariff;
+
+  /// Lot R-5 : employé servi au tarif du personnel (`personnel_id`), null sinon.
+  final String? staffId;
 
   bool get active => status != RestoLineStatus.cancelled;
   int get gross => Decimal6.amount(unitPrice, quantity);
@@ -162,6 +166,7 @@ class RestoLine {
     settled: settled,
     promotionUuid: promotionUuid,
     tariff: tariff,
+    staffId: staffId,
   );
 
   Map<String, dynamic> toJson() => {
@@ -181,7 +186,9 @@ class RestoLine {
     'parent_ligne_uuid': parentLineUuid,
     'envoye': Decimal6.format(sent),
     'reglee': Decimal6.format(settled),
+    // Lot R-5 : toujours envoyés, même à null (leur absence désigne un client R-4).
     'promotion_uuid': promotionUuid,
+    'personnel_id': staffId,
   };
 
   static RestoLine fromJson(Map m) => RestoLine(
@@ -202,6 +209,7 @@ class RestoLine {
     sent: Decimal6.parse(m['envoye'] as String),
     settled: Decimal6.parse(m['reglee'] as String),
     promotionUuid: m['promotion_uuid'] as String?,
+    staffId: m['personnel_id'] as String?,
     tariff: const {'promotion', 'happy_hour', 'staff'}.contains(m['tarif']) ? m['tarif'] as String : null,
   );
 }
@@ -250,6 +258,8 @@ class RestoOrder {
     this.version = 0,
     this.prebills = 0,
     this.globalDiscount = 0,
+    this.globalDiscountSource,
+    this.discountFrozen = false,
     List<RestoLine>? lines,
   }) : lines = lines ?? [];
 
@@ -279,6 +289,14 @@ class RestoOrder {
   int version;
   int prebills;
   int globalDiscount;
+
+  /// Origine de la remise de commande (`remise_globale_source`, lot R-5) : `manual` (fait `remise`), `customer` (remise du
+  /// client cité à l'ouverture) ou null.
+  String? globalDiscountSource;
+
+  /// Remise client figée (non transmis) : la commande a eu un règlement (même annulé depuis), ou son état vient d'un client
+  /// R-4 avec une remise de commande.
+  bool discountFrozen;
   final List<RestoLine> lines;
 
   bool get isOpen => status == 'open';
@@ -305,6 +323,8 @@ class RestoOrder {
     version: version,
     prebills: prebills,
     globalDiscount: globalDiscount,
+    globalDiscountSource: globalDiscountSource,
+    discountFrozen: discountFrozen,
     lines: [for (final l in lines) l.copy()],
   );
 
@@ -349,6 +369,7 @@ class RestoOrder {
       'etape': stage,
       'prefactures': prebills,
       'remise_globale': globalDiscount,
+      'remise_globale_source': globalDiscountSource ?? (globalDiscount > 0 ? 'manual' : null),
       'lignes': [for (final l in lines) l.toJson()],
       'totaux': {'brut': t.gross, 'remises': t.discounts, 'a_payer': t.payable, 'regle': t.settled},
     });
@@ -389,6 +410,9 @@ class RestoOrder {
     version: version,
     prebills: m['prefactures'] as int,
     globalDiscount: m['remise_globale'] as int,
+    globalDiscountSource: m['remise_globale_source'] as String?,
+    // État d'un client R-4 avec une remise de commande : remise manuelle sans source, jamais recalculée.
+    discountFrozen: !m.containsKey('remise_globale_source') && (m['remise_globale'] as int) > 0,
     lines: [for (final l in (m['lignes'] as List).cast<Map>()) RestoLine.fromJson(l)],
   );
 }
@@ -405,6 +429,7 @@ class RestoNewLine {
     this.routing = const RestoRouting(),
     this.comment,
     this.categoryUuid,
+    this.staffId,
   });
 
   final String productUuid;
@@ -418,6 +443,9 @@ class RestoNewLine {
 
   /// Catégorie du produit (cibles des promotions, lot R-5).
   final String? categoryUuid;
+
+  /// Lot R-5 : employé servi au tarif du personnel ; la remise vient alors des promotions `staff` publiées.
+  final String? staffId;
 }
 
 // ------------------------------------------------------------------ bons
@@ -585,6 +613,7 @@ class RestoEngine {
     this.vat = const RestoVat(),
     this.cancellationReasonRequired = false,
     RestoPromotions? promotions,
+    this.customerDiscounts = const {},
   }) : promotions = promotions ?? RestoPromotions();
 
   final String Function() newUuid;
@@ -607,6 +636,25 @@ class RestoEngine {
   /// Promotions publiées (lot R-5, profil Restaurant) ; vides : aucune promotion n'est appliquée.
   final RestoPromotions promotions;
 
+  /// Taux de remise par client (`restaurant.remise_client`, lot R-5), par uuid du client ; vide : réglage éteint.
+  final Map<String, int> customerDiscounts;
+
+  /// Faits après lesquels la remise client n'est pas recalculée (PromotionsCaisse::remiseClient).
+  static const _customerDiscountKept = {'ouverture', 'remise', 'annulation', 'fusion', 'cloture'};
+
+  /// Remise client (lot R-5, OrderModificationService::syncCustomerDiscount) : floor(montant après remises de ligne × taux du
+  /// client / 100), recalculée après chaque fait tant qu'aucune remise manuelle ni aucun règlement ne l'a figée.
+  void _syncCustomerDiscount(RestoOrder order, String action) {
+    if (_customerDiscountKept.contains(action) || order.globalDiscountSource == 'manual' || order.discountFrozen) return;
+    if (order.lines.any((l) => l.settled > 0)) return;
+    final percent = order.customerUuid == null ? 0 : (customerDiscounts[order.customerUuid] ?? 0);
+    final amount = orderDiscountBase(order) * percent ~/ 100;
+    if (amount == order.globalDiscount) return;
+    order
+      ..globalDiscount = amount
+      ..globalDiscountSource = percent > 0 ? 'customer' : null;
+  }
+
   RestoResult _record(
     RestoOrder order,
     String action,
@@ -616,6 +664,7 @@ class RestoEngine {
     List<Map<String, dynamic>> authorizations = const [],
     Map<String, RestoPromotion> promotionTerms = const {},
   }) {
+    _syncCustomerDiscount(order, action);
     // R-4 : une remise de commande ne dépasse jamais le montant après remises de ligne (offert, déplacement, annulation).
     if (order.isOpen && order.activeLines.isNotEmpty && order.globalDiscount > orderDiscountBase(order)) {
       throw RestoRefusal('La remise de la commande (${order.globalDiscount} F) dépasserait son montant (${orderDiscountBase(order)} F) : réduisez-la d’abord.');
@@ -670,6 +719,7 @@ class RestoEngine {
     String? channel,
     String? externalReference,
     String? customerName,
+    String? customerUuid,
   }) {
     if (profile == 'TABLE_SERVICE' && tableUuid == null) throw const RestoRefusal('Choisissez la table de la commande.');
     if (profile == 'PRODUCTION' && (channel == null || channel.isEmpty)) throw const RestoRefusal('Choisissez le canal de la commande.');
@@ -691,6 +741,8 @@ class RestoEngine {
       channel: profile == 'PRODUCTION' ? channel : null,
       externalReference: _clean(externalReference),
       customerName: _clean(customerName),
+      // Lot R-5 : le client est cité à l'ouverture seulement (aucun fait ne le change) ; il porte la remise client.
+      customerUuid: customerUuid,
       // Règle ServiceStage du web : `waiting` au Service de table, null au Restaurant (la préaddition la passe
       // `bill_printed`).
       stage: profile == 'TABLE_SERVICE' ? RestoStage.waiting : null,
@@ -707,8 +759,12 @@ class RestoEngine {
     Map<String, String?> comments = const {},
     Set<String> removed = const {},
     bool firstActiveFallback = false,
+    String? reason,
+    List<Map<String, dynamic>> authorizations = const [],
   }) {
     _requireOpen(order);
+    // Tarif du personnel (lot R-5) : motif exigé, comme la « Vente personnel » du web.
+    final staffMotive = added.any((i) => i.staffId != null) ? _motive(reason, 'du tarif du personnel') : null;
     final next = order.copy();
     final addedUuids = <String>[], changed = <String>[], removedUuids = <String>[];
     final terms = <String, RestoPromotion>{};
@@ -725,11 +781,16 @@ class RestoEngine {
         unitPrice: item.unitPrice,
         comment: _clean(item.comment),
         stationUuid: item.routing.resolve(stations, firstActiveFallback: firstActiveFallback)?.uuid,
+        staffId: item.staffId,
       );
       next.lines.add(line);
       addedUuids.add(line.uuid);
-      // Lot R-5 : promotion de la saisie (profil Restaurant) ; un « X achetés, Y offerts » ajoute son offert lié.
-      final offered = _applyPromotion(next, line, item.categoryUuid, terms);
+      // Lot R-5 : promotion de la saisie (profil Restaurant) ; un « X achetés, Y offerts » ajoute son offert lié. Tarif du
+      // personnel : promotions `staff` seulement, refusé si aucune ne vise l'article maintenant (comme le web).
+      final offered = _applyPromotion(next, line, item.categoryUuid, terms, categories: item.staffId == null ? const ['promotion', 'happy_hour'] : const ['staff']);
+      if (item.staffId != null && line.promotionUuid == null) {
+        throw RestoRefusal('Le tarif du personnel ne s’applique pas à « ${line.label} » maintenant.');
+      }
       if (offered != null) {
         next.lines.add(offered);
         addedUuids.add(offered.uuid);
@@ -786,7 +847,9 @@ class RestoEngine {
     if (next.lines.length > 200) throw const RestoRefusal('Une commande compte 200 lignes au plus.');
     next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'lignes', {'ajoutees': addedUuids, 'modifiees': changed, 'retirees': removedUuids},
-        reason: removedUuids.isEmpty ? null : 'Retiré de la commande', promotionTerms: terms);
+        reason: staffMotive ?? (removedUuids.isEmpty ? null : 'Retiré de la commande'),
+        promotionTerms: terms,
+        authorizations: staffMotive == null ? const [] : authorizations);
   }
 
   // ---------------------------------------------------------------- promotions (lot R-5)
@@ -1171,7 +1234,10 @@ class RestoEngine {
     if (amount > ceiling) throw RestoRefusal('La remise de commande est plafonnée à $ceiling F.');
     final motive = amount > 0 ? _motive(reason, 'de la remise') : (reason?.trim() ?? '');
     if (motive.length > 500) throw const RestoRefusal('Motif trop long (500 caractères au plus).');
-    final next = order.copy()..globalDiscount = amount;
+    // Lot R-5 : la remise de commande est manuelle ; retirer une remise client l'est aussi (elle n'est plus reposée).
+    final next = order.copy()
+      ..globalDiscount = amount
+      ..globalDiscountSource = amount > 0 || order.globalDiscountSource == 'customer' ? 'manual' : null;
     next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'remise', {'montant': amount}, reason: motive.isEmpty ? null : motive, authorizations: amount > 0 ? authorizations : const []);
   }
@@ -1277,6 +1343,9 @@ class RestoEngine {
       version: target.version,
       prebills: target.prebills,
       globalDiscount: merge ? target.globalDiscount + sourceBefore.globalDiscount : target.globalDiscount,
+      // Lot R-5 (DeplacementsCaisse) : une remise reçue d'une fusion est manuelle.
+      globalDiscountSource: merge && sourceBefore.globalDiscount > 0 ? 'manual' : target.globalDiscountSource,
+      discountFrozen: target.discountFrozen,
       lines: [
         for (final l in target.lines) l.copy(),
         for (final l in sourceBefore.lines)

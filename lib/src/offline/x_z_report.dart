@@ -56,6 +56,10 @@ class ClosureSession {
   final List<Map> sales = [];
   final List<Map> returns = [];
 
+  /// Annulation d'une vente restaurant (`resto_remboursement`, lot R-5) : rendue sur les moyens de la vente, par uuid de
+  /// l'opération puis par moyen. Un retour (de la caisse ou restaurant) est rendu en espèces.
+  final Map<String, Map<String, int>> refundMethods = {};
+
   /// Opération de clôture (`cloture_session`), ou null tant que la session est ouverte.
   Map? closure;
 
@@ -117,8 +121,10 @@ List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSess
     return session;
   }
 
+  final sales = <Object?, Map>{};
   for (final o in operations) {
     final content = (o['contenu'] as Map?) ?? const {};
+    if (o['type'] == 'vente') sales[o['uuid']] = o;
     switch (o['type']) {
       case 'ouverture_session':
         current = start(uuid: '${o['uuid']}', at: _date(o['cree_le']), opener: int.tryParse('${o['operateur_id']}'), float: content['fond'] as int?);
@@ -127,9 +133,16 @@ List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSess
         if (current == null || current.closed || (uuid != null && current.uuid != null && current.uuid != uuid)) current = start(uuid: uuid);
         current.uuid ??= uuid;
         current.sales.add(o);
-      case 'retour':
+      case 'retour' || 'resto_remboursement':
         if (current == null || current.closed) current = start();
         current.returns.add(o);
+        final sale = content['type'] == 'annulation' ? sales[(content['vente_ref'] as Map?)?['operation_uuid']] : null;
+        if (sale != null) {
+          final methods = current.refundMethods['${o['uuid']}'] = <String, int>{};
+          for (final p in ((sale['contenu'] as Map)['paiements'] as List? ?? const []).cast<Map>()) {
+            methods.update('${p['moyen']}', (v) => v + _int(p['montant']), ifAbsent: () => _int(p['montant']));
+          }
+        }
       case 'cloture_session':
         final uuid = content['session_uuid'] as String?;
         if (current == null || current.closed || (uuid != null && current.uuid != null && current.uuid != uuid)) current = start(uuid: uuid);
@@ -212,11 +225,16 @@ Map<String, dynamic> closureDetail(ClosureFacts facts, List<ClosureSession> sess
     }
   }
   final refunds = <String, Map<String, dynamic>>{};
-  for (final r in [for (final s in sessions) ...s.returns]) {
-    final content = r['contenu'] as Map;
-    final code = content['remboursement'] == 'especes' || content['remboursement'] == null ? cashCode : '${content['remboursement']}';
-    final row = refunds.putIfAbsent(code, () => {'code': code, 'label': methodNames[code] ?? code, 'amount': 0});
-    row['amount'] = (row['amount'] as int) + _int(content['montant']);
+  for (final s in sessions) {
+    for (final r in s.returns) {
+      final content = r['contenu'] as Map;
+      final code = content['remboursement'] == 'especes' || content['remboursement'] == null ? cashCode : '${content['remboursement']}';
+      // Annulation restaurant (R-5) : sur les moyens de la vente ; sinon en espèces.
+      for (final e in (s.refundMethods['${r['uuid']}'] ?? {code: _int(content['montant'])}).entries) {
+        final row = refunds.putIfAbsent(e.key, () => {'code': e.key, 'label': methodNames[e.key] ?? e.key, 'amount': 0});
+        row['amount'] = (row['amount'] as int) + e.value;
+      }
+    }
   }
   final vat = <String, Map<String, dynamic>>{};
   for (final sale in sales) {
@@ -315,6 +333,23 @@ List<Map<String, dynamic>> _top(List<Map<String, dynamic>> lines) {
     final content = r['contenu'] as Map;
     final sale = sales['${(content['vente_ref'] as Map?)?['operation_uuid']}'];
     final saleLines = {for (final l in (((sale?['contenu'] as Map?)?['lignes'] as List?) ?? const []).cast<Map>()) '${l['ligne_uuid']}': l};
+    // Annulation d'une vente restaurant (R-5) : toute la vente, ses lignes détaillées (DetailCloture::retours du web).
+    final cancellation = r['type'] == 'resto_remboursement' && content['type'] == 'annulation';
+    if (cancellation) {
+      rows.add({
+        'kind': 'cancellation',
+        'sale': (sale?['contenu'] as Map?)?['numero_local'],
+        'at': r['cree_le'],
+        'amount': _int(content['montant']),
+        'reason': '${content['motif'] ?? ''}',
+        'lines': [
+          for (final l in saleLines.values) {'label': '${l['libelle']}', 'quantity': parseMicros('${l['quantite']}') ?? BigInt.zero, 'amount': _int(l['total'])},
+        ],
+      });
+      totals['cancellations_count'] = totals['cancellations_count']! + 1;
+      totals['cancellations_amount'] = totals['cancellations_amount']! + _int(content['montant']);
+      continue;
+    }
     rows.add({
       'kind': 'return',
       'sale': (sale?['contenu'] as Map?)?['numero_local'],
@@ -430,7 +465,12 @@ class ZContext {
       if (cash.contains(p['moyen'])) salesCash += _int(p['montant']) + _int(p['ecart_arrondi']);
     }
   }
-  final refunds = s.returns.fold<int>(0, (sum, r) => sum + _int((r['contenu'] as Map)['montant']));
+  // Retours en espèces ; annulation restaurant (R-5) : la part espèces des paiements de la vente.
+  final refunds = s.returns.fold<int>(0, (sum, r) {
+    final methods = s.refundMethods['${r['uuid']}'];
+    if (methods == null) return sum + _int((r['contenu'] as Map)['montant']);
+    return sum + methods.entries.where((e) => cash.contains(e.key)).fold<int>(0, (t, e) => t + e.value);
+  });
   final expected = s.float == null ? null : s.float! + salesCash - refunds;
   final counted = (s.closure?['contenu'] as Map?)?['compte'] as int?;
   return (float: s.float, salesCash: salesCash, refunds: refunds, expected: expected, counted: counted, difference: counted == null || expected == null ? null : counted - expected);

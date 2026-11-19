@@ -57,14 +57,15 @@ class _RestaurantBoardState extends State<_RestaurantBoard> {
     final blocker = _engine.restaurantBlocker(operator);
     if (blocker != null) return widget.host._refuse(blocker, title: 'Commande impossible');
     final ctx = _engine.restaurant!;
-    final choice = await showDialog<({RestoChannel channel, String? table, String? reference, String? customer})>(
+    final choice = await showDialog<({RestoChannel channel, String? table, String? reference, String? customer, Customer? client})>(
       context: context,
-      builder: (_) => _NewOrderDialog(context: ctx, busyTables: {for (final o in _orders) ?o.order.tableUuid}),
+      builder: (_) => _NewOrderDialog(context: ctx, busyTables: {for (final o in _orders) ?o.order.tableUuid}, engine: _engine),
     );
     if (choice == null || !mounted) return;
     final RestoOrderView view;
     try {
-      view = await _engine.restoOpenOnChannel(operator, choice.channel.code, tableUuid: choice.table, reference: choice.reference, customerName: choice.customer);
+      view = await _engine.restoOpenOnChannel(operator, choice.channel.code,
+          tableUuid: choice.table, reference: choice.reference, customerName: choice.client?.name ?? choice.customer, customerUuid: choice.client?.uuid);
     } on OfflineRefusal catch (e) {
       return widget.host._refuse(e.message, title: 'Commande impossible');
     }
@@ -77,6 +78,12 @@ class _RestaurantBoardState extends State<_RestaurantBoard> {
       isScrollControlled: true,
       builder: (_) => _TicketsSheet(host: widget.host, title: 'Bons à vérifier'),
     );
+    await _reload();
+  }
+
+  /// Ventes réglées de la caisse : remboursement (retour en espèces ou annulation de la vente), état des remboursements.
+  Future<void> _refunds() async {
+    await showModalBottomSheet<void>(context: context, isScrollControlled: true, builder: (_) => _RefundsSheet(host: widget.host));
     await _reload();
   }
 
@@ -134,6 +141,13 @@ class _RestaurantBoardState extends State<_RestaurantBoard> {
                 onPressed: blocker == null ? _newOrder : null,
                 icon: const Icon(Icons.add),
                 label: const Text('Nouvelle commande'),
+              ),
+              OutlinedButton.icon(
+                key: const ValueKey('resto-remboursements'),
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 44)),
+                onPressed: blocker == null ? _refunds : null,
+                icon: const Icon(Icons.undo),
+                label: const Text('Ventes réglées'),
               ),
             ],
           ),
@@ -197,9 +211,12 @@ class _RestaurantBoardState extends State<_RestaurantBoard> {
 
 /// Nouvelle commande du profil Restaurant : canal actif, puis table (canal qui l'exige) et référence (canal qui l'exige).
 class _NewOrderDialog extends StatefulWidget {
-  const _NewOrderDialog({required this.context, required this.busyTables});
+  const _NewOrderDialog({required this.context, required this.busyTables, this.engine});
 
   final RestoContext context;
+
+  /// Recherche des clients connus (lot R-5 : le client cité à l'ouverture porte la remise client).
+  final CaisseEngine? engine;
 
   /// Tables qui ont déjà une commande ouverte (une seule par table, sauf réglage contraire).
   final Set<String> busyTables;
@@ -214,6 +231,7 @@ class _NewOrderDialogState extends State<_NewOrderDialog> {
   RestoChannel? _channel;
   String? _table;
   String? _error;
+  Customer? _client;
 
   List<RestoChannel> get _channels => [for (final c in widget.context.channels) if (c.active) c];
 
@@ -243,7 +261,13 @@ class _NewOrderDialogState extends State<_NewOrderDialog> {
       table: channel.requiresTable ? _table : null,
       reference: reference.isEmpty ? null : reference,
       customer: customer.isEmpty ? null : customer,
+      client: _client,
     ));
+  }
+
+  Future<void> _pickClient() async {
+    final picked = await _restoPickClient(context, widget.engine!, widget.context.customerDiscounts);
+    if (picked != null && mounted) setState(() => _client = picked.$1);
   }
 
   @override
@@ -303,7 +327,18 @@ class _NewOrderDialogState extends State<_NewOrderDialog> {
                   maxLength: 80,
                   decoration: const InputDecoration(labelText: 'Référence (obligatoire)', hintText: 'N° de la plateforme…'),
                 ),
-              if (channel != null)
+              if (channel != null && (widget.engine?.customersSupported ?? false))
+                ListTile(
+                  key: const ValueKey('resto-client'),
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.person_search_outlined),
+                  title: Text(_client?.name ?? 'Client enregistré (facultatif)'),
+                  subtitle: _client == null
+                      ? null
+                      : Text((widget.context.customerDiscounts[_client!.uuid] ?? 0) > 0 ? 'Remise client ${widget.context.customerDiscounts[_client!.uuid]} %' : 'Sans remise client'),
+                  onTap: _pickClient,
+                ),
+              if (channel != null && _client == null)
                 TextField(controller: _customer, maxLength: 160, decoration: const InputDecoration(labelText: 'Nom du client (facultatif)')),
               if (channel != null && channel.tracksDelivery)
                 const Text('Le suivi de livraison reste sur la caisse web.', style: TextStyle(color: Colors.black54)),
@@ -318,6 +353,56 @@ class _NewOrderDialogState extends State<_NewOrderDialog> {
       ],
     );
   }
+}
+
+/// Client connu de la boutique (recherche par nom ou téléphone), cité à l'ouverture d'une commande seulement (lot R-5 : il
+/// porte la remise client) ; `(null,)` : aucun client, null : abandon.
+Future<(Customer?,)?> _restoPickClient(BuildContext context, CaisseEngine engine, Map<String, int> discounts) async {
+  var results = await engine.searchCustomers('');
+  if (!context.mounted) return null;
+  return showDialog<(Customer?,)>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setLocal) => AlertDialog(
+        title: const Text('Client de la commande'),
+        content: SizedBox(
+          width: 360,
+          height: 300,
+          child: Column(
+            children: [
+              TextField(
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Nom ou téléphone'),
+                onChanged: (text) async {
+                  final found = await engine.searchCustomers(text);
+                  setLocal(() => results = found);
+                },
+              ),
+              Expanded(
+                child: results.isEmpty
+                    ? const Center(child: Text('Aucun client.'))
+                    : ListView(
+                        children: [
+                          for (final c in results)
+                            ListTile(
+                              dense: true,
+                              title: Text(c.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: Text([c.phone ?? 'Sans téléphone', if (discounts[c.uuid] case final p?) 'remise $p %'].join(' · ')),
+                              onTap: () => Navigator.pop(context, (c,)),
+                            ),
+                        ],
+                      ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, (null,)), child: const Text('Aucun client')),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Registre (journée) de la caisse, depuis le menu de session : ouverture avec une note, clôture après la session avec
@@ -511,6 +596,233 @@ class _SettleChoiceDialogState extends State<_SettleChoiceDialog> {
                   _SettleMode.items => _SettlePlan(_SettleMode.items, items: {for (final e in _items.entries) if (e.value > 0) e.key: e.value}),
                   _SettleMode.shares => _SettlePlan(_SettleMode.shares, shares: _shares),
                 }),
+          child: const Text('Continuer'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Ventes réglées de la caisse (profil Restaurant, lot R-5) : remboursement d'une commande soldée — retour d'articles en
+/// espèces ou annulation de toute la vente (moyens d'origine, la commande est rouverte) — et état de la remontée (attente
+/// du règlement, montant à arbitrer).
+class _RefundsSheet extends StatefulWidget {
+  const _RefundsSheet({required this.host});
+
+  final _OfflineRegisterPageState host;
+
+  @override
+  State<_RefundsSheet> createState() => _RefundsSheetState();
+}
+
+class _RefundsSheetState extends State<_RefundsSheet> {
+  List<RestoSettledSale>? _sales;
+
+  CaisseEngine get _engine => widget.host._engine;
+  Operator get _operator => widget.host._operator!;
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  Future<void> _reload() async {
+    final sales = await _engine.restoSettledSales();
+    if (mounted) setState(() => _sales = sales);
+  }
+
+  Future<void> _refund(RestoSettledSale sale) async {
+    final blocker = _engine.restoRefundBlocker(_operator);
+    if (blocker != null) return widget.host._refuse(blocker, title: 'Remboursement impossible');
+    final plan = await showDialog<({String type, Map<String, int> quantities, int amount})>(context: context, builder: (_) => _RefundChoiceDialog(engine: _engine, sale: sale));
+    if (plan == null || !mounted) return;
+    final cancel = plan.type == 'annulation';
+    final result = await showDialog<({bool percent, int value, String reason, RestoApproval? approval})>(
+      context: context,
+      builder: (_) => _GestureDialog(
+        engine: _engine,
+        operator: _operator,
+        gesture: _Gesture.refund,
+        title: cancel ? 'Annuler la vente ${sale.number}' : 'Retour sur la vente ${sale.number}',
+        base: plan.amount,
+        refund: plan.type,
+        description: cancel
+            ? 'Toute la vente (${formatFcfa(plan.amount)}) est rendue sur ses moyens de paiement ; la commande ${sale.orderNumber} est rouverte.'
+            : '${formatFcfa(plan.amount)} à rendre en espèces.',
+      ),
+    );
+    if (result == null || !mounted) return;
+    try {
+      await _engine.restoRefund(_operator, sale.saleUuid, plan.type, plan.quantities, result.reason, approval: result.approval);
+      widget.host._toast(cancel ? 'Vente annulée : la commande ${sale.orderNumber} est rouverte.' : 'Remboursement enregistré : ${formatFcfa(plan.amount)} à rendre en espèces.');
+    } on OfflineRefusal catch (e) {
+      await widget.host._refuse(e.message, title: 'Remboursement refusé');
+    }
+    await _reload();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sales = _sales;
+    String two(int v) => v.toString().padLeft(2, '0');
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxHeight: MediaQuery.sizeOf(context).height * .85),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(padding: EdgeInsets.fromLTRB(16, 16, 16, 4), child: Text('Ventes réglées', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+            if (sales == null)
+              const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+            else if (sales.isEmpty)
+              const Padding(padding: EdgeInsets.all(24), child: Text('Aucune vente réglée sur cette caisse.', textAlign: TextAlign.center))
+            else
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                  children: [
+                    for (final sale in sales)
+                      Card(
+                        child: ListTile(
+                          key: ValueKey('resto-vente-${sale.saleUuid}'),
+                          title: Text('Vente ${sale.number} · ${formatFcfa(sale.total)}', maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: Text([
+                            'Commande ${sale.orderNumber} · ${two(sale.at.day)}/${two(sale.at.month)} ${two(sale.at.hour)}:${two(sale.at.minute)}',
+                            if (sale.cancelled) 'Vente annulée' else if (sale.refunded > 0) 'Remboursé : ${formatFcfa(sale.refunded)}',
+                            for (final r in sale.refunds)
+                              if (r.message != null) '${r.waiting ? 'En attente' : (r.toArbitrate ? 'À arbitrer' : 'Serveur')} : ${r.message}',
+                          ].join('\n')),
+                          trailing: sale.refundable ? TextButton(onPressed: () => _refund(sale), child: const Text('Rembourser')) : null,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Choix du remboursement : retour d'articles (quantités en unité de base, rendues en espèces) ou annulation de la vente.
+class _RefundChoiceDialog extends StatefulWidget {
+  const _RefundChoiceDialog({required this.engine, required this.sale});
+
+  final CaisseEngine engine;
+  final RestoSettledSale sale;
+
+  @override
+  State<_RefundChoiceDialog> createState() => _RefundChoiceDialogState();
+}
+
+class _RefundChoiceDialogState extends State<_RefundChoiceDialog> {
+  String _type = 'retour';
+  final _quantities = <String, int>{};
+  int? _amount;
+  String? _error;
+
+  Future<void> _compute() async {
+    final quantities = {for (final e in _quantities.entries) if (e.value > 0) e.key: e.value};
+    if (_type == 'retour' && quantities.isEmpty) return setState(() => _amount = _error = null);
+    try {
+      final amount = await widget.engine.restoRefundAmount(widget.sale.saleUuid, _type, _type == 'annulation' ? const {} : quantities);
+      if (mounted) {
+        setState(() {
+          _amount = amount;
+          _error = null;
+        });
+      }
+    } on OfflineRefusal catch (e) {
+      if (mounted) {
+        setState(() {
+          _amount = null;
+          _error = e.message;
+        });
+      }
+    }
+  }
+
+  void _step(RestoSaleLine line, int delta) {
+    final next = ((_quantities[line.lineUuid] ?? 0) + delta).clamp(0, line.remaining);
+    setState(() => _quantities[line.lineUuid] = next);
+    _compute();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final amount = _amount;
+    return AlertDialog(
+      title: Text('Rembourser la vente ${widget.sale.number}'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  ChoiceChip(
+                    key: const ValueKey('remboursement-retour'),
+                    label: const Text('Retour d’articles (espèces)'),
+                    selected: _type == 'retour',
+                    onSelected: (_) {
+                      setState(() => _type = 'retour');
+                      _compute();
+                    },
+                  ),
+                  ChoiceChip(
+                    key: const ValueKey('remboursement-annulation'),
+                    label: const Text('Annuler la vente'),
+                    selected: _type == 'annulation',
+                    onSelected: (_) {
+                      setState(() => _type = 'annulation');
+                      _compute();
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_type == 'annulation')
+                const Text('Toute la vente est rendue sur ses moyens de paiement d’origine ; la commande est rouverte.')
+              else
+                for (final line in widget.sale.lines)
+                  if (line.remaining > 0)
+                    Row(
+                      children: [
+                        Expanded(child: Text(line.label, maxLines: 2, overflow: TextOverflow.ellipsis)),
+                        IconButton(
+                          tooltip: 'Moins',
+                          onPressed: (_quantities[line.lineUuid] ?? 0) > 0 ? () => _step(line, -Decimal6.scale) : null,
+                          icon: const Icon(Icons.remove_circle_outline),
+                        ),
+                        Text('${Decimal6.label(_quantities[line.lineUuid] ?? 0)} / ${Decimal6.label(line.remaining)}'),
+                        IconButton(
+                          tooltip: 'Plus',
+                          onPressed: (_quantities[line.lineUuid] ?? 0) < line.remaining ? () => _step(line, Decimal6.scale) : null,
+                          icon: const Icon(Icons.add_circle_outline),
+                        ),
+                      ],
+                    ),
+              if (amount != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text('À rendre : ${formatFcfa(amount)}', style: const TextStyle(fontWeight: FontWeight.bold))),
+              if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+        FilledButton(
+          key: const ValueKey('remboursement-suite'),
+          onPressed: amount == null || amount <= 0
+              ? null
+              : () => Navigator.pop(context, (type: _type, quantities: {for (final e in _quantities.entries) if (e.value > 0) e.key: e.value}, amount: amount)),
           child: const Text('Continuer'),
         ),
       ],
