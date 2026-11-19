@@ -1,3 +1,6 @@
+/// The server resolves the account/device terminal and restaurant profile.
+Uri? caisseStartWebsite(String? origin) => caisseWebsite(origin, '/caisse/demarrer');
+
 /// Use the paired website only, without forwarding API credentials or codes.
 Uri? caisseWebsite(String? origin, String path) {
   final uri = Uri.tryParse(origin ?? '');

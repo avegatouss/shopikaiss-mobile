@@ -10,8 +10,8 @@ void main() {
         'https://demo.khoga.ci/accueil',
       );
       expect(
-        caisseWebsite('https://example.test/shop/', '/caisse').toString(),
-        'https://example.test/shop/caisse',
+        caisseStartWebsite('https://example.test/shop/').toString(),
+        'https://example.test/shop/caisse/demarrer',
       );
       for (final value in [
         null,
@@ -21,7 +21,7 @@ void main() {
         'file:///test',
         'https://example.test/#secret',
       ]) {
-        expect(caisseWebsite(value, '/caisse'), isNull);
+        expect(caisseStartWebsite(value), isNull);
       }
     },
   );
