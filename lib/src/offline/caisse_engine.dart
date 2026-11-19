@@ -12,6 +12,7 @@ import 'money.dart';
 import 'notifier.dart';
 import 'store.dart';
 import 'web_rules.dart';
+import 'x_z_report.dart';
 
 /// Vérifie un PIN contre l'empreinte bcrypt du serveur (Laravel écrit `$2y$`, équivalent de `$2a$`).
 Future<bool> verifyPinHash(String pin, String hash) => Isolate.run(() => _checkPin([pin, hash]));
@@ -387,6 +388,10 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Dernière clôture émise par ce terminal, ou null ; son contenu porte `z` une fois intégrée.
   Future<OfflineOperation?> lastClosure() async => null;
+
+  /// Faits de clôture lus dans la file du terminal (sessions, ventes, retours, clôtures) pour imprimer pré-X, Z et pré-Z
+  /// sans réseau ; null : documents locaux non disponibles sur ce terminal.
+  Future<ClosureFacts?> closureFacts() async => null;
 
   /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
   bool get customersSupported => false;
