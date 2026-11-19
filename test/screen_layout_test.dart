@@ -239,7 +239,7 @@ class _RestaurantEngine extends OfflineEngine {
   ];
 
   @override
-  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid, List<RestoShare>? shares}) async {
+  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid, List<RestoShare>? shares, String? operationUuid}) async {
     settledWith = payments;
     final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid);
     _keep(_resto.close(orders[orderUuid]!), 'cloture');
@@ -323,7 +323,7 @@ class _ProductionEngine extends _RestaurantEngine {
   Future<int> restoRefundAmount(String saleUuid, String type, Map<String, int> quantities) async => type == 'annulation' ? 3000 : (quantities['l1'] ?? 0) * 3000 ~/ 1000000;
 
   @override
-  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) async {
+  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval, String? operationUuid}) async {
     refunds.add('$type:$reason:$quantities');
     return OfflineOperation(uuid: 'r1', sequence: 2, type: 'resto_remboursement', number: null, date: DateTime(2026), operatorId: operator.id, content: const {});
   }
@@ -360,7 +360,7 @@ class _ProductionEngine extends _RestaurantEngine {
   Future<List<CartLine>> restoCartItems(String orderUuid, Map<String, int> quantities) async => _cart(orderUuid, quantities);
 
   @override
-  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid, List<RestoShare>? shares}) async {
+  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid, List<RestoShare>? shares, String? operationUuid}) async {
     settledWith = payments;
     settledShares = shares;
     final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid);

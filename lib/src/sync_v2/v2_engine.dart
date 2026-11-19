@@ -533,8 +533,8 @@ class V2Engine extends CaisseEngine {
   Future<int> restoRefundAmount(String saleUuid, String type, Map<String, int> quantities) => _restoRefundAmount(saleUuid, type, quantities);
 
   @override
-  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval}) =>
-      _restoRefund(operator, saleUuid, type, quantities, reason, approval: approval);
+  Future<OfflineOperation> restoRefund(Operator operator, String saleUuid, String type, Map<String, int> quantities, String reason, {RestoApproval? approval, String? operationUuid}) =>
+      _restoRefund(operator, saleUuid, type, quantities, reason, approval: approval, operationUuid: operationUuid);
 
   @override
   bool restoNeedsApproval(Operator operator, String type) => _restoNeedsApproval(operator, type);
@@ -577,7 +577,11 @@ class V2Engine extends CaisseEngine {
   Future<void> restoVerifyTicket(Operator operator, String ticketUuid, {required bool printed}) => _restoVerify(operator, ticketUuid, printed: printed);
 
   @override
-  Future<RestoOutcome> restoDuplicateTicket(Operator operator, String ticketUuid, String reason) => _restoDuplicate(operator, ticketUuid, reason);
+  Future<RestoOutcome?> restoDuplicateTicket(Operator operator, String ticketUuid, String reason) => _restoDuplicate(operator, ticketUuid, reason);
+
+  @override
+  Future<void> restoDeferredOutcome(Operator operator, RestoDeferredPrint job, RestoOutcome outcome, {Set<RestoTarget> inFlight = const {}}) =>
+      _restoDeferredOutcome(operator, job, outcome, inFlight: inFlight);
 
   @override
   Map<String, String> get restoPrinterAddresses => Map.unmodifiable(_restoPrinters);
@@ -596,7 +600,8 @@ class V2Engine extends CaisseEngine {
     List<CartPayment> payments, {
     String? draftUuid,
     List<RestoShare>? shares,
-  }) => _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid, shares: shares);
+    String? operationUuid,
+  }) => _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid, shares: shares, operationUuid: operationUuid);
 
   @override
   Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers, String? customerUuid}) =>
