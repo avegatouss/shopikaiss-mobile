@@ -8,10 +8,25 @@ import 'package:printing/printing.dart';
 
 import 'receipt_pdf.dart';
 import 'raw_receipt_printer.dart';
+import 'production_printing.dart';
+import '../../restaurant/resto_engine.dart';
 import '../../offline/ticket.dart';
 
 /// App-specific printer; never changes the Windows system default.
 class ReceiptPrinting {
+  static Future<String> printProduction(List<String> lines) async {
+    // Production never falls back to PDF after an uncertain spool result.
+    if (!await _file.exists()) return 'non_envoye';
+    final saved = jsonDecode(await _file.readAsString()) as Map;
+    final printers = await Printing.listPrinters();
+    final selected = printers.where((p) => p.url == saved['url'] && p.isAvailable).firstOrNull;
+    if (selected == null) return 'non_envoye';
+    return switch (await const ProductionPrinting().send(selected.name, lines)) {
+      RestoOutcome.transmis => 'transmis',
+      RestoOutcome.nonEnvoye => 'non_envoye',
+      _ => 'a_verifier',
+    };
+  }
   static File get _file =>
       File('${Platform.environment['LOCALAPPDATA']}/ShopiKaiss/printer.json');
   static Future<void> choose(BuildContext context) async {

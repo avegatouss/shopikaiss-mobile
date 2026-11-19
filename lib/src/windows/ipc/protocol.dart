@@ -51,6 +51,7 @@ enum HostCommand {
   cashDocuments,
   cashDocument,
   cashClosureDocument,
+  cashClosureEdition,
   restaurantView,
   restoOrder,
   restoTickets,

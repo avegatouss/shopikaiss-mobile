@@ -41,6 +41,8 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
           (result['lines'] as List).cast<String>(),
           escposBytes: base64Decode(result['escpos_base64'] as String),
         );
+        await widget.host.call(HostCommand.cashClosureEdition,
+            arguments: {'edition_id': result['edition_id']});
       }
     } catch (e) {
       message = e is HostFailure
@@ -120,7 +122,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
                     ),
                     DropdownMenuItem(
                       value: 'pre-z',
-                      child: Text('Pré-Z du terminal'),
+                      child: Text('Pré-Z de la journée'),
                     ),
                     DropdownMenuItem(
                       value: 'z-session',
@@ -159,7 +161,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              'Pré-X / pré-Z : documents provisoires, données connues de ce terminal uniquement. Imprimer ne clôture pas la caisse.',
+              'Pré-X / pré-Z : documents provisoires. La journée regroupe les sessions reçues et les données locales ; les sessions non synchronisées peuvent manquer. Imprimer ne clôture pas la caisse.',
               style: TextStyle(fontSize: 12),
             ),
           ),

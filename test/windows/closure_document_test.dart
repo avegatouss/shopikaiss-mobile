@@ -19,6 +19,9 @@ class _FactsEngine implements CaisseEngine {
   @override
   Future<ClosureFacts?> closureFacts() async => facts;
   @override
+  Future<ClosureDocument?> closureDocument(String kind, String version, {bool duplicate = false}) async =>
+      buildClosureDocument(facts, ZContext.of(snapshot!), kind: kind, version: version, now: now, duplicate: duplicate);
+  @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw StateError('Unexpected engine action: ${invocation.memberName}');
 }
