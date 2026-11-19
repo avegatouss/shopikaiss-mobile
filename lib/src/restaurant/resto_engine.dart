@@ -572,6 +572,10 @@ class RestoEngine {
     List<RestoTicket> tickets = const [],
     List<Map<String, dynamic>> authorizations = const [],
   }) {
+    // R-4 : une remise de commande ne dépasse jamais le montant après remises de ligne (offert, déplacement, annulation).
+    if (order.isOpen && order.activeLines.isNotEmpty && order.globalDiscount > orderDiscountBase(order)) {
+      throw RestoRefusal('La remise de la commande (${order.globalDiscount} F) dépasserait son montant (${orderDiscountBase(order)} F) : réduisez-la d’abord.');
+    }
     order.version++;
     return RestoResult(
       order,
@@ -810,9 +814,18 @@ class RestoEngine {
         RestoTicketLine(lineUuid: line.uuid, label: line.label, quantity: announced, comment: _cancelComment(motive), action: 'cancel'),
       ], reason: motive));
     }
-    line
-      ..quantity = remaining
-      ..sent -= announced;
+    // Lot R-4 (RemisesCaisse::remiseApresReduction) : une réduction garde la remise proportionnelle (arrondie vers le bas,
+    // au plus le brut) ; un offert reste offert en entier. Une ligne annulée en entier garde sa quantité et sa remise
+    // (le serveur ne passe que son statut à `cancelled`).
+    if (remaining > 0) {
+      if (!line.free && line.discount > 0) {
+        final part = (BigInt.from(line.discount) * BigInt.from(remaining) ~/ BigInt.from(line.quantity)).toInt();
+        final gross = Decimal6.amount(line.unitPrice, remaining);
+        line.discount = part > gross ? gross : part;
+      }
+      line.quantity = remaining;
+    }
+    line.sent -= announced;
     if (remaining == 0) line.status = RestoLineStatus.cancelled;
     next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'annulation_ligne', {'ligne_uuid': lineUuid, 'quantite': Decimal6.format(quantity), 'bons': [for (final t in tickets) t.toJson()]},
@@ -890,6 +903,195 @@ class RestoEngine {
       ..covers = covers
       ..serverId = serverId;
     return _record(next, 'couverts_serveur', {'couverts': covers, 'serveur_id': serverId});
+  }
+
+  // ---------------------------------------------------------------- gestes sur une commande (lot R-4)
+
+  static String _motive(String? reason, String gesture) {
+    final motive = reason?.trim() ?? '';
+    if (motive.length < 3) throw RestoRefusal('Indiquez le motif $gesture (3 caractères au moins).');
+    if (motive.length > 500) throw const RestoRefusal('Motif trop long (500 caractères au plus).');
+    return motive;
+  }
+
+  /// Ligne dont le prix peut encore changer : active, rien de réglé (RemisesCaisse::ligne).
+  static RestoLine _priceable(RestoOrder order, String lineUuid) {
+    final line = order.line(lineUuid);
+    if (!line.active) throw const RestoRefusal('Cet article est annulé.');
+    if (line.settled > 0) throw RestoRefusal('« ${line.label} » est déjà en partie réglé : son prix ne change plus.');
+    return line;
+  }
+
+  /// Montant d'une remise de ligne saisie : francs, ou pourcentage du brut arrondi vers le bas (RemisesCaisse::remiserLigne).
+  static int lineDiscountOf(RestoLine line, {required bool percent, required int value}) =>
+      percent ? (BigInt.from(line.gross) * BigInt.from(value) ~/ BigInt.from(100)).toInt() : value;
+
+  /// Pourcentage d'une remise sur sa base, arrondi au supérieur (plafond de l'assistant, jamais contourné par l'arrondi).
+  static int percentOf(int discount, int base) => base <= 0 ? 100 : (discount * 100 + base - 1) ~/ base;
+
+  /// Base de la remise de commande : Σ (brut − remise de ligne) des lignes actives.
+  static int orderDiscountBase(RestoOrder order) => order.activeLines.fold<int>(0, (sum, l) => sum + l.total);
+
+  /// Plafond de la remise de commande : [maxPercent] % de [orderDiscountBase], arrondi vers le bas.
+  static int orderDiscountCeiling(RestoOrder order, int maxPercent) => orderDiscountBase(order) * maxPercent ~/ 100;
+
+  /// Offert (R-4) : remise = brut de la ligne, quantité inchangée ; droit `resto_offrir` ou autorisation vérifiés par
+  /// l'appelant et joints en [authorizations] ; motif de 3 caractères au moins dans les deux cas.
+  RestoResult offer(RestoOrder order, String lineUuid, String reason, {List<Map<String, dynamic>> authorizations = const []}) {
+    _requireOpen(order);
+    final motive = _motive(reason, 'de l’offert');
+    final next = order.copy();
+    final line = _priceable(next, lineUuid);
+    if (line.free) throw RestoRefusal('« ${line.label} » est déjà offert.');
+    line
+      ..free = true
+      ..discount = 0;
+    next.stage = RestoStage.afterChange(next.stage);
+    return _record(next, 'offert', {'ligne_uuid': lineUuid}, reason: motive, authorizations: authorizations);
+  }
+
+  /// Remise de ligne (R-4) : en francs ou en pourcentage (1 à 100, arrondi vers le bas) du brut, de 1 F au brut, jamais
+  /// sur un article offert ; quantité inchangée. Droit `remise` ou autorisation, motif dans les deux cas.
+  RestoResult discountLine(RestoOrder order, String lineUuid, {required bool percent, required int value, required String reason, List<Map<String, dynamic>> authorizations = const []}) {
+    _requireOpen(order);
+    final motive = _motive(reason, 'de la remise');
+    final next = order.copy();
+    final line = _priceable(next, lineUuid);
+    if (line.free) throw RestoRefusal('« ${line.label} » est offert : il ne reçoit pas de remise.');
+    if (value < 1 || (percent && value > 100)) throw const RestoRefusal('Remise invalide.');
+    final amount = lineDiscountOf(line, percent: percent, value: value);
+    if (amount < 1 || amount > line.gross) throw RestoRefusal('La remise doit être comprise entre 1 F et le montant de la ligne (${line.gross} F).');
+    line.discount = amount;
+    next.stage = RestoStage.afterChange(next.stage);
+    return _record(next, 'remise_ligne', {'ligne_uuid': lineUuid, 'saisie': {'type': percent ? 'pourcentage' : 'montant', 'valeur': value}},
+        reason: motive, authorizations: authorizations);
+  }
+
+  /// Remise de commande (R-4, action `remise`) : en francs, plafonnée à [maxPercent] % du montant après remises de ligne,
+  /// impossible une fois un article réglé ; 0 la retire (droit REMISE, sans motif). Motif exigé pour une remise > 0.
+  RestoResult discountOrder(RestoOrder order, int amount, {String? reason, int maxPercent = 100, List<Map<String, dynamic>> authorizations = const []}) {
+    _requireOpen(order);
+    if (amount < 0) throw const RestoRefusal('Remise invalide.');
+    if (order.activeLines.any((l) => l.settled > 0)) throw const RestoRefusal('Cette commande a déjà un règlement : la remise de commande n’est plus possible.');
+    if (amount == order.globalDiscount) {
+      throw RestoRefusal(amount == 0 ? 'Cette commande n’a pas de remise à retirer.' : 'La remise de la commande est déjà de $amount F.');
+    }
+    final ceiling = orderDiscountCeiling(order, maxPercent);
+    if (amount > ceiling) throw RestoRefusal('La remise de commande est plafonnée à $ceiling F.');
+    final motive = amount > 0 ? _motive(reason, 'de la remise') : (reason?.trim() ?? '');
+    if (motive.length > 500) throw const RestoRefusal('Motif trop long (500 caractères au plus).');
+    final next = order.copy()..globalDiscount = amount;
+    next.stage = RestoStage.afterChange(next.stage);
+    return _record(next, 'remise', {'montant': amount}, reason: motive.isEmpty ? null : motive, authorizations: amount > 0 ? authorizations : const []);
+  }
+
+  /// Validation de la préfacture par le client (Service de table seulement) : étape `customer_validated`.
+  RestoResult validateCustomer(RestoOrder order) {
+    _requireOpen(order);
+    if (order.profile != 'TABLE_SERVICE') throw const RestoRefusal('La validation client est propre au Service de table.');
+    if (order.prebills == 0) throw const RestoRefusal('Imprimez d’abord la préfacture : le client la valide.');
+    if (order.stage == RestoStage.customerValidated) throw const RestoRefusal('Le client a déjà validé cette commande.');
+    final next = order.copy()..stage = RestoStage.customerValidated;
+    return _record(next, 'validation_client', const {});
+  }
+
+  /// Contrôles communs du déplacement et de la fusion (DeplacementsCaisse) : deux commandes ouvertes distinctes, même
+  /// profil, même canal au Restaurant.
+  static void _checkPair(RestoOrder source, RestoOrder target) {
+    if (source.uuid == target.uuid) throw const RestoRefusal('Choisissez une autre commande de destination.');
+    if (!target.isOpen) throw const RestoRefusal('La commande de destination est fermée.');
+    if (source.profile != target.profile) throw const RestoRefusal('Les deux commandes ne sont pas du même profil.');
+    if (source.profile == 'PRODUCTION' && source.channel != target.channel) throw const RestoRefusal('Les articles ne passent qu’entre commandes du même canal de vente.');
+  }
+
+  /// Lignes déplaçables : ni annulées, ni réglées ; un offert lié suit son article acheté, dans les deux sens.
+  static void _checkMovable(RestoOrder source, Set<String> moved) {
+    for (final uuid in moved) {
+      final line = source.line(uuid);
+      if (!line.active) throw RestoRefusal('« ${line.label} » est annulé : il ne se déplace pas.');
+      if (line.settled > 0) throw RestoRefusal('« ${line.label} » est déjà en partie réglé : il ne change plus de commande.');
+      if (line.parentLineUuid != null && !moved.contains(line.parentLineUuid)) {
+        throw RestoRefusal('L’article offert « ${line.label} » suit l’article acheté : déplacez l’article acheté.');
+      }
+    }
+    for (final line in source.activeLines) {
+      if (line.parentLineUuid != null && moved.contains(line.parentLineUuid) && !moved.contains(line.uuid)) {
+        throw RestoRefusal('L’article offert « ${line.label} » suit l’article acheté : déplacez-le avec lui.');
+      }
+    }
+  }
+
+  /// Déplacement de lignes (R-4, Q9) : une seule opération, sur la SOURCE, qui cite la cible et sa version courante
+  /// (`version_cible`). La cible ne consomme pas de version : sa version suivante porte les lignes reçues ([receive]).
+  RestoResult moveLines(RestoOrder source, RestoOrder target, Set<String> lineUuids) {
+    _requireOpen(source);
+    _checkPair(source, target);
+    if (lineUuids.isEmpty) throw const RestoRefusal('Choisissez au moins un article à déplacer.');
+    if (lineUuids.length > 100) throw const RestoRefusal('Déplacez 100 articles au plus à la fois.');
+    _checkMovable(source, lineUuids);
+    if (target.lines.length + lineUuids.length > 200) throw const RestoRefusal('La commande de destination compterait plus de 200 lignes.');
+    final next = source.copy()..lines.removeWhere((l) => lineUuids.contains(l.uuid));
+    next.stage = RestoStage.afterChange(next.stage);
+    final cited = [for (final l in source.lines) if (lineUuids.contains(l.uuid)) l.uuid];
+    return _record(next, 'deplacement_lignes', {'vers_commande_uuid': target.uuid, 'version_cible': target.version, 'lignes': cited});
+  }
+
+  /// Fusion (R-4, Q9) : toutes les lignes actives passent à la cible, la source est annulée (son état ne porte plus que
+  /// ses lignes annulées ; sa remise de commande s'ajoute à la cible). Refusée si la source a un règlement, ou si sa
+  /// remise irait sur une cible déjà en partie réglée.
+  RestoResult merge(RestoOrder source, RestoOrder target, {String? reason}) {
+    _requireOpen(source);
+    _checkPair(source, target);
+    if (source.activeLines.any((l) => l.settled > 0)) throw RestoRefusal('La commande ${source.localNumber} a déjà un règlement : encaissez-la séparément.');
+    if (source.globalDiscount > 0 && target.activeLines.any((l) => l.settled > 0)) {
+      throw const RestoRefusal('La commande de destination a déjà un règlement : la remise de cette commande ne peut plus s’y ajouter.');
+    }
+    final moved = {for (final l in source.activeLines) l.uuid};
+    _checkMovable(source, moved);
+    if (target.lines.length + moved.length > 200) throw const RestoRefusal('La commande de destination compterait plus de 200 lignes.');
+    final motive = reason?.trim() ?? '';
+    if (motive.length > 500) throw const RestoRefusal('Motif trop long (500 caractères au plus).');
+    final next = source.copy()
+      ..lines.removeWhere((l) => moved.contains(l.uuid))
+      ..status = 'cancelled';
+    // `merged_into` ne change pas l'étape (ServiceStage::next).
+    return _record(next, 'fusion', {'vers_commande_uuid': target.uuid, 'version_cible': target.version}, reason: motive.isEmpty ? null : motive);
+  }
+
+  /// Cible après réception d'un déplacement ou d'une fusion (DeplacementsCaisse::deplacer), SANS nouvelle version : lignes
+  /// reçues telles qu'elles étaient dans [sourceBefore] (état de la source juste avant le geste), étape « modifiée »
+  /// après une préfacture ; fusion : couverts additionnés (500 au plus, null si aucun), remises de commande additionnées,
+  /// client, nom et commentaire de la source repris quand la cible n'en a pas.
+  static RestoOrder receive(RestoOrder target, RestoOrder sourceBefore, String action, Map fact) {
+    final merge = action == 'fusion';
+    final moved = merge ? {for (final l in sourceBefore.activeLines) l.uuid} : {...(fact['lignes'] as List).cast<String>()};
+    bool empty(String? v) => v == null || v.isEmpty;
+    final covers = (target.covers ?? 0) + (sourceBefore.covers ?? 0);
+    return RestoOrder(
+      uuid: target.uuid,
+      localNumber: target.localNumber,
+      businessDay: target.businessDay,
+      profile: target.profile,
+      channel: target.channel,
+      tableUuid: target.tableUuid,
+      menuUuid: target.menuUuid,
+      covers: merge ? (covers > 0 ? (covers > 500 ? 500 : covers) : null) : target.covers,
+      serverId: target.serverId,
+      customerUuid: merge && empty(target.customerUuid) && !empty(sourceBefore.customerUuid) ? sourceBefore.customerUuid : target.customerUuid,
+      customerName: merge && empty(target.customerName) && !empty(sourceBefore.customerName) ? sourceBefore.customerName : target.customerName,
+      externalReference: target.externalReference,
+      comment: merge && empty(target.comment) && !empty(sourceBefore.comment) ? sourceBefore.comment : target.comment,
+      status: target.status,
+      stage: RestoStage.afterChange(target.stage),
+      version: target.version,
+      prebills: target.prebills,
+      globalDiscount: merge ? target.globalDiscount + sourceBefore.globalDiscount : target.globalDiscount,
+      lines: [
+        for (final l in target.lines) l.copy(),
+        for (final l in sourceBefore.lines)
+          if (moved.contains(l.uuid)) l.copy(),
+      ],
+    );
   }
 
   /// Clôture après le règlement complet (`full`) par la vente v2 qui le précède dans la file : toutes les lignes actives

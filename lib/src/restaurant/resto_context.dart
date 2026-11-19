@@ -48,17 +48,22 @@ class RestoSettings {
 
 /// Plafonds d'une autorisation donnée par un assistant manager (`restaurant.reglages.assistant`) ; 0 = illimité.
 class RestoAssistantCaps {
-  const RestoAssistantCaps({this.operationsPerDay = 0, this.amountPerOperation = 0, this.amountPerDay = 0});
+  const RestoAssistantCaps({this.operationsPerDay = 0, this.amountPerOperation = 0, this.amountPerDay = 0, this.maxDiscountPercent = 0});
 
   factory RestoAssistantCaps.fromJson(Map m) => RestoAssistantCaps(
     operationsPerDay: m['max_operations_par_jour'] as int? ?? 0,
     amountPerOperation: m['max_montant_par_operation'] as int? ?? 0,
     amountPerDay: m['max_montant_par_jour'] as int? ?? 0,
+    maxDiscountPercent: m['max_remise_pourcent'] as int? ?? 0,
   );
 
   final int operationsPerDay;
   final int amountPerOperation;
   final int amountPerDay;
+
+  /// Remise (ligne ou commande) qu'un assistant peut autoriser, en % arrondi au supérieur (R-4,
+  /// `approval.assistant.max_discount_percent`) ; contrairement aux autres plafonds, 0 = aucune remise.
+  final int maxDiscountPercent;
 }
 
 /// Autorisation d'un approbateur restaurant (`autorisation_restaurant`, §4.3 bis) : code de 8 chiffres vérifié sur la
@@ -68,7 +73,7 @@ class RestoApproval {
 
   final int approverId;
 
-  /// `resto_modifier_envoye` ou `resto_annuler_commande`.
+  /// `resto_modifier_envoye`, `resto_annuler_commande`, `resto_offrir` ou `remise` (R-4).
   final String type;
   final String reason;
   final String verifiedAt;
