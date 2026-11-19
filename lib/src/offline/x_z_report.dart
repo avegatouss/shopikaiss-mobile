@@ -4,9 +4,11 @@
 /// une structure « ticket » (`kind`, `titre`, `version`, `provisoire`, `duplicata`, `rubriques`, `mentions`) rendue en
 /// texte à 32 ou 48 colonnes.
 ///
-/// Rien n'est envoyé au serveur : l'audit des éditions et la remontée du détail figé ne sont pas encore au contrat.
-/// Le Z journalier (`z-jour`) n'est pas produit ici : la journée de caisse est un objet de la boutique (sessions de tous
-/// les postes, numéro, clôture par le responsable) qu'aucune donnée du terminal ne décrit.
+/// Lot « Z local » (contrat z-local-c3610bbb, README §12, capacité `z.local`) : le fond initial et les retours saisis en
+/// ligne viennent de `z.session`, le pré-Z de la journée compose les sessions closes publiées par `z.journee` avec les
+/// sessions locales ([journeyPreZModel]), le bloc de détail du Z de session est figé dans `cloture_session.contenu.detail`
+/// ([detailToContract]) et chaque édition provisoire est auditée (`edition_pre_x`, `edition_pre_z`, [ClosureDocument]).
+/// Le Z journalier (`z-jour`) n'est jamais produit ici : sa clôture et son numéro restent au serveur.
 library;
 
 import 'dart:convert';
@@ -60,13 +62,26 @@ class ClosureSession {
   /// l'opération puis par moyen. Un retour (de la caisse ou restaurant) est rendu en espèces.
   final Map<String, Map<String, int>> refundMethods = {};
 
+  /// Retours et annulations saisis en ligne dans la session (`z.session.retours`, lot Z local), au format du contrat :
+  /// ajoutés à ceux du terminal, jamais en double ([applyZSession]).
+  final List<Map> onlineReturns = [];
+
+  /// Retours en ligne de la session non publiés (`retours_omis`, au-delà de 100) : documents alors partiels.
+  int onlineReturnsOmitted = 0;
+
   /// Opération de clôture (`cloture_session`), ou null tant que la session est ouverte.
   Map? closure;
+
+  /// État local de l'opération de clôture (`a_envoyer`, `integree`…), posé par le moteur ; null : inconnu.
+  String? closureState;
+
+  /// Bloc de détail figé avec le Z de session (`cloture_session.contenu.detail`, format du contrat), ou null.
+  Map? get frozenDetail => (closure?['contenu'] as Map?)?['detail'] as Map?;
 
   bool get closed => closure != null;
   DateTime? get closedAt => closure == null ? null : _date(closure!['cree_le']);
   int? get closerId => closure == null ? null : int.tryParse('${closure!['operateur_id']}');
-  bool get isEmpty => sales.isEmpty && returns.isEmpty && closure == null && float == null;
+  bool get isEmpty => sales.isEmpty && returns.isEmpty && onlineReturns.isEmpty && closure == null && float == null;
 
   /// Dates des opérations de la session (ouverture comprise).
   Iterable<DateTime> get dates sync* {
@@ -80,7 +95,15 @@ class ClosureSession {
 /// Faits de clôture lus par le moteur : sessions du terminal dans l'ordre chronologique, session ouverte, et ce qu'il
 /// faut du catalogue pour classer les articles.
 class ClosureFacts {
-  ClosureFacts({required this.sessions, this.openSessionUuid, this.categories = const {}, this.productNames = const {}});
+  ClosureFacts({
+    required this.sessions,
+    this.openSessionUuid,
+    this.categories = const {},
+    this.productNames = const {},
+    this.zDay,
+    this.terminalUuid,
+    this.journalStale = false,
+  });
 
   final List<ClosureSession> sessions;
 
@@ -92,6 +115,15 @@ class ClosureFacts {
 
   /// Nom du produit (UUID), pour les lignes de retour (quantités en unité de base, sans conditionnement).
   final Map<String, String> productNames;
+
+  /// Journée de caisse publiée (`z.journee` qui contient ce terminal, lot Z local) ; null : pré-Z de ce terminal seul.
+  final Map? zDay;
+
+  /// UUID du terminal (sessions ouvertes des autres terminaux au pré-Z).
+  final String? terminalUuid;
+
+  /// Dernière lecture du journal échouée ou plus vieille que trois fois `delais.changements_secondes` (§12.4.3).
+  final bool journalStale;
 
   ClosureSession? get openSession => openSessionUuid == null ? null : sessions.where((s) => !s.closed && s.uuid == openSessionUuid).lastOrNull;
 
@@ -160,6 +192,27 @@ List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSess
   return sessions;
 }
 
+/// Lot Z local : complète la session de même `session_uuid` avec `z.session` — fond initial, caissier et heure
+/// d'ouverture quand le terminal ne les connaît pas (session ouverte en ligne), retours et annulations saisis en ligne.
+/// Un retour déjà dans la file du terminal (même UUID) n'est jamais ajouté une seconde fois.
+void applyZSession(List<ClosureSession> sessions, Map? zSession) {
+  final uuid = zSession?['session_uuid'];
+  if (zSession == null || uuid == null) return;
+  final session = sessions.where((s) => s.uuid == uuid).lastOrNull;
+  if (session == null) return;
+  session.float ??= zSession['fond_initial'] as int?;
+  session.openerId ??= int.tryParse('${zSession['operateur_id'] ?? ''}');
+  session.openedAt ??= _date(zSession['ouverte_le']);
+  session.onlineReturnsOmitted = (zSession['retours_omis'] as int?) ?? 0;
+  final own = {for (final s in sessions) for (final r in s.returns) '${r['uuid']}'};
+  final seen = {for (final r in session.onlineReturns) '${r['retour_uuid']}'};
+  for (final r in ((zSession['retours'] as List?) ?? const []).cast<Map>()) {
+    final id = '${r['retour_uuid']}';
+    if (own.contains(id) || !seen.add(id)) continue;
+    session.onlineReturns.add(r);
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Bloc de détail (DetailCloture, version 1)
 // ---------------------------------------------------------------------------------------------------------------------
@@ -189,9 +242,17 @@ int _int(Object? v) => (v as num?)?.toInt() ?? 0;
 bool _counted(Map sale) => ((sale['contenu'] as Map)['passages'] as List? ?? const []).isEmpty;
 
 /// Bloc de détail des ventes et retours de [sessions] : synthèse, encaissements par moyen, articles par catégorie,
-/// top 5, retours détaillés, remboursements par moyen, TVA par taux. [methodNames] : nom des moyens par code ;
-/// [cashCode] : code du moyen espèces (remboursement des retours hors ligne).
-Map<String, dynamic> closureDetail(ClosureFacts facts, List<ClosureSession> sessions, {required Map<String, String> methodNames, String cashCode = 'especes'}) {
+/// top 5, retours détaillés (ceux du terminal et ceux saisis en ligne), remboursements par moyen, TVA par taux, et les
+/// rubriques facultatives du 19/11 : `payments_count` et, avec [operatorName], `cashiers` (paiements par auteur de la
+/// vente). `families` n'est pas produite : le terminal ne reçoit pas les familles de rapport. [methodNames] : nom des
+/// moyens par code ; [cashCode] : code du moyen espèces (remboursement des retours hors ligne).
+Map<String, dynamic> closureDetail(
+  ClosureFacts facts,
+  List<ClosureSession> sessions, {
+  required Map<String, String> methodNames,
+  String cashCode = 'especes',
+  String Function(int? id)? operatorName,
+}) {
   final sales = [for (final s in sessions) for (final sale in s.sales) if (_counted(sale)) sale];
   final lines = <Map<String, dynamic>>[];
   for (final sale in sales) {
@@ -235,6 +296,30 @@ Map<String, dynamic> closureDetail(ClosureFacts facts, List<ClosureSession> sess
         row['amount'] = (row['amount'] as int) + e.value;
       }
     }
+    // Retours saisis en ligne : leurs remboursements par moyen (README §12.3).
+    for (final r in s.onlineReturns) {
+      for (final p in ((r['remboursements'] as List?) ?? const []).cast<Map>()) {
+        final code = '${p['moyen']}';
+        final row = refunds.putIfAbsent(code, () => {'code': code, 'label': methodNames[code] ?? code, 'amount': 0});
+        row['amount'] = (row['amount'] as int) + _int(p['montant']);
+      }
+    }
+  }
+  final cashiers = <String, Map<String, dynamic>>{};
+  var paymentsCount = 0;
+  for (final sale in sales) {
+    final id = int.tryParse('${sale['operateur_id']}');
+    final name = operatorName?.call(id);
+    for (final p in ((sale['contenu'] as Map)['paiements'] as List? ?? const []).cast<Map>()) {
+      paymentsCount++;
+      if (operatorName == null) continue;
+      final label = name == null || name.isEmpty ? 'Caissier ${id ?? '?'}' : name;
+      final code = '${p['moyen']}';
+      final cashier = cashiers.putIfAbsent(label, () => {'label': label, 'methods': <String, Map<String, dynamic>>{}, 'total': 0});
+      final method = (cashier['methods'] as Map<String, Map<String, dynamic>>).putIfAbsent(code, () => {'code': code, 'label': methodNames[code] ?? code, 'amount': 0});
+      method['amount'] = (method['amount'] as int) + _int(p['montant']);
+      cashier['total'] = (cashier['total'] as int) + _int(p['montant']);
+    }
   }
   final vat = <String, Map<String, dynamic>>{};
   for (final sale in sales) {
@@ -257,6 +342,11 @@ Map<String, dynamic> closureDetail(ClosureFacts facts, List<ClosureSession> sess
     'returns': returns.rows,
     'refunds': refunds.values.toList(),
     'vat': vatRows,
+    'payments_count': paymentsCount,
+    if (operatorName != null)
+      'cashiers': [
+        for (final c in cashiers.values) {'label': c['label'], 'methods': (c['methods'] as Map<String, Map<String, dynamic>>).values.toList(), 'total': c['total']},
+      ],
   };
 }
 
@@ -329,6 +419,25 @@ List<Map<String, dynamic>> _top(List<Map<String, dynamic>> lines) {
   final sales = facts._salesByUuid;
   final rows = <Map<String, dynamic>>[];
   final totals = {'returns_count': 0, 'returns_amount': 0, 'cancellations_count': 0, 'cancellations_amount': 0};
+  // Retours et annulations saisis en ligne (z.session, README §12.3) : kind, sale, at, amount, reason, destination, lines.
+  for (final r in [for (final s in sessions) ...s.onlineReturns]) {
+    final cancellation = r['type'] == 'annulation';
+    rows.add({
+      'kind': cancellation ? 'cancellation' : 'return',
+      'sale': r['vente_numero'],
+      'at': zWebTime(r['le']),
+      'amount': _int(r['montant']),
+      'reason': '${r['motif'] ?? ''}',
+      'destination': '${r['destination'] ?? ''}',
+      'lines': [
+        for (final l in ((r['lignes'] as List?) ?? const []).cast<Map>())
+          {'label': '${l['libelle']}', 'quantity': parseQuantity6('${l['quantite']}'), 'amount': _int(l['montant'])},
+      ],
+    });
+    final kind = cancellation ? 'cancellations' : 'returns';
+    totals['${kind}_count'] = totals['${kind}_count']! + 1;
+    totals['${kind}_amount'] = totals['${kind}_amount']! + _int(r['montant']);
+  }
   for (final r in [for (final s in sessions) ...s.returns]) {
     final content = r['contenu'] as Map;
     final sale = sales['${(content['vente_ref'] as Map?)?['operation_uuid']}'];
@@ -339,9 +448,10 @@ List<Map<String, dynamic>> _top(List<Map<String, dynamic>> lines) {
       rows.add({
         'kind': 'cancellation',
         'sale': (sale?['contenu'] as Map?)?['numero_local'],
-        'at': r['cree_le'],
+        'at': zWebTime(r['cree_le']),
         'amount': _int(content['montant']),
         'reason': '${content['motif'] ?? ''}',
+        'destination': 'original',
         'lines': [
           for (final l in saleLines.values) {'label': '${l['libelle']}', 'quantity': parseMicros('${l['quantite']}') ?? BigInt.zero, 'amount': _int(l['total'])},
         ],
@@ -350,26 +460,79 @@ List<Map<String, dynamic>> _top(List<Map<String, dynamic>> lines) {
       totals['cancellations_amount'] = totals['cancellations_amount']! + _int(content['montant']);
       continue;
     }
+    final returned = ((content['lignes'] as List?) ?? const []).cast<Map>().toList();
+    // Montant par ligne non archivé par le retour hors ligne (seul le total l'est) : part de la ligne de vente au prorata
+    // de la quantité rendue, la dernière ligne portant le reste pour que la somme égale le montant du retour.
+    var rest = _int(content['montant']);
+    final amounts = <int>[];
+    for (var i = 0; i < returned.length; i++) {
+      if (i == returned.length - 1) {
+        amounts.add(rest);
+        break;
+      }
+      final saleLine = saleLines['${returned[i]['ligne_uuid']}'];
+      final quantity = parseMicros('${returned[i]['quantite']}') ?? BigInt.zero;
+      final sold = parseMicros('${saleLine?['quantite_base'] ?? saleLine?['quantite'] ?? ''}');
+      final share = sold == null || sold == BigInt.zero ? 0 : divideHalfUp(BigInt.from(_int(saleLine!['total'])) * quantity, sold).toInt();
+      amounts.add(share);
+      rest -= share;
+    }
     rows.add({
       'kind': 'return',
       'sale': (sale?['contenu'] as Map?)?['numero_local'],
-      'at': r['cree_le'],
+      'at': zWebTime(r['cree_le']),
       'amount': _int(content['montant']),
       'reason': '${content['motif'] ?? ''}',
+      'destination': content['remboursement'] == null || content['remboursement'] == 'especes' ? 'cash' : '${content['remboursement']}',
       'lines': [
-        for (final l in ((content['lignes'] as List?) ?? const []).cast<Map>())
+        for (final (i, l) in returned.indexed)
           {
             'label': facts.productNames['${saleLines['${l['ligne_uuid']}']?['produit_uuid']}'] ?? '${saleLines['${l['ligne_uuid']}']?['libelle'] ?? 'Article'}',
             'quantity': parseMicros('${l['quantite']}') ?? BigInt.zero,
-            // Montant par ligne non archivé par le retour hors ligne (seul le total l'est) : rien à droite.
-            'amount': null,
+            'amount': amounts[i],
           },
       ],
     });
     totals['returns_count'] = totals['returns_count']! + 1;
     totals['returns_amount'] = totals['returns_amount']! + _int(content['montant']);
   }
-  return (rows: rows, totals: totals);
+  return (rows: _byDate(rows), totals: totals);
+}
+
+/// Retours mis bout à bout par date (`at` au format du web, comparable en texte), ordre d'origine à date égale.
+List<Map<String, dynamic>> _byDate(List<Map<String, dynamic>> rows) {
+  final indexed = rows.indexed.toList()
+    ..sort((a, b) {
+      final at = '${a.$2['at'] ?? '~'}'.compareTo('${b.$2['at'] ?? '~'}');
+      return at != 0 ? at : a.$1.compareTo(b.$1);
+    });
+  return [for (final e in indexed) e.$2];
+}
+
+/// Date d'une opération au format imprimé du web (`2026-11-19 10:42:00`, heure locale) ; null si absente.
+String? zWebTime(Object? raw) {
+  final date = _date(raw);
+  if (date == null) return raw == null ? null : '$raw';
+  String two(int v) => v.toString().padLeft(2, '0');
+  return '${date.year}-${two(date.month)}-${two(date.day)} ${two(date.hour)}:${two(date.minute)}:${two(date.second)}';
+}
+
+final BigInt _million = BigInt.from(1000000);
+
+/// Quantité du contrat (six décimales, signée, sans borne) en millionièmes.
+BigInt parseQuantity6(String text) {
+  final negative = text.startsWith('-');
+  final parts = (negative ? text.substring(1) : text).split('.');
+  final whole = BigInt.tryParse(parts.first) ?? BigInt.zero;
+  final fraction = BigInt.tryParse((parts.length > 1 ? parts[1] : '').padRight(6, '0').substring(0, 6)) ?? BigInt.zero;
+  final value = whole * _million + fraction;
+  return negative ? -value : value;
+}
+
+/// Millionièmes en quantité du contrat (`"3.000000"`, `"-0.500000"`).
+String formatQuantity6(BigInt micros) {
+  final abs = micros.abs();
+  return '${micros.isNegative ? '-' : ''}${abs ~/ _million}.${(abs % _million).toString().padLeft(6, '0')}';
 }
 
 Map<String, dynamic> _summary(List<Map> sales, Map<String, dynamic> articles, Map<String, int> returns) {
@@ -466,11 +629,16 @@ class ZContext {
     }
   }
   // Retours en espèces ; annulation restaurant (R-5) : la part espèces des paiements de la vente.
-  final refunds = s.returns.fold<int>(0, (sum, r) {
+  final local = s.returns.fold<int>(0, (sum, r) {
     final methods = s.refundMethods['${r['uuid']}'];
     if (methods == null) return sum + _int((r['contenu'] as Map)['montant']);
     return sum + methods.entries.where((e) => cash.contains(e.key)).fold<int>(0, (t, e) => t + e.value);
   });
+  final online = s.onlineReturns.fold<int>(0, (sum, r) {
+    final back = ((r['remboursements'] as List?) ?? const []).cast<Map>().where((p) => cash.contains(p['moyen']));
+    return sum + back.fold<int>(0, (t, p) => t + _int(p['montant']));
+  });
+  final refunds = local + online;
   final expected = s.float == null ? null : s.float! + salesCash - refunds;
   final counted = (s.closure?['contenu'] as Map?)?['compte'] as int?;
   return (float: s.float, salesCash: salesCash, refunds: refunds, expected: expected, counted: counted, difference: counted == null || expected == null ? null : counted - expected);
@@ -505,6 +673,10 @@ List<Map<String, dynamic>> _methodControl(List<ClosureSession> sessions, ZContex
 
 const _localMention = 'Caisse locale : chiffres de ce terminal. Le Z de la boutique fait foi après synchronisation.';
 
+/// Bloc de détail d'une session tel que le Z de session l'imprime (et que `cloture_session.contenu.detail` le fige).
+Map<String, dynamic> sessionDetail(ClosureFacts facts, ClosureSession session, ZContext context) =>
+    closureDetail(facts, [session], methodNames: context.methodNames, cashCode: context.cashCode, operatorName: context.operatorName);
+
 /// Modèle d'un pré-X ([ZKind.preX], session ouverte, à l'aveugle) ou d'un Z de session ([ZKind.session], session
 /// clôturée sur ce terminal ; [duplicate] pour une réimpression).
 Map<String, dynamic> sessionZModel(ClosureFacts facts, ClosureSession session, ZContext context, {required String kind, required DateTime now, bool duplicate = false}) {
@@ -527,7 +699,9 @@ Map<String, dynamic> sessionZModel(ClosureFacts facts, ClosureSession session, Z
     lines.add(_moneyOrDash('Écart', cash.difference, bold: true, sign: true));
   }
   final comment = (session.closure?['contenu'] as Map?)?['commentaire'] as String?;
-  final detail = closureDetail(facts, [session], methodNames: context.methodNames, cashCode: context.cashCode);
+  // Z d'une clôture du lot Z local : le détail figé dans la clôture, tel qu'envoyé au serveur, jamais recalculé.
+  final frozen = session.frozenDetail;
+  final detail = frozen != null ? detailFromContract(frozen) : sessionDetail(facts, session, context);
   return _assemble(kind, context.storeName, null, header, detail, now: now, duplicate: duplicate, parts: {
     'especes': lines,
     'ecart': cash.difference,
@@ -536,6 +710,7 @@ Map<String, dynamic> sessionZModel(ClosureFacts facts, ClosureSession session, Z
     if (blind) 'Comptage à l’aveugle : l’attendu en caisse et l’écart figurent au Z de clôture.',
     if (comment != null && comment.isNotEmpty) 'Commentaire : $comment',
     if (cash.float == null) 'Fond initial inconnu de ce terminal (session ouverte en ligne) : attendu et écart au Z de la boutique.',
+    if (session.onlineReturnsOmitted > 0) '${session.onlineReturnsOmitted} retour(s) saisi(s) en ligne non repris ici : retours partiels.',
     _localMention,
   ]);
 }
@@ -608,6 +783,7 @@ Map<String, dynamic> _assemble(
   bool duplicate = false,
   required Map<String, dynamic> parts,
   required List<String> mentions,
+  String? warning,
 }) {
   final provisional = kind == ZKind.preX || kind == ZKind.preZ;
   final summary = {...detail['summary'] as Map<String, dynamic>, 'cash_difference': parts['ecart']};
@@ -615,6 +791,7 @@ Map<String, dynamic> _assemble(
   return {
     'type': kind,
     'titre': '${ZKind.titles[kind]}${duplicate ? ' — DUPLICATA' : ''}',
+    'avertissement': warning,
     'boutique': store,
     'numero': number,
     'provisoire': provisional,
@@ -709,6 +886,8 @@ Map<String, dynamic> closureTicket(Map<String, dynamic> model, String version) {
   return {
     'kind': model['type'],
     'titre': model['titre'],
+    // Pré-Z de la journée (§12.4.3) : « Journée partielle : sessions non synchronisées absentes », imprimé sous le titre.
+    'avertissement': model['avertissement'],
     'version': version,
     'boutique': {'nom': model['boutique']},
     'numero': model['numero'],
@@ -872,6 +1051,12 @@ ZPrintout layoutClosureTicket(Map<String, dynamic> ticket, {required int paperWi
   for (final l in _wrap(_ascii(_clean(ticket['titre'])), columns)) {
     add(l, strong: true, center: true);
   }
+  final warning = _clean(ticket['avertissement']);
+  if (warning.isNotEmpty) {
+    for (final l in _wrap(_ascii(warning), columns)) {
+      add(l, strong: true, center: true);
+    }
+  }
   final number = _clean(ticket['numero']);
   if (number.isNotEmpty) add(_labelValue('No', _ascii(number), columns));
   for (final section in ((ticket['rubriques'] as List?) ?? const []).cast<Map>()) {
@@ -895,4 +1080,447 @@ ZPrintout layoutClosureTicket(Map<String, dynamic> ticket, {required int paperWi
     }
   }
   return ZPrintout(lines, bold: bold, large: large);
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Lot « Z local » : bloc de détail au format du contrat, pré-Z de la journée, audit des éditions
+// ---------------------------------------------------------------------------------------------------------------------
+
+/// Champs montants du bloc de détail (`montant_texte` : entier en chaîne) ; `quantity` est une quantité à six décimales.
+const _amountFields = {
+  'revenue', 'delivery_fees', 'payable', 'credit', 'average_basket', 'gross_value', 'line_discounts', 'global_discounts', //
+  'discounts', 'offered_value', 'ht', 'vat', 'returns_amount', 'cancellations_amount', 'net_after_returns', 'amount', 'value',
+  'discount', 'unit_price', 'base', 'ttc', 'total',
+};
+
+/// Longueurs maximales du schéma `detail_cloture` (la plus petite quand un nom de champ sert à plusieurs endroits).
+const _maxLengths = {'label': 120, 'key': 80, 'code': 64, 'reason': 2000, 'sale': 60, 'at': 40, 'destination': 24, 'packaging': 120};
+
+String _cut(String text, int max) {
+  final runes = text.runes.toList();
+  return runes.length <= max ? text : String.fromCharCodes(runes.take(max));
+}
+
+/// Bloc de détail interne ([closureDetail] : entiers et millionièmes) au format du contrat (`DetailCloture` v1,
+/// `donnees-z-local-1.json#/$defs/detail_cloture`) : montants en chaînes d'entiers, quantités à six décimales.
+Map<String, dynamic> detailToContract(Map<String, dynamic> detail) {
+  Object? convert(String? key, Object? value) {
+    if (value is Map) return {for (final e in value.entries) '${e.key}': convert('${e.key}', e.value)};
+    if (value is List) return [for (final v in value) convert(null, v)];
+    if (key == 'quantity' && value is BigInt) return formatQuantity6(value);
+    if (key != null && _amountFields.contains(key) && value is int) return '$value';
+    if (key != null && value is String && _maxLengths[key] != null) return _cut(value, _maxLengths[key]!);
+    return value;
+  }
+
+  final out = convert(null, detail) as Map<String, dynamic>;
+  return {...out, 'version': 1};
+}
+
+/// Bloc de détail du contrat (publié par `z.journee` ou figé dans une clôture) au format interne de [closureDetail].
+Map<String, dynamic> detailFromContract(Map detail) {
+  Object? convert(String? key, Object? value) {
+    if (value is Map) return <String, dynamic>{for (final e in value.entries) '${e.key}': convert('${e.key}', e.value)};
+    if (value is List) return [for (final v in value) convert(null, v)];
+    if (key == 'quantity' && value is String) return parseQuantity6(value);
+    if (key != null && _amountFields.contains(key) && value is String) return int.tryParse(value) ?? 0;
+    return value;
+  }
+
+  return convert(null, detail) as Map<String, dynamic>;
+}
+
+const _summaryCounts = ['tickets', 'lines', 'offered_count', 'returns_count', 'cancellations_count'];
+
+Map<String, dynamic> _emptySummary() => {
+  for (final k in _summaryCounts) k: 0,
+  for (final k in _amountFields.intersection({
+    'revenue', 'delivery_fees', 'payable', 'credit', 'average_basket', 'gross_value', 'line_discounts', 'global_discounts', 'discounts', //
+    'offered_value', 'ht', 'vat', 'returns_amount', 'cancellations_amount', 'net_after_returns',
+  }))
+    k: 0,
+  'quantity': BigInt.zero,
+};
+
+int _halfUp(int numerator, int denominator) {
+  if (denominator == 0) return 0;
+  final value = divideHalfUp(BigInt.from(numerator.abs()), BigInt.from(denominator)).toInt();
+  return numerator < 0 ? -value : value;
+}
+
+/// Somme de blocs de détail (format interne) pour le pré-Z de la journée (README §12.4.4) : synthèse additionnée et
+/// panier moyen recalculé ; moyens et remboursements regroupés par code (ordre de première apparition) ; articles
+/// regroupés par catégorie (même libellé, « Sans catégorie » en dernier) puis par ligne (libellé, conditionnement, prix
+/// unitaire, offert), retriés ; top recalculé sur (libellé, conditionnement) ; retours bout à bout par date ; TVA par
+/// taux. Rubriques facultatives (`cashiers`, `payments_count`, `families`) seulement si tous les blocs les portent.
+/// [details] : dans l'ordre chronologique des sessions.
+Map<String, dynamic> composeDetails(List<Map<String, dynamic>> details) {
+  final summary = _emptySummary();
+  for (final d in details) {
+    final s = d['summary'] as Map;
+    for (final key in summary.keys.toList()) {
+      if (key == 'quantity') {
+        summary[key] = (summary[key] as BigInt) + ((s[key] as BigInt?) ?? BigInt.zero);
+      } else {
+        summary[key] = (summary[key] as int) + ((s[key] as int?) ?? 0);
+      }
+    }
+  }
+  summary['average_basket'] = _halfUp(summary['revenue'] as int, summary['tickets'] as int);
+
+  List<Map<String, dynamic>> byCode(String rubric, {bool counted = false}) {
+    final rows = <String, Map<String, dynamic>>{};
+    for (final d in details) {
+      for (final p in ((d[rubric] as List?) ?? const []).cast<Map>()) {
+        final row = rows.putIfAbsent('${p['code']}', () => {'code': p['code'], 'label': p['label'], if (counted) 'count': 0, 'amount': 0});
+        if (counted) row['count'] = (row['count'] as int) + ((p['count'] as int?) ?? 0);
+        row['amount'] = (row['amount'] as int) + ((p['amount'] as int?) ?? 0);
+      }
+    }
+    return rows.values.toList();
+  }
+
+  // Articles : catégories par libellé, lignes par (libellé, conditionnement, prix unitaire, offert).
+  final categories = <String, Map<String, dynamic>>{};
+  final totals = <String, dynamic>{'lines': 0, 'quantity': BigInt.zero, 'value': 0, 'discount': 0, 'amount': 0, 'offered_count': 0, 'offered_value': 0};
+  for (final d in details) {
+    final articles = d['articles'] as Map;
+    final t = articles['totals'] as Map;
+    for (final k in totals.keys.toList()) {
+      totals[k] = k == 'quantity' ? (totals[k] as BigInt) + ((t[k] as BigInt?) ?? BigInt.zero) : (totals[k] as int) + ((t[k] as int?) ?? 0);
+    }
+    for (final c in (articles['categories'] as List).cast<Map>()) {
+      final none = c['key'] == 'none';
+      final category = categories.putIfAbsent(
+        none ? '\u0000none' : '${c['label']}',
+        () => {'key': c['key'], 'label': c['label'], 'rows': <String, Map<String, dynamic>>{}, 'lines': 0, 'quantity': BigInt.zero, 'value': 0, 'discount': 0, 'amount': 0},
+      );
+      category['lines'] = (category['lines'] as int) + ((c['lines'] as int?) ?? 0);
+      category['quantity'] = (category['quantity'] as BigInt) + ((c['quantity'] as BigInt?) ?? BigInt.zero);
+      for (final f in ['value', 'discount', 'amount']) {
+        category[f] = (category[f] as int) + ((c[f] as int?) ?? 0);
+      }
+      for (final r in (c['rows'] as List).cast<Map>()) {
+        final row = (category['rows'] as Map<String, Map<String, dynamic>>).putIfAbsent(
+          '${r['label']}\u0001${r['packaging'] ?? ''}\u0001${r['unit_price']}\u0001${r['offered'] == true}',
+          () => {'label': r['label'], 'packaging': r['packaging'], 'quantity': BigInt.zero, 'unit_price': r['unit_price'], 'value': 0, 'discount': 0, 'amount': 0, 'offered': r['offered'] == true},
+        );
+        row['quantity'] = (row['quantity'] as BigInt) + ((r['quantity'] as BigInt?) ?? BigInt.zero);
+        for (final f in ['value', 'discount', 'amount']) {
+          row[f] = (row[f] as int) + ((r[f] as int?) ?? 0);
+        }
+      }
+    }
+  }
+  final categoryList = [
+    for (final c in categories.values) {...c, 'rows': (c['rows'] as Map<String, Map<String, dynamic>>).values.toList()..sort(_best)},
+  ]..sort((a, b) {
+      final none = (a['key'] == 'none' ? 1 : 0).compareTo(b['key'] == 'none' ? 1 : 0);
+      return none != 0 ? none : '${a['label']}'.toLowerCase().compareTo('${b['label']}'.toLowerCase());
+    });
+
+  // Top recalculé sur les lignes regroupées par (libellé, conditionnement), comme au web : « Riz 1 kg (Sac de 5) ».
+  final top = <String, Map<String, dynamic>>{};
+  for (final c in categoryList) {
+    for (final r in (c['rows'] as List).cast<Map<String, dynamic>>()) {
+      final packaging = r['packaging'] as String?;
+      final label = packaging == null || packaging.isEmpty ? '${r['label']}' : '${r['label']} ($packaging)';
+      final row = top.putIfAbsent(label, () => {'label': label, 'quantity': BigInt.zero, 'amount': 0});
+      row['quantity'] = (row['quantity'] as BigInt) + (r['quantity'] as BigInt);
+      row['amount'] = (row['amount'] as int) + (r['amount'] as int);
+    }
+  }
+
+  final vat = <String, Map<String, dynamic>>{};
+  for (final d in details) {
+    for (final v in ((d['vat'] as List?) ?? const []).cast<Map>()) {
+      final row = vat.putIfAbsent('${v['rate']}', () => {'rate': v['rate'], 'base': 0, 'vat': 0, 'ttc': 0});
+      for (final f in ['base', 'vat', 'ttc']) {
+        row[f] = (row[f] as int) + ((v[f] as int?) ?? 0);
+      }
+    }
+  }
+
+  final out = <String, dynamic>{
+    'version': 1,
+    'summary': summary,
+    'payments': byCode('payments', counted: true),
+    'articles': {'categories': categoryList, 'totals': totals},
+    'top': (top.values.toList()..sort(_best)).take(zTop).toList(),
+    'returns': _byDate([for (final d in details) ...((d['returns'] as List?) ?? const []).cast<Map<String, dynamic>>()]),
+    'refunds': byCode('refunds'),
+    'vat': vat.values.toList()..sort((a, b) => (parseMicros('${a['rate']}') ?? BigInt.zero).compareTo(parseMicros('${b['rate']}') ?? BigInt.zero)),
+  };
+  bool all(String rubric) => details.isNotEmpty && details.every((d) => d[rubric] != null);
+  if (all('payments_count')) out['payments_count'] = details.fold<int>(0, (sum, d) => sum + (d['payments_count'] as int));
+  if (all('cashiers')) {
+    final cashiers = <String, Map<String, dynamic>>{};
+    for (final d in details) {
+      for (final c in (d['cashiers'] as List).cast<Map>()) {
+        final cashier = cashiers.putIfAbsent('${c['label']}', () => {'label': c['label'], 'methods': <String, Map<String, dynamic>>{}, 'total': 0});
+        cashier['total'] = (cashier['total'] as int) + ((c['total'] as int?) ?? 0);
+        for (final m in ((c['methods'] as List?) ?? const []).cast<Map>()) {
+          final method = (cashier['methods'] as Map<String, Map<String, dynamic>>).putIfAbsent('${m['code']}', () => {'code': m['code'], 'label': m['label'], 'amount': 0});
+          method['amount'] = (method['amount'] as int) + ((m['amount'] as int?) ?? 0);
+        }
+      }
+    }
+    out['cashiers'] = [for (final c in cashiers.values) {...c, 'methods': (c['methods'] as Map<String, Map<String, dynamic>>).values.toList()}];
+  }
+  if (all('families')) {
+    final families = <String, Map<String, dynamic>>{};
+    for (final d in details) {
+      for (final f in (d['families'] as List).cast<Map>()) {
+        final family = families.putIfAbsent('${f['key']}', () => {'key': f['key'], 'label': f['label'], 'lines': 0, 'quantity': BigInt.zero, 'amount': 0});
+        family['lines'] = (family['lines'] as int) + ((f['lines'] as int?) ?? 0);
+        family['quantity'] = (family['quantity'] as BigInt) + ((f['quantity'] as BigInt?) ?? BigInt.zero);
+        family['amount'] = (family['amount'] as int) + ((f['amount'] as int?) ?? 0);
+      }
+    }
+    out['families'] = families.values.toList();
+  }
+  return out;
+}
+
+/// Mention imprimée sous le titre du pré-Z quand la journée ne peut pas être garantie complète (README §12.4.3).
+const partialDayMention = 'Journée partielle : sessions non synchronisées absentes';
+
+String _isoDay(DateTime date) => '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+String _dayOf(String iso) {
+  final parts = iso.split('-');
+  return parts.length == 3 ? '${parts[2]}/${parts[1]}/${parts[0]}' : iso;
+}
+
+final _uuid = RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$');
+
+/// Pré-Z de la journée (README §12.4) : les sessions closes publiées de `z.journee`, plus les sessions locales closes
+/// que le serveur n'a pas encore publiées (détail figé ou local) ; une session ouverte (celle du terminal, ou d'un autre
+/// terminal d'après `sessions_ouvertes`) est signalée « non clôturée », sans montant. Une session locale déjà publiée
+/// (même `session_uuid`, ou même `cloture_uuid` que sa clôture) n'est comptée qu'une fois, avec le détail publié. Jamais
+/// de numéro de Z journalier. `edition` porte de quoi auditer l'impression (`edition_pre_z`).
+Map<String, dynamic> journeyPreZModel(ClosureFacts facts, ZContext context, {required DateTime now}) {
+  final day = facts.zDay!;
+  // Date publiée si elle égale la date locale de la caisse, sinon la date locale (§12.4.5) : la date locale, donc.
+  final date = _isoDay(now);
+  final published = ((day['sessions_closes'] as List?) ?? const []).cast<Map>();
+  final lastZ = day['dernier_z'] as Map?;
+  final lastZAt = _date(lastZ?['cloture_le']);
+  bool matches(Map p, ClosureSession s) => (s.uuid != null && p['session_uuid'] == s.uuid) || (s.closure != null && p['cloture_uuid'] == s.closure!['uuid']);
+
+  // Sessions locales closes, absentes de la publication : clôture pas encore intégrée, ou intégrée aujourd'hui après le
+  // dernier Z journalier (journal pas encore relu). Une clôture en quarantaine n'existe pas pour le serveur.
+  final local = <ClosureSession>[];
+  for (final s in facts.sessions) {
+    if (!s.closed || s.closureState == 'rejet_protocole' || published.any((p) => matches(p, s))) continue;
+    if (s.closureState == 'integree' || s.closureState == 'resolue') {
+      final at = s.closedAt;
+      if (at == null || _isoDay(at) != date || (lastZAt != null && !at.isAfter(lastZAt))) continue;
+    }
+    local.add(s);
+  }
+  final own = facts.openSession;
+  final othersOpen = [
+    for (final o in ((day['sessions_ouvertes'] as List?) ?? const []).cast<Map>())
+      if (o['terminal_uuid'] == null || o['terminal_uuid'] != facts.terminalUuid) o,
+  ];
+  final partial = facts.journalStale || ((day['sessions_omises'] as int?) ?? 0) > 0 || othersOpen.isNotEmpty;
+
+  // Sessions closes dans l'ordre chronologique (ouverture), publiées et locales.
+  final closed = <({DateTime? at, Map<String, dynamic> detail, Map<String, dynamic> block, int? fond, int? theorique, int? compte, int? ecart})>[];
+  for (final p in published) {
+    final who = ['${p['terminal_nom'] ?? ''}', '${p['caissier'] ?? ''}'].where((t) => t.isNotEmpty).join(' · ');
+    closed.add((
+      at: _date(p['ouverte_le']) ?? _date(p['close_le']),
+      detail: detailFromContract(p['detail'] as Map),
+      block: {
+        'titre': 'Session $who'.trim(),
+        'lignes': [
+          zValue('Ouverture', zDate(_date(p['ouverte_le']))),
+          zValue('Clôture', zDate(_date(p['close_le']))),
+          _moneyOrDash('Fond', p['fond'] as int?),
+          _moneyOrDash('Théorique', p['theorique'] as int?),
+          _moneyOrDash('Compté', p['compte'] as int?),
+          _moneyOrDash('Écart', p['ecart'] as int?, bold: true, sign: true),
+        ],
+      },
+      fond: p['fond'] as int?,
+      theorique: p['theorique'] as int?,
+      compte: p['compte'] as int?,
+      ecart: p['ecart'] as int?,
+    ));
+  }
+  for (final s in local) {
+    final cash = _cash(s, context);
+    final who = [context.terminalName, context.operatorName(s.openerId)].where((t) => t.isNotEmpty).join(' · ');
+    final frozen = s.frozenDetail;
+    closed.add((
+      at: s.openedAt ?? s.closedAt,
+      detail: frozen != null ? detailFromContract(frozen) : sessionDetail(facts, s, context),
+      block: {
+        'titre': 'Session $who'.trim(),
+        'lignes': [
+          zValue('Ouverture', zDate(s.openedAt)),
+          zValue('Clôture', zDate(s.closedAt)),
+          _moneyOrDash('Fond', cash.float),
+          _moneyOrDash('Théorique', cash.expected),
+          _moneyOrDash('Compté', cash.counted),
+          _moneyOrDash('Écart', cash.difference, bold: true, sign: true),
+        ],
+      },
+      fond: cash.float,
+      theorique: cash.expected,
+      compte: cash.counted,
+      ecart: cash.difference,
+    ));
+  }
+  final ordered = closed.indexed.toList()
+    ..sort((a, b) {
+      final x = a.$2.at, y = b.$2.at;
+      if (x == null || y == null) return x == null && y == null ? a.$1.compareTo(b.$1) : (x == null ? -1 : 1);
+      final c = x.compareTo(y);
+      return c != 0 ? c : a.$1.compareTo(b.$1);
+    });
+  final sessions = [for (final e in ordered) e.$2];
+
+  final openLabels = <String>[];
+  final openBlocks = <Map<String, dynamic>>[];
+  void open(String who, DateTime? since) {
+    openLabels.add('$who depuis le ${zDate(since)}');
+    openBlocks.add({
+      'titre': 'Session $who'.trim(),
+      'lignes': [zValue('Ouverture', zDate(since)), zValue('Clôture', 'non clôturée')],
+    });
+  }
+
+  if (own != null) open([context.terminalName, context.operatorName(own.openerId)].where((t) => t.isNotEmpty).join(' · '), own.openedAt);
+  for (final o in othersOpen) {
+    open(['${o['terminal_nom'] ?? ''}', '${o['caissier'] ?? ''}'].where((t) => t.isNotEmpty).join(' · '), _date(o['ouverte_le']));
+  }
+
+  int? total(int? Function(({DateTime? at, Map<String, dynamic> detail, Map<String, dynamic> block, int? fond, int? theorique, int? compte, int? ecart}) s) of) {
+    if (sessions.isEmpty) return null;
+    var sum = 0;
+    for (final s in sessions) {
+      final v = of(s);
+      if (v == null) return null;
+      sum += v;
+    }
+    return sum;
+  }
+
+  final difference = total((s) => s.ecart);
+  final header = <Map<String, dynamic>>[
+    zValue('Point de vente', '${day['point_de_vente_nom'] ?? context.terminalName}'),
+    zValue('Journée du', _dayOf(date)),
+    zValue('Sessions', '${sessions.length + openBlocks.length}'),
+  ];
+  final detail = composeDetails([for (final s in sessions) s.detail]);
+  final model = _assemble(
+    ZKind.preZ,
+    context.storeName,
+    null,
+    header,
+    detail,
+    now: now,
+    warning: partial ? partialDayMention : null,
+    parts: {
+      'especes': [
+        _moneyOrDash('Fond', total((s) => s.fond)),
+        _moneyOrDash('Théorique', total((s) => s.theorique), bold: true),
+        _moneyOrDash('Compté', total((s) => s.compte), bold: true),
+        _moneyOrDash('Écart', difference, bold: true, sign: true),
+      ],
+      'ecart': difference,
+      'sessions': [for (final s in sessions) s.block, ...openBlocks],
+      'controle_moyens': <Map<String, dynamic>>[],
+    },
+    mentions: [
+      if (openLabels.isNotEmpty) '${openLabels.length} session(s) non clôturée(s), sans montant : ${openLabels.join(', ')}.',
+      if (published.any((p) => p['detail_recalcule'] == true)) 'Détail par article recalculé pour les sessions clôturées avant le figement du détail.',
+      if (day['statut'] == 'close' && lastZ != null)
+        'Aucune session en attente au serveur. Dernier Z journalier : n° ${lastZ['numero']} du ${_dayOf('${lastZ['date_exploitation']}')}.',
+      'Pré-Z local : sessions publiées par la boutique et sessions de ce terminal. Seul le Z journalier de la boutique fait foi.',
+    ],
+  );
+  final localUuids = [for (final s in local) ?s.uuid, ?own?.uuid].where(_uuid.hasMatch).toSet().toList();
+  model['edition'] = {
+    'point_de_vente_uuid': day['point_de_vente_uuid'],
+    'date_exploitation': date,
+    'sessions': {for (final p in published) '${p['session_uuid']}'}.take(100).toList(),
+    'sessions_locales': localUuids.length > 10 ? localUuids.sublist(localUuids.length - 10) : localUuids,
+    'partielle': partial,
+  };
+  return model;
+}
+
+/// Rien à imprimer : aucune session ouverte (pré-X) ou clôturée (Z de session).
+class ClosureUnavailable implements Exception {
+  const ClosureUnavailable(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
+/// Document de clôture prêt à imprimer : modèle, structure « ticket » (rendue par Android et l'hôte Windows) et, pour
+/// une édition provisoire, le contenu de son opération d'audit (`edition_pre_x`, `edition_pre_z`, README §12.5).
+class ClosureDocument {
+  const ClosureDocument({required this.kind, required this.version, required this.model, required this.ticket, this.edition});
+
+  final String kind;
+  final String version;
+  final Map<String, dynamic> model;
+  final Map<String, dynamic> ticket;
+
+  /// `contenu` de l'opération d'audit ; null hors pré-X et pré-Z (ou session sans UUID publiable).
+  final Map<String, dynamic>? edition;
+
+  /// Type de l'opération d'audit, ou null.
+  String? get editionType => edition == null ? null : (kind == ZKind.preX ? 'edition_pre_x' : (kind == ZKind.preZ ? 'edition_pre_z' : null));
+
+  /// Pré-Z portant la mention « journée partielle ».
+  bool get partial => model['avertissement'] == partialDayMention;
+
+  ZPrintout layout({required int paperWidth}) => layoutClosureTicket(ticket, paperWidth: paperWidth);
+}
+
+/// Document [kind] ([ZKind.preX], [ZKind.session], [ZKind.preZ]) en version [version], calculé sans réseau. Le pré-Z
+/// est celui de la journée quand `z.journee` est connue ([journeyPreZModel]), sinon celui de ce terminal ([dayZModel]).
+/// Lève [ClosureUnavailable] s'il n'y a pas de session à imprimer.
+ClosureDocument buildClosureDocument(ClosureFacts facts, ZContext context, {required String kind, required String version, required DateTime now, bool duplicate = false}) {
+  Map<String, dynamic> model;
+  Map<String, dynamic>? edition;
+  switch (kind) {
+    case ZKind.preZ:
+      if (facts.zDay != null) {
+        model = journeyPreZModel(facts, context, now: now);
+        edition = Map<String, dynamic>.from(model['edition'] as Map);
+      } else {
+        model = dayZModel(facts, context, day: now, now: now);
+        final mine = [for (final s in facts.sessionsOn(now)) ?s.uuid].where(_uuid.hasMatch).toSet().toList();
+        // Pré-Z de ce terminal seul : jamais garanti complet.
+        edition = {
+          'point_de_vente_uuid': null,
+          'date_exploitation': _isoDay(now),
+          'sessions': <String>[],
+          'sessions_locales': mine.length > 10 ? mine.sublist(mine.length - 10) : mine,
+          'partielle': true,
+        };
+      }
+    case ZKind.preX:
+      final session = facts.openSession ?? (throw const ClosureUnavailable('Aucune session ouverte sur ce terminal.'));
+      model = sessionZModel(facts, session, context, kind: ZKind.preX, now: now);
+      final uuid = session.uuid;
+      edition = uuid != null && _uuid.hasMatch(uuid) ? {'session_uuid': uuid, 'aveugle': true} : null;
+    default:
+      final session = facts.lastClosed ?? (throw const ClosureUnavailable('Aucune session clôturée sur ce terminal.'));
+      model = sessionZModel(facts, session, context, kind: ZKind.session, now: now, duplicate: duplicate);
+  }
+  final summary = model['synthese'] as Map;
+  if (edition != null) {
+    edition = {...edition, 'version': version, 'resume': {'tickets': summary['tickets'], 'chiffre_affaires': summary['revenue']}};
+  }
+  return ClosureDocument(kind: kind, version: version, model: model, ticket: closureTicket(model, version), edition: edition);
 }

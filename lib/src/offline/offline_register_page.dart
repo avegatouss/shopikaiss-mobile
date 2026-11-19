@@ -9,6 +9,7 @@ import '../app_settings.dart';
 import '../diagnostics.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
+import '../restaurant/resto_interface.dart';
 import '../sync_v2/decimal6.dart';
 import '../terminal/terminal_session.dart';
 import '../web/shop_browser_page.dart';
@@ -543,7 +544,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               ListTile(
                 leading: const Icon(Icons.today_outlined),
                 title: const Text('Imprimer un pré-Z du jour'),
-                subtitle: const Text('Sessions de ce terminal aujourd’hui, rien n’est clôturé'),
+                subtitle: const Text('Journée du point de vente (sessions publiées et de ce terminal), rien n’est clôturé'),
                 enabled: _engine.hasRight(operator, 'caisse_cloturer'),
                 onTap: () => Navigator.pop(context, 'prez'),
               ),
@@ -565,7 +566,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       case 'prex':
         if (await _askZVersion('Pré-X', 'Point provisoire : rien n’est clôturé.') case final version?) await _printClosure(ZKind.preX, version);
       case 'prez':
-        if (await _askZVersion('Pré-Z du jour', 'Sessions de ce terminal aujourd’hui : rien n’est clôturé.') case final version?) await _printClosure(ZKind.preZ, version);
+        if (await _askZVersion('Pré-Z du jour', 'Journée du point de vente : rien n’est clôturé.') case final version?) await _printClosure(ZKind.preZ, version);
       case 'duplicata':
         if (await _askZVersion('Duplicata du dernier Z', 'Réimpression du Z de la dernière session clôturée sur ce terminal.') case final version?) {
           await _printClosure(ZKind.session, version, duplicate: true);
@@ -587,24 +588,21 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     ),
   );
 
-  /// Document de clôture calculé sur les opérations du terminal, imprimé en texte (§3 d'IMPRESSION-X-Z).
+  /// Document de clôture calculé par le moteur sans réseau, imprimé en texte (§3 d'IMPRESSION-X-Z). Une édition
+  /// provisoire (pré-X, pré-Z) est auditée par le moteur : une opération par impression (lot Z local).
   Future<void> _printClosure(String kind, String version, {bool duplicate = false}) async {
-    final snapshot = _snapshot;
-    final facts = await _engine.closureFacts();
-    if (snapshot == null || facts == null) return _toast('Documents de clôture non disponibles sur ce terminal.');
-    final context = ZContext.of(snapshot);
-    final now = _engine.now;
-    final Map<String, dynamic> model;
-    if (kind == ZKind.preZ) {
-      model = dayZModel(facts, context, day: now, now: now);
-    } else {
-      final session = kind == ZKind.preX ? facts.openSession : facts.lastClosed;
-      if (session == null) return _toast(kind == ZKind.preX ? 'Aucune session ouverte sur ce terminal.' : 'Aucune session clôturée sur ce terminal.');
-      model = sessionZModel(facts, session, context, kind: kind, now: now, duplicate: duplicate);
+    final ClosureDocument? document;
+    try {
+      document = await _engine.closureDocument(kind, version, duplicate: duplicate);
+    } on ClosureUnavailable catch (e) {
+      return _toast(e.message);
     }
+    if (document == null) return _toast('Documents de clôture non disponibles sur ce terminal.');
     final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
-    final printout = layoutClosureTicket(closureTicket(model, version), paperWidth: width);
+    final printout = document.layout(paperWidth: width);
     await _printText(printout.lines, failure: 'Document non imprimé', bytes: printout.bytes());
+    final operator = _operator;
+    if (operator != null && document.editionType != null) await _engine.recordEdition(operator, document);
   }
 
   /// Choix du client de la vente : recherche par nom ou téléphone, création si le caissier en a le droit.

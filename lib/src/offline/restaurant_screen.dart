@@ -118,7 +118,8 @@ class _RestaurantFloorState extends State<_RestaurantFloor> {
     if (view == null) {
       final blocker = _engine.restaurantBlocker(operator);
       if (blocker != null) return widget.host._refuse(blocker, title: 'Commande impossible');
-      final choice = await _askCovers(table);
+      // Interface simplifiée (`demander_couverts` faux) : une table libre ouvre aussitôt la commande.
+      final choice = _engine.restaurantInterface.askCovers ? await _askCovers(table) : (covers: 0, client: null);
       if (choice == null || !mounted) return;
       try {
         view = await _engine.restoOpen(operator, table.uuid, covers: choice.covers == 0 ? null : choice.covers, customer: choice.client);
@@ -1742,6 +1743,45 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
   Widget _catalog() {
     final snapshot = widget.host._snapshot!;
     final products = snapshot.search(_search.text, limit: null, category: _category);
+    // Navigation de la carte (`restaurant.interface`) : puces ; tuiles de catégories ; familles — le terminal ne reçoit pas
+    // les familles de rapport, elles s'affichent donc comme les tuiles (catégories en dossiers, puis articles).
+    final folders = _engine.restaurantInterface.catalogNavigation != RestoInterface.navigationChips && snapshot.categories.isNotEmpty;
+    if (folders && _category == null && _search.text.isEmpty) {
+      return Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+            child: TextField(
+              controller: _search,
+              decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'Rechercher un article', border: OutlineInputBorder(), isDense: true),
+              onChanged: (_) => setState(() {}),
+            ),
+          ),
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.all(12),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(maxCrossAxisExtent: 170, mainAxisExtent: 76, crossAxisSpacing: 8, mainAxisSpacing: 8),
+              itemCount: snapshot.categories.length,
+              itemBuilder: (context, i) {
+                final c = snapshot.categories[i];
+                return FilledButton.tonal(
+                  style: FilledButton.styleFrom(padding: const EdgeInsets.all(8), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                  onPressed: () => setState(() => _category = c),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.folder_outlined, size: 18),
+                      const SizedBox(width: 6),
+                      Flexible(child: Text(c, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center)),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      );
+    }
     return Column(
       children: [
         Padding(
@@ -1752,7 +1792,18 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
             onChanged: (_) => setState(() {}),
           ),
         ),
-        if (snapshot.categories.isNotEmpty)
+        if (folders && _category != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(
+              children: [
+                ActionChip(avatar: const Icon(Icons.arrow_back, size: 18), label: const Text('Catégories'), onPressed: () => setState(() => _category = null)),
+                const SizedBox(width: 8),
+                Expanded(child: Text(_category!, style: const TextStyle(fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis)),
+              ],
+            ),
+          ),
+        if (!folders && snapshot.categories.isNotEmpty)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -1820,7 +1871,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
                 style: FilledButton.styleFrom(backgroundColor: Colors.deepOrange, minimumSize: const Size(0, 48)),
                 onPressed: _busy ? null : _send,
                 icon: const Icon(Icons.send_outlined),
-                label: Text(_engine.restaurant?.sendLabel ?? 'Envoyer'),
+                label: Text(_engine.restaurantInterface.sendButton(production: _engine.restaurant?.settings.sendToProduction ?? true)),
               ),
               const SizedBox(width: 8),
             ],

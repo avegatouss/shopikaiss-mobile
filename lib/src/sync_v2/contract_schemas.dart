@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -1988,7 +1988,7 @@ const contractV2Schemas = <String, String>{
   'donnees-restaurant-1.json': r'''{
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "donnees-restaurant-1.json",
-    "title": "Données des changements restaurant.* (révision restaurant-1, lots R-1 à R-3 ; RESTAURANT-1 §3). Rendues aux seuls clients à qui restaurant.v1 est accordée. R-1 : critiques ; R-2 (salle, table, menu, categorie) et R-3 (poste, routage), R-4 (canal) et R-5 (promotion, remise_client) : non critiques.",
+    "title": "Données des changements restaurant.* (révision restaurant-1, lots R-1 à R-3 ; RESTAURANT-1 §3). Rendues aux seuls clients à qui restaurant.v1 est accordée. R-1 : critiques ; R-2 (salle, table, menu, categorie) et R-3 (poste, routage), R-4 (canal) et R-5 (promotion, remise_client) et lot Z local (interface) : non critiques.",
     "$defs": {
         "restaurant.point_de_vente": {
             "description": "Point de vente de la boutique (clé = son uuid). Le mode du terminal en dépend : Boutique, Service de table ou Restaurant.",
@@ -2811,8 +2811,418 @@ const contractV2Schemas = <String, String>{
                     "maximum": 100
                 }
             }
+        },
+        "restaurant.interface": {
+            "description": "Lot Z local (README §12.8), NON critique, clé « interface:<uuid du point de vente> » : réglages d’affichage de la caisse restaurant (interface simplifiée du web). Un terminal qui ne connaît pas ce type l’ignore ; type absent ou valeur inconnue : valeurs par défaut (demander_couverts vrai, libelle_envoi « send », navigation_carte « chips »).",
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "demander_couverts",
+                "libelle_envoi",
+                "navigation_carte"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "demander_couverts": {
+                    "type": "boolean",
+                    "description": "restaurant.ask_covers : demander le nombre de couverts à l’ouverture d’une table ; faux = toucher une table libre ouvre aussitôt la commande. Défaut vrai."
+                },
+                "libelle_envoi": {
+                    "enum": [
+                        "send",
+                        "hold",
+                        "hold_short"
+                    ],
+                    "description": "restaurant.send_button_label : send = « Envoyer » (« Valider » sans envoi en production), hold = « Mettre en attente », hold_short = « Mise en attente ». Défaut send."
+                },
+                "navigation_carte": {
+                    "enum": [
+                        "chips",
+                        "tiles",
+                        "families"
+                    ],
+                    "description": "restaurant.catalog_navigation : chips = puces de catégories, tiles = tuiles de catégories, families = familles en haut, catégories en dossiers, puis articles. Défaut chips."
+                }
+            }
         }
     }
+}
+''',
+  'donnees-z-local-1.json': r'''{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "donnees-z-local-1.json",
+  "title": "Lot « Z local » du contrat v2 (README §12, capacité z.local) : données publiées pour imprimer hors ligne le pré-X, le Z de session et le pré-Z de la journée, et bloc de détail de clôture (DetailCloture, version 1) commun au web, aux terminaux et à cloture_session.",
+  "$defs": {
+    "z.session": {
+      "description": "Non critique. Clé « z_session:<terminal_uuid> ». Dernière session du terminal (la même que l'entité session) : fond initial, caissier d'ouverture et retours et annulations SAISIS EN LIGNE dans la session (ceux d'une opération retour du terminal ne sont pas republiés : il les a déjà).",
+      "type": "object",
+      "required": ["terminal_uuid", "session_uuid", "ouverte", "ouverte_le", "operateur_id", "operateur_nom", "fond_initial", "retours", "retours_omis"],
+      "additionalProperties": false,
+      "properties": {
+        "terminal_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "session_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "ouverte": { "type": "boolean" },
+        "ouverte_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] },
+        "operateur_id": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/identifiant_serveur" }], "description": "Caissier d'ouverture." },
+        "operateur_nom": { "type": ["string", "null"], "maxLength": 255 },
+        "fond_initial": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant" }], "description": "Fond de caisse déclaré à l'ouverture (espèces). null : inconnu du serveur ; le ticket affiche alors « — »." },
+        "retours": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/retour_en_ligne" }, "description": "Du plus ancien au plus récent ; les 100 plus récents au plus." },
+        "retours_omis": { "type": "integer", "minimum": 0, "description": "Retours en ligne de la session non publiés (au-delà de 100) : le pré-X local est alors partiel." }
+      }
+    },
+    "retour_en_ligne": {
+      "description": "Retour ou annulation saisi en ligne dans la session. Correspondance avec DetailCloture.returns : kind = return|cancellation selon type, sale = vente_numero, at = le, amount = montant, reason = motif, destination, lines = lignes {label = libelle, quantity = quantite, amount = montant} ; remboursements par moyen vers DetailCloture.refunds.",
+      "type": "object",
+      "required": ["retour_uuid", "type", "vente_numero", "le", "montant", "motif", "destination", "lignes", "remboursements"],
+      "additionalProperties": false,
+      "properties": {
+        "retour_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "type": { "enum": ["retour", "annulation"] },
+        "vente_numero": { "type": ["string", "null"], "maxLength": 60 },
+        "le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] },
+        "montant": { "$ref": "commun.json#/$defs/montant" },
+        "motif": { "type": "string", "maxLength": 2000 },
+        "destination": { "type": "string", "maxLength": 24, "description": "Destination du remboursement au web (cash, credit, original…)." },
+        "lignes": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": ["produit_uuid", "libelle", "conditionnement", "quantite", "prix_unitaire", "montant"],
+            "additionalProperties": false,
+            "properties": {
+              "produit_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+              "libelle": { "type": "string", "maxLength": 300, "description": "Libellé imprimé, déjà formé comme au web (annulation sans lignes propres : « nom (conditionnement) »)." },
+              "conditionnement": { "type": ["string", "null"], "maxLength": 120 },
+              "quantite": { "$ref": "#/$defs/quantite_texte", "description": "Retour : quantité en unité de base ; annulation sans lignes propres : quantité de la ligne de vente." },
+              "prix_unitaire": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant_signe" }], "description": "Prix unitaire de la ligne de vente d'origine (par conditionnement)." },
+              "montant": { "$ref": "commun.json#/$defs/montant_signe" }
+            }
+          }
+        },
+        "remboursements": {
+          "type": "array",
+          "maxItems": 30,
+          "items": {
+            "type": "object",
+            "required": ["moyen", "montant"],
+            "additionalProperties": false,
+            "properties": {
+              "moyen": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "montant": { "$ref": "commun.json#/$defs/montant_signe" }
+            }
+          }
+        }
+      }
+    },
+    "z.journee": {
+      "description": "Non critique. Clé « z_journee:<uuid du point de vente> » (ou de la boutique sans point de vente). Journée de caisse au grain du Z journalier du web : un point de vente, tous ses terminaux, sessions d'un registre restaurant exclues. La clôture de la journée (Z journalier officiel) reste au serveur ; le terminal en tire seulement un pré-Z (README §12.4).",
+      "type": "object",
+      "required": ["point_de_vente_uuid", "point_de_vente_nom", "terminaux", "fuseau", "date_exploitation", "statut", "dernier_z", "sessions_closes", "sessions_omises", "sessions_ouvertes"],
+      "additionalProperties": false,
+      "properties": {
+        "point_de_vente_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+        "point_de_vente_nom": { "type": ["string", "null"], "maxLength": 120 },
+        "terminaux": { "type": "array", "maxItems": 100, "uniqueItems": true, "items": { "$ref": "commun.json#/$defs/uuid" }, "description": "Terminaux actifs de cette journée : un terminal lit l'entité qui le contient." },
+        "fuseau": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "date_exploitation": { "$ref": "commun.json#/$defs/jour", "description": "Date qu'aurait le Z journalier s'il était clôturé maintenant (jour civil de la boutique)." },
+        "statut": { "enum": ["ouverte", "close"], "description": "close : aucune session ouverte ni close en attente de Z journalier (le dernier Z est dans dernier_z)." },
+        "dernier_z": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "required": ["numero", "date_exploitation", "cloture_le"],
+              "additionalProperties": false,
+              "properties": {
+                "numero": { "type": "integer", "minimum": 1 },
+                "date_exploitation": { "$ref": "commun.json#/$defs/jour" },
+                "cloture_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] }
+              }
+            }
+          ]
+        },
+        "sessions_closes": { "type": "array", "maxItems": 20, "items": { "$ref": "#/$defs/session_close" }, "description": "Sessions closes en attente de Z journalier, les 20 plus récentes, dans l'ordre de création." },
+        "sessions_omises": { "type": "integer", "minimum": 0, "description": "Sessions closes en attente non publiées (au-delà de 20) : le pré-Z local est alors partiel." },
+        "sessions_ouvertes": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/session_identite" }, "description": "Sessions encore ouvertes au serveur : signalées au pré-Z, sans montant." }
+      }
+    },
+    "session_identite": {
+      "type": "object",
+      "required": ["session_uuid", "terminal_uuid", "terminal_nom", "caissier", "operateur_id", "ouverte_le"],
+      "additionalProperties": false,
+      "properties": {
+        "session_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "terminal_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+        "terminal_nom": { "type": "string", "maxLength": 120 },
+        "caissier": { "type": "string", "maxLength": 255 },
+        "operateur_id": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/identifiant_serveur" }] },
+        "ouverte_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] }
+      }
+    },
+    "session_close": {
+      "description": "Session close : montants espèces de sa clôture (rectification d'arbitrage comprise, comme le Z journalier) et détail figé avec son Z.",
+      "type": "object",
+      "required": ["session_uuid", "terminal_uuid", "terminal_nom", "caissier", "operateur_id", "ouverte_le", "close_le", "cloture_uuid", "fond", "theorique", "compte", "ecart", "rectifiee", "detail_recalcule", "detail"],
+      "additionalProperties": false,
+      "properties": {
+        "session_uuid": { "$ref": "commun.json#/$defs/uuid" },
+        "terminal_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+        "terminal_nom": { "type": "string", "maxLength": 120 },
+        "caissier": { "type": "string", "maxLength": 255 },
+        "operateur_id": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/identifiant_serveur" }] },
+        "ouverte_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] },
+        "close_le": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/horodatage" }] },
+        "cloture_uuid": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/uuid" }] },
+        "fond": { "$ref": "commun.json#/$defs/montant_signe" },
+        "theorique": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant_signe" }] },
+        "compte": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant_signe" }] },
+        "ecart": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant_signe" }] },
+        "rectifiee": { "type": "boolean" },
+        "detail_recalcule": { "type": "boolean", "description": "Vrai si la clôture est antérieure au figement du détail (18/11) : le détail est recalculé ; le document porte « Détail par article recalculé… »." },
+        "detail": { "$ref": "#/$defs/detail_cloture" }
+      }
+    },
+    "montant_texte": {
+      "description": "Montant entier FCFA en chaîne (format du bloc de détail du web, sans borne).",
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,15})$"
+    },
+    "quantite_texte": {
+      "description": "Quantité en chaîne, six décimales exactement (somme : sans borne de chiffres entiers).",
+      "type": "string",
+      "pattern": "^-?(0|[1-9][0-9]{0,15})\\.[0-9]{6}$"
+    },
+    "detail_cloture": {
+      "description": "Bloc de détail d'un Z (DetailCloture, version 1 ; IMPRESSION-X-Z.md §5), clés du web. Tiré des ventes validées des sessions (annulées ensuite comprises), hors ventes hors chiffre d'affaires. Le pré-X, le Z détaillé, le Z court et le pré-Z s'en déduisent sans autre calcul.",
+      "type": "object",
+      "required": ["version", "summary", "payments", "articles", "top", "returns", "refunds", "vat"],
+      "additionalProperties": false,
+      "properties": {
+        "version": { "const": 1 },
+        "summary": { "$ref": "#/$defs/detail_synthese" },
+        "payments": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["code", "label", "count", "amount"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "label": { "type": "string", "maxLength": 120 },
+              "count": { "type": "integer", "minimum": 0 },
+              "amount": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        },
+        "articles": {
+          "type": "object",
+          "required": ["categories", "totals"],
+          "additionalProperties": false,
+          "properties": {
+            "categories": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/detail_categorie" } },
+            "totals": {
+              "type": "object",
+              "required": ["lines", "quantity", "value", "discount", "amount", "offered_count", "offered_value"],
+              "additionalProperties": false,
+              "properties": {
+                "lines": { "type": "integer", "minimum": 0 },
+                "quantity": { "$ref": "#/$defs/quantite_texte" },
+                "value": { "$ref": "#/$defs/montant_texte" },
+                "discount": { "$ref": "#/$defs/montant_texte" },
+                "amount": { "$ref": "#/$defs/montant_texte" },
+                "offered_count": { "type": "integer", "minimum": 0 },
+                "offered_value": { "$ref": "#/$defs/montant_texte" }
+              }
+            }
+          }
+        },
+        "top": {
+          "type": "array",
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "required": ["label", "quantity", "amount"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "maxLength": 400 },
+              "quantity": { "$ref": "#/$defs/quantite_texte" },
+              "amount": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        },
+        "returns": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/detail_retour" } },
+        "refunds": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["code", "label", "amount"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "label": { "type": "string", "maxLength": 120 },
+              "amount": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        },
+        "vat": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "required": ["rate", "base", "vat", "ttc"],
+            "additionalProperties": false,
+            "properties": {
+              "rate": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,2})(\\.[0-9]{1,2})?$", "description": "Taux en pour cent, sans zéros inutiles (« 18 », « 5.5 »)." },
+              "base": { "$ref": "#/$defs/montant_texte" },
+              "vat": { "$ref": "#/$defs/montant_texte" },
+              "ttc": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        },
+        "cashiers": {
+          "description": "Facultatif (rapports du 19/11, absent d’un bloc plus ancien) : paiements par caissier, auteur de la vente, dans l’ordre du premier encaissement.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": ["label", "methods", "total"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "maxLength": 190 },
+              "methods": {
+                "type": "array",
+                "maxItems": 50,
+                "items": {
+                  "type": "object",
+                  "required": ["code", "label", "amount"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+                    "label": { "type": "string", "maxLength": 120 },
+                    "amount": { "$ref": "#/$defs/montant_texte" }
+                  }
+                }
+              },
+              "total": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        },
+        "payments_count": { "description": "Facultatif (19/11) : nombre de paiements.", "type": "integer", "minimum": 0 },
+        "families": {
+          "description": "Facultatif (19/11) : rubrique « Par famille », présente seulement si la boutique a défini des familles de rapport.",
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": ["key", "label", "lines", "quantity", "amount"],
+            "additionalProperties": false,
+            "properties": {
+              "key": { "type": "string", "pattern": "^(none|family:[0-9]+)$" },
+              "label": { "type": "string", "maxLength": 120 },
+              "lines": { "type": "integer", "minimum": 0 },
+              "quantity": { "$ref": "#/$defs/quantite_texte" },
+              "amount": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        }
+      }
+    },
+    "detail_synthese": {
+      "type": "object",
+      "required": ["tickets", "revenue", "delivery_fees", "payable", "credit", "average_basket", "lines", "quantity", "gross_value", "line_discounts", "global_discounts", "discounts", "offered_count", "offered_value", "ht", "vat", "returns_count", "returns_amount", "cancellations_count", "cancellations_amount", "net_after_returns"],
+      "additionalProperties": false,
+      "properties": {
+        "tickets": { "type": "integer", "minimum": 0 },
+        "revenue": { "$ref": "#/$defs/montant_texte", "description": "CA TTC = somme des net." },
+        "delivery_fees": { "$ref": "#/$defs/montant_texte" },
+        "payable": { "$ref": "#/$defs/montant_texte", "description": "Montant des ventes = somme des à payer (livraison comprise)." },
+        "credit": { "$ref": "#/$defs/montant_texte" },
+        "average_basket": { "$ref": "#/$defs/montant_texte", "description": "revenue / tickets, arrondi au franc, demi vers le haut ; 0 sans ticket." },
+        "lines": { "type": "integer", "minimum": 0 },
+        "quantity": { "$ref": "#/$defs/quantite_texte" },
+        "gross_value": { "$ref": "#/$defs/montant_texte" },
+        "line_discounts": { "$ref": "#/$defs/montant_texte" },
+        "global_discounts": { "$ref": "#/$defs/montant_texte" },
+        "discounts": { "$ref": "#/$defs/montant_texte" },
+        "offered_count": { "type": "integer", "minimum": 0 },
+        "offered_value": { "$ref": "#/$defs/montant_texte" },
+        "ht": { "$ref": "#/$defs/montant_texte" },
+        "vat": { "$ref": "#/$defs/montant_texte" },
+        "returns_count": { "type": "integer", "minimum": 0 },
+        "returns_amount": { "$ref": "#/$defs/montant_texte" },
+        "cancellations_count": { "type": "integer", "minimum": 0 },
+        "cancellations_amount": { "$ref": "#/$defs/montant_texte" },
+        "net_after_returns": { "$ref": "#/$defs/montant_texte" }
+      }
+    },
+    "detail_categorie": {
+      "description": "Catégorie (triées par nom, « Sans catégorie » en dernier, clé « none »), lignes par article, conditionnement, prix unitaire et offert (montant décroissant, puis quantité décroissante, puis libellé).",
+      "type": "object",
+      "required": ["key", "label", "rows", "lines", "quantity", "value", "discount", "amount"],
+      "additionalProperties": false,
+      "properties": {
+        "key": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "label": { "type": "string", "maxLength": 255 },
+        "rows": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "required": ["label", "packaging", "quantity", "unit_price", "value", "discount", "amount", "offered"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "maxLength": 300 },
+              "packaging": { "type": ["string", "null"], "maxLength": 120 },
+              "quantity": { "$ref": "#/$defs/quantite_texte" },
+              "unit_price": { "$ref": "#/$defs/montant_texte" },
+              "value": { "$ref": "#/$defs/montant_texte" },
+              "discount": { "$ref": "#/$defs/montant_texte" },
+              "amount": { "$ref": "#/$defs/montant_texte" },
+              "offered": { "type": "boolean" }
+            }
+          }
+        },
+        "lines": { "type": "integer", "minimum": 0 },
+        "quantity": { "$ref": "#/$defs/quantite_texte" },
+        "value": { "$ref": "#/$defs/montant_texte" },
+        "discount": { "$ref": "#/$defs/montant_texte" },
+        "amount": { "$ref": "#/$defs/montant_texte" }
+      }
+    },
+    "detail_retour": {
+      "type": "object",
+      "required": ["kind", "sale", "at", "amount", "reason", "destination", "lines"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["return", "cancellation"] },
+        "sale": { "type": ["string", "null"], "maxLength": 60 },
+        "at": { "type": ["string", "null"], "maxLength": 40, "description": "Date de l'opération (pas de la vente), telle qu'imprimée." },
+        "amount": { "$ref": "#/$defs/montant_texte" },
+        "reason": { "type": "string", "maxLength": 2000 },
+        "destination": { "type": "string", "maxLength": 24 },
+        "lines": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "required": ["label", "quantity", "amount"],
+            "additionalProperties": false,
+            "properties": {
+              "label": { "type": "string", "maxLength": 300 },
+              "quantity": { "$ref": "#/$defs/quantite_texte" },
+              "amount": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 ''',
   'donnees.json': r'''{
@@ -3250,6 +3660,12 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/resto_remboursement"
+        },
+        {
+            "$ref": "#/$defs/edition_pre_x"
+        },
+        {
+            "$ref": "#/$defs/edition_pre_z"
         }
     ],
     "$defs": {
@@ -4062,11 +4478,22 @@ const contractV2Schemas = <String, String>{
                             ],
                             "maxLength": 500,
                             "description": "Obligatoire si le compté diffère de l'attendu : sinon a_arbitrer."
+                        },
+                        "detail": {
+                            "description": "Lot Z local (README §12), facultatif : bloc de détail que le terminal a imprimé sur son Z de session (DetailCloture, version 1). Absent ou null : le serveur calcule le sien. Conservé tel quel pour le duplicata ; comparé au calcul du serveur, écart noté, jamais refusé.",
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "donnees-z-local-1.json#/$defs/detail_cloture"
+                                }
+                            ]
                         }
                     }
                 }
             },
-            "description": "Clôture de la session du terminal, comptée à l'aveugle (REVISION-2.1 §3.3, capacité session.cloture). L'opérateur doit détenir caisse_cloturer."
+            "description": "Clôture de la session du terminal, comptée à l'aveugle (REVISION-2.1 §3.3, capacité session.cloture). L'opérateur doit détenir caisse_cloturer. Lot Z local : champ facultatif contenu.detail."
         },
         "panier_suspendre": {
             "type": "object",
@@ -4959,7 +5386,7 @@ const contractV2Schemas = <String, String>{
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": []
+                    "properties": {}
                 },
                 "motif": {
                     "type": [
@@ -5315,7 +5742,7 @@ const contractV2Schemas = <String, String>{
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": []
+                    "properties": {}
                 },
                 "motif": {
                     "type": [
@@ -5816,7 +6243,7 @@ const contractV2Schemas = <String, String>{
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": []
+                    "properties": {}
                 },
                 "motif": {
                     "type": [
@@ -6778,6 +7205,215 @@ const contractV2Schemas = <String, String>{
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_resto_remboursement"
+                }
+            }
+        },
+        "contenu_edition_pre_x": {
+            "type": "object",
+            "required": [
+                "session_uuid",
+                "version",
+                "aveugle",
+                "resume"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Session serveur, ou UUID de l’ouverture_session locale."
+                },
+                "version": {
+                    "enum": [
+                        "detailed",
+                        "short"
+                    ]
+                },
+                "aveugle": {
+                    "type": "boolean",
+                    "description": "Pré-X à l’aveugle (sans VOIR_RAPPORTS) : ni théorique, ni contrôle par moyen, ni écart."
+                },
+                "resume": {
+                    "description": "Résumé de ce qui a été imprimé, pour l’audit.",
+                    "type": "object",
+                    "required": [
+                        "tickets",
+                        "chiffre_affaires"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "tickets": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "chiffre_affaires": {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    }
+                }
+            }
+        },
+        "edition_pre_x": {
+            "description": "Lot Z local (README §12), capacité z.local : audit d’un pré-X imprimé hors ligne (même nom que l’audit du web). Non critique : ni argent ni stock, jamais refusé, ne bloque pas la clôture. Idempotent par uuid.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "edition_pre_x"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_edition_pre_x"
+                }
+            }
+        },
+        "contenu_edition_pre_z": {
+            "type": "object",
+            "required": [
+                "point_de_vente_uuid",
+                "date_exploitation",
+                "version",
+                "sessions",
+                "sessions_locales",
+                "partielle",
+                "resume"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "point_de_vente_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "z.journee.point_de_vente_uuid de la journée imprimée."
+                },
+                "date_exploitation": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "version": {
+                    "enum": [
+                        "detailed",
+                        "short"
+                    ]
+                },
+                "sessions": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    },
+                    "description": "Sessions closes publiées reprises dans le pré-Z."
+                },
+                "sessions_locales": {
+                    "type": "array",
+                    "maxItems": 10,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    },
+                    "description": "Sessions du terminal ajoutées par lui (non encore synchronisées ou ouvertes)."
+                },
+                "partielle": {
+                    "type": "boolean",
+                    "description": "Vrai si le pré-Z portait la mention « journée partielle »."
+                },
+                "resume": {
+                    "description": "Résumé de ce qui a été imprimé, pour l’audit.",
+                    "type": "object",
+                    "required": [
+                        "tickets",
+                        "chiffre_affaires"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "tickets": {
+                            "type": "integer",
+                            "minimum": 0
+                        },
+                        "chiffre_affaires": {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    }
+                }
+            }
+        },
+        "edition_pre_z": {
+            "description": "Lot Z local (README §12), capacité z.local : audit d’un pré-Z de la journée imprimé hors ligne (même nom que l’audit du web). Non critique : ni argent ni stock, jamais refusé. Idempotent par uuid. La clôture de la journée reste au serveur.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "edition_pre_z"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_edition_pre_z"
                 }
             }
         }

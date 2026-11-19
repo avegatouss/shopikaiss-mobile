@@ -1,0 +1,193 @@
+{
+    "point_de_vente_uuid": "8b000000-0000-4000-8000-000000000001",
+    "point_de_vente_nom": "Boutique principale",
+    "terminaux": [
+        "11111111-2222-4333-8444-555555555555",
+        "11111111-2222-4333-8444-666666666666"
+    ],
+    "fuseau": "Africa/Abidjan",
+    "date_exploitation": "2026-11-19",
+    "statut": "ouverte",
+    "dernier_z": {
+        "numero": 41,
+        "date_exploitation": "2026-11-18",
+        "cloture_le": "2026-11-18T21:05:00Z"
+    },
+    "sessions_closes": [
+        {
+            "session_uuid": "5e55a0d1-0000-4000-8000-000000000002",
+            "terminal_uuid": "11111111-2222-4333-8444-666666666666",
+            "terminal_nom": "Comptoir 2",
+            "caissier": "Yao Kouassi",
+            "operateur_id": "8",
+            "ouverte_le": "2026-11-19T06:00:00Z",
+            "close_le": "2026-11-19T12:00:00Z",
+            "cloture_uuid": "6d000000-0000-4000-8000-000000000001",
+            "fond": 10000,
+            "theorique": 14000,
+            "compte": 14000,
+            "ecart": 0,
+            "rectifiee": false,
+            "detail_recalcule": false,
+            "detail": {
+                "version": 1,
+                "summary": {
+                    "tickets": 2,
+                    "revenue": "5000",
+                    "delivery_fees": "0",
+                    "payable": "5000",
+                    "credit": "0",
+                    "average_basket": "2500",
+                    "lines": 3,
+                    "quantity": "5.000000",
+                    "gross_value": "6000",
+                    "line_discounts": "1000",
+                    "global_discounts": "0",
+                    "discounts": "1000",
+                    "offered_count": 1,
+                    "offered_value": "500",
+                    "ht": "4237",
+                    "vat": "763",
+                    "returns_count": 1,
+                    "returns_amount": "1000",
+                    "cancellations_count": 0,
+                    "cancellations_amount": "0",
+                    "net_after_returns": "4000"
+                },
+                "payments": [
+                    {
+                        "code": "especes",
+                        "label": "Espèces",
+                        "count": 2,
+                        "amount": "5000"
+                    }
+                ],
+                "articles": {
+                    "categories": [
+                        {
+                            "key": "category:12",
+                            "label": "Épicerie",
+                            "rows": [
+                                {
+                                    "label": "Riz parfumé 1 kg",
+                                    "packaging": null,
+                                    "quantity": "3.000000",
+                                    "unit_price": "1000",
+                                    "value": "3000",
+                                    "discount": "0",
+                                    "amount": "3000",
+                                    "offered": false
+                                },
+                                {
+                                    "label": "Riz parfumé 1 kg",
+                                    "packaging": "Sac de 5",
+                                    "quantity": "1.000000",
+                                    "unit_price": "2500",
+                                    "value": "2500",
+                                    "discount": "500",
+                                    "amount": "2000",
+                                    "offered": false
+                                }
+                            ],
+                            "lines": 2,
+                            "quantity": "4.000000",
+                            "value": "5500",
+                            "discount": "500",
+                            "amount": "5000"
+                        },
+                        {
+                            "key": "none",
+                            "label": "Sans catégorie",
+                            "rows": [
+                                {
+                                    "label": "Sachet",
+                                    "packaging": null,
+                                    "quantity": "1.000000",
+                                    "unit_price": "500",
+                                    "value": "500",
+                                    "discount": "500",
+                                    "amount": "0",
+                                    "offered": true
+                                }
+                            ],
+                            "lines": 1,
+                            "quantity": "1.000000",
+                            "value": "500",
+                            "discount": "500",
+                            "amount": "0"
+                        }
+                    ],
+                    "totals": {
+                        "lines": 3,
+                        "quantity": "5.000000",
+                        "value": "6000",
+                        "discount": "1000",
+                        "amount": "5000",
+                        "offered_count": 1,
+                        "offered_value": "500"
+                    }
+                },
+                "top": [
+                    {
+                        "label": "Riz parfumé 1 kg",
+                        "quantity": "3.000000",
+                        "amount": "3000"
+                    },
+                    {
+                        "label": "Riz parfumé 1 kg (Sac de 5)",
+                        "quantity": "1.000000",
+                        "amount": "2000"
+                    },
+                    {
+                        "label": "Sachet",
+                        "quantity": "1.000000",
+                        "amount": "0"
+                    }
+                ],
+                "returns": [
+                    {
+                        "kind": "return",
+                        "sale": "V-000123",
+                        "at": "2026-11-19 10:42:00",
+                        "amount": "1000",
+                        "reason": "Article défectueux",
+                        "destination": "cash",
+                        "lines": [
+                            {
+                                "label": "Riz parfumé 1 kg",
+                                "quantity": "1.000000",
+                                "amount": "1000"
+                            }
+                        ]
+                    }
+                ],
+                "refunds": [
+                    {
+                        "code": "especes",
+                        "label": "Espèces",
+                        "amount": "1000"
+                    }
+                ],
+                "vat": [
+                    {
+                        "rate": "18",
+                        "base": "4237",
+                        "vat": "763",
+                        "ttc": "5000"
+                    }
+                ]
+            }
+        }
+    ],
+    "sessions_omises": 0,
+    "sessions_ouvertes": [
+        {
+            "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+            "terminal_uuid": "11111111-2222-4333-8444-555555555555",
+            "terminal_nom": "Comptoir 1",
+            "caissier": "Awa Koné",
+            "operateur_id": "7",
+            "ouverte_le": "2026-11-19T07:30:00Z"
+        }
+    ]
+}

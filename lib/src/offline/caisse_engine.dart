@@ -7,6 +7,7 @@ import 'package:bcrypt/bcrypt.dart';
 import '../passes/pass_rules.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
+import '../restaurant/resto_interface.dart';
 import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -254,6 +255,10 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Restaurant du point de vente du terminal (profil, caisse maîtresse, salles, tables) ; null hors restaurant.
   RestoContext? get restaurant => null;
+
+  /// Interface simplifiée de la caisse restaurant (`restaurant.interface`, lot Z local) : couverts, libellé d'envoi,
+  /// navigation de la carte ; valeurs par défaut sans entité reçue.
+  RestoInterface get restaurantInterface => RestoInterface.defaults;
 
   /// Pourquoi [operator] ne peut pas prendre de commande sur ce terminal, ou null s'il le peut (caisse maîtresse, profil
   /// Service de table, droit `caisse_table`).
@@ -504,6 +509,20 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Faits de clôture lus dans la file du terminal (sessions, ventes, retours, clôtures) pour imprimer pré-X, Z et pré-Z
   /// sans réseau ; null : documents locaux non disponibles sur ce terminal.
   Future<ClosureFacts?> closureFacts() async => null;
+
+  /// Document de clôture prêt à imprimer ([ZKind.preX], [ZKind.session], [ZKind.preZ]), calculé sans réseau à partir
+  /// de [closureFacts] ; null : documents locaux non disponibles. Lève [ClosureUnavailable] s'il n'y a pas de session à
+  /// imprimer. Commun à Android et à l'hôte Windows (qui rend `ticket`).
+  Future<ClosureDocument?> closureDocument(String kind, String version, {bool duplicate = false}) async {
+    final facts = await closureFacts();
+    final s = snapshot;
+    if (facts == null || s == null) return null;
+    return buildClosureDocument(facts, ZContext.of(s), kind: kind, version: version, now: now, duplicate: duplicate);
+  }
+
+  /// Audit d'une édition provisoire imprimée (pré-X, pré-Z ; lot Z local) : une opération par impression, avec son
+  /// propre UUID. Sans effet ici ; ne lève jamais (l'audit ne bloque ni l'impression ni la clôture).
+  Future<void> recordEdition(Operator operator, ClosureDocument document) async {}
 
   /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
   bool get customersSupported => false;

@@ -1,0 +1,37 @@
+{
+    "fond_initial": -500,
+    "terminal_uuid": "11111111-2222-4333-8444-555555555555",
+    "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+    "ouverte": true,
+    "ouverte_le": "2026-11-19T07:30:00Z",
+    "operateur_id": "7",
+    "operateur_nom": "Awa Koné",
+    "retours": [
+        {
+            "retour_uuid": "6c000000-0000-4000-8000-000000000001",
+            "type": "retour",
+            "vente_numero": "V-000123",
+            "le": "2026-11-19T10:42:00Z",
+            "montant": 1000,
+            "motif": "Article défectueux",
+            "destination": "cash",
+            "lignes": [
+                {
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                    "libelle": "Riz parfumé 1 kg",
+                    "conditionnement": null,
+                    "quantite": "1.000000",
+                    "prix_unitaire": 1000,
+                    "montant": 1000
+                }
+            ],
+            "remboursements": [
+                {
+                    "moyen": "especes",
+                    "montant": 1000
+                }
+            ]
+        }
+    ],
+    "retours_omis": 0
+}
