@@ -1,0 +1,22 @@
+{
+    "nom": "2 achetés, 1 offert",
+    "categorie": "promotion",
+    "type": "x_achetes_y_offerts",
+    "pourcentage": null,
+    "montant": null,
+    "achetes": 2,
+    "offerts": 1,
+    "priorite": 0,
+    "jours": [],
+    "heure_debut": null,
+    "heure_fin": null,
+    "du": "2026-11-01",
+    "au": "2026-11-30",
+    "canaux": [],
+    "salles": [],
+    "produits": [
+        "c0000000-0000-4000-8000-000000000103"
+    ],
+    "categories": [],
+    "max_par_personnel": null
+}

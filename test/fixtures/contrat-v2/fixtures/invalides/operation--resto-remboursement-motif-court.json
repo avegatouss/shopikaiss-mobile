@@ -1,0 +1,30 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000523",
+    "type": "resto_remboursement",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 523,
+    "cree_le": "2026-11-18T19:12:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000002",
+        "vente_ref": {
+            "operation_uuid": "a0000000-0000-4000-8000-000000000520"
+        },
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000031",
+        "type": "annulation",
+        "lignes": [],
+        "montant": 8300,
+        "motif": "ok",
+        "autorisations": []
+    },
+    "empreinte": "715a14840199c4cf014b6983cf50b8e9c02ebb7bd2d3c68696fb02da9d160e6e"
+}

@@ -1,0 +1,55 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000308",
+    "type": "resto_commande",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 368,
+    "cree_le": "2026-11-17T20:37:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000012",
+        "version": 3,
+        "action": "fusion",
+        "fait": {
+            "vers_commande_uuid": "c0aa0000-0000-4000-8000-000000000013",
+            "version_cible": 2
+        },
+        "motif": "Même tablée",
+        "autorisations": [],
+        "etat": {
+            "profil": "TABLE_SERVICE",
+            "numero_local": "PF-20261117-L0012",
+            "date_metier": "2026-11-17",
+            "canal": null,
+            "table_uuid": "7ab1e000-0000-4000-8000-0000000000e1",
+            "menu_uuid": null,
+            "couverts": 2,
+            "serveur_id": "7",
+            "client_uuid": null,
+            "client_nom": null,
+            "reference_externe": null,
+            "commentaire": null,
+            "statut": "cancelled",
+            "etape": "waiting",
+            "prefactures": 0,
+            "remise_globale": 0,
+            "lignes": [],
+            "totaux": {
+                "brut": 0,
+                "remises": 0,
+                "a_payer": 0,
+                "regle": 0
+            }
+        }
+    },
+    "empreinte": "ec084f8599b3608a4bbdc74e0467b2183032ed6700ab715b063c3c497eef2688"
+}

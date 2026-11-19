@@ -1,0 +1,9 @@
+{
+    "code": "yango",
+    "nom": "Yango",
+    "exige_table": false,
+    "exige_reference": true,
+    "suivi_livraison": true,
+    "ordre": 30,
+    "actif": true
+}

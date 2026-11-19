@@ -1,0 +1,27 @@
+{
+    "nom": "Happy hour bar",
+    "categorie": "happy_hour",
+    "type": "pourcentage",
+    "pourcentage": "20.000000",
+    "montant": null,
+    "achetes": null,
+    "offerts": null,
+    "priorite": 10,
+    "jours": [
+        5,
+        6
+    ],
+    "heure_debut": "17:00:00",
+    "heure_fin": "02:00:00",
+    "du": null,
+    "au": null,
+    "canaux": [
+        "sur_place"
+    ],
+    "salles": [],
+    "produits": [],
+    "categories": [
+        "ca000000-0000-4000-8000-000000000002"
+    ],
+    "max_par_personnel": null
+}

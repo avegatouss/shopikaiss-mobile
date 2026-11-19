@@ -30,6 +30,15 @@
         },
         {
             "$ref": "#/$defs/resto_bons_etats"
+        },
+        {
+            "$ref": "#/$defs/resto_registre_ouvre"
+        },
+        {
+            "$ref": "#/$defs/resto_registre_clos"
+        },
+        {
+            "$ref": "#/$defs/resto_remboursement"
         }
     ],
     "$defs": {
@@ -233,7 +242,7 @@
                     "items": {
                         "$ref": "#/$defs/paiement"
                     },
-                    "description": "Au moins un paiement dès que a_payer > 0 (recoupé par le serveur) ; aucun pour une vente à 0 F."
+                    "description": "Au moins un paiement dès que a_payer > 0 (recoupé par le serveur) ; aucun pour une vente à 0 F. Le serveur l’applique au règlement d’une commande de la caisse maîtresse (`commande`, lot R-5 : commande entièrement offerte) ; les autres ventes gardent au moins un paiement."
                 },
                 "mouvements": {
                     "type": "array",
@@ -1171,7 +1180,7 @@
             "description": "Retour hors ligne limité (REVISION-2.1 §3.4, capacité retour.especes, politique retours.mode = especes) : espèces, vente émise par ce terminal."
         },
         "commande_vente": {
-            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.6) : la vente règle une commande de la caisse maîtresse. Sans la capacité : rejet_protocole capacite_absente. La vente est intégrée dans tous les cas où elle l'aurait été sans ce champ ; un lien impossible part en arbitrage sur la commande, jamais la vente. Révision R-2 : seul `full` est relié, `items` et `shares` (R-4) sont reçus, la vente intégrée et le lien arbitré `restaurant.hors_lot`.",
+            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.6) : la vente règle une commande de la caisse maîtresse. Sans la capacité : rejet_protocole capacite_absente. La vente est intégrée dans tous les cas où elle l'aurait été sans ce champ ; un lien impossible part en arbitrage sur la commande (`restaurant.reglement_incoherent`), jamais la vente. Service de table : un seul règlement `full`. Restaurant (lot R-4) : `full` (tout le reste d'une commande sans règlement), `items` (une partie ; pas sur une commande à remise globale tant qu'elle ne couvre pas tout), `shares` (tout le reste, `parts` obligatoire : montants additionnant celui de la vente, chaque paiement dans une part et une seule). Offerts et remises de la commande sont de confiance pour la vente (ni droit REMISE ni plafond hors ligne).",
             "type": "object",
             "required": [
                 "commande_uuid",
@@ -1261,7 +1270,8 @@
                                 }
                             }
                         }
-                    ]
+                    ],
+                    "description": "Obligatoire (2 parts au moins) pour `shares`, null sinon."
                 },
                 "libelle": {
                     "type": [
@@ -1273,7 +1283,7 @@
             }
         },
         "ligne_commande": {
-            "description": "Ligne de commande dans l'état résultant. `lignes` contient TOUTES les lignes de la commande, retirées comprises (statut cancelled) : une ligne n'en disparaît jamais. Libellé et prix figés à l'ajout.",
+            "description": "Ligne de commande dans l'état résultant. `lignes` contient TOUTES les lignes de la commande, retirées comprises (statut cancelled) : une ligne n'en disparaît jamais. Libellé et prix figés à l'ajout. Lot R-5 : `promotion_uuid` et `personnel_id`, facultatifs au schéma, sont TOUJOURS envoyés par un client R-5 ; leur absence signifie un client R-4 (aucune promotion attendue).",
             "type": "object",
             "required": [
                 "ligne_uuid",
@@ -1339,11 +1349,14 @@
                     "$ref": "commun.json#/$defs/montant"
                 },
                 "tarif": {
-                    "description": "promotion, happy_hour et staff sont refusés tant que les promotions sont restreintes.",
+                    "description": "`free` (offert) et `manual_discount` (remise de ligne) seulement par les faits `offert` et `remise_ligne` (lot R-4). Lot R-5 (profil Restaurant seulement, comme au web) : `promotion` ou `happy_hour` = remise d'une promotion publiée (`restaurant.promotion`, catégorie du même nom) ; `staff` = tarif du personnel (catégorie `staff`, `personnel_id` obligatoire) ; un article acheté d'un « X achetés, Y offerts » reste `standard` avec `promotion_uuid`, son offert lié est `free` avec `parent_ligne_uuid` et le même `promotion_uuid`.",
                     "enum": [
                         "standard",
                         "free",
-                        "manual_discount"
+                        "manual_discount",
+                        "promotion",
+                        "happy_hour",
+                        "staff"
                     ]
                 },
                 "statut": {
@@ -1378,7 +1391,8 @@
                         {
                             "$ref": "commun.json#/$defs/uuid"
                         }
-                    ]
+                    ],
+                    "description": "Offert lié d'une promotion « X achetés, Y offerts » (lot R-5) : la ligne achetée, dans la même commande. null sinon."
                 },
                 "envoye": {
                     "$ref": "commun.json#/$defs/quantite",
@@ -1387,6 +1401,28 @@
                 "reglee": {
                     "$ref": "commun.json#/$defs/quantite",
                     "description": "Quantité réglée. Un réglé supérieur à ce que le serveur connaît est accepté : il attend les ventes."
+                },
+                "promotion_uuid": {
+                    "description": "Lot R-5 : promotion appliquée à la saisie (une promotion par ligne : priorité la plus haute, puis la plus forte remise, à l’heure de la caisse dans le fuseau publié), null sinon. Un offert ou une remise manuelle la retirent. Le serveur recontrôle avec le moteur du web ; un écart de prix suit `price_gap_policy` (`restaurant.prix_ecart` ou noté).",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "personnel_id": {
+                    "description": "Lot R-5 : employé servi au tarif du personnel (`tarif` = `staff`), membre actif de la boutique ; null sinon. Droit `remise` de l’opérateur ou autorisation `remise`, motif obligatoire.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        }
+                    ]
                 }
             }
         },
@@ -1438,7 +1474,8 @@
                             "type": "string",
                             "maxLength": 40
                         }
-                    ]
+                    ],
+                    "description": "Profil Restaurant (lot R-4) : code d'un canal publié (`restaurant.canal`), obligatoire ; table exigée si le canal `exige_table`, absente sinon. Service de table : null."
                 },
                 "table_uuid": {
                     "oneOf": [
@@ -1527,7 +1564,8 @@
                         "bill_printed",
                         "customer_validated",
                         "amended"
-                    ]
+                    ],
+                    "description": "Règle ServiceStage::next du web sur le type du journal du profil. Ouverture : `waiting` au Service de table, null au Restaurant (la préaddition la passe `bill_printed`)."
                 },
                 "prefactures": {
                     "type": "integer",
@@ -1567,6 +1605,14 @@
                             "$ref": "commun.json#/$defs/montant"
                         }
                     }
+                },
+                "remise_globale_source": {
+                    "description": "Lot R-5, facultatif au schéma mais TOUJOURS envoyé par un client R-5 (absent : client R-4, aucune remise client attendue). `customer` : remise du client de la commande (`restaurant.remise_client`), recalculée à chaque fait sur le montant après remises de ligne (arrondi vers le bas) tant qu'aucune remise manuelle ni aucun règlement ne l'a figée ; `manual` : posée par le fait `remise` (y compris son retrait d'une remise client, comme au web) ; null : aucune.",
+                    "enum": [
+                        null,
+                        "manual",
+                        "customer"
+                    ]
                 }
             }
         },
@@ -1702,7 +1748,7 @@
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": {}
+                    "properties": []
                 },
                 "motif": {
                     "type": [
@@ -2058,7 +2104,7 @@
                     "type": "object",
                     "required": [],
                     "additionalProperties": false,
-                    "properties": {}
+                    "properties": []
                 },
                 "motif": {
                     "type": [
@@ -2227,8 +2273,601 @@
                 }
             }
         },
+        "resto_commande_validation": {
+            "description": "Lot R-4 : quand l'envoi en production est éteint (`restaurant.reglages.envoi_production`), « Valider » fige les lignes en attente citées (`sent`) sans aucun bon, comme OrderService::send. Envoi rallumé depuis la publication : accepté et noté (`envoi_production_actif`).",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "validation"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "lignes"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "lignes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            }
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_offert": {
+            "description": "Lot R-4 : offrir un article non annulé, non réglé, pas déjà offert : `tarif` = `free`, `remise` = montant brut de la ligne (prix × quantité, arrondi au franc). Droit `resto_offrir`, ou autorisation `resto_offrir` d'un approbateur qui détient RESTO_OFFRIR ; `motif` de 3 caractères au moins. Audit `line.offer`. Un article offert garde sa quantité (retirez-le pour la changer).",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "offert"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "ligne_uuid"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "ligne_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_remise_ligne": {
+            "description": "Lot R-4 : remise manuelle d'un article non annulé, non réglé, non offert : `tarif` = `manual_discount`, `remise` = `valeur` (montant) ou `valeur` % du brut de la ligne arrondi vers le bas (pourcentage), de 1 F au brut. Droit `remise` (REMISE), ou autorisation `remise` d'un approbateur qui détient REMISE (assistant : plafond `restaurant.reglages.assistant.max_remise_pourcent`) ; `motif` de 3 caractères au moins. Audit `line.discount`. Un article remisé garde sa quantité.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "remise_ligne"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "ligne_uuid",
+                        "saisie"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "ligne_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "saisie": {
+                            "type": "object",
+                            "required": [
+                                "type",
+                                "valeur"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "type": {
+                                    "enum": [
+                                        "montant",
+                                        "pourcentage"
+                                    ]
+                                },
+                                "valeur": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100000000,
+                                    "description": "Francs (montant) ou 1 à 100 (pourcentage)."
+                                }
+                            }
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_remise": {
+            "description": "Lot R-4 : remise de la commande (`remise_globale`), en francs, comme ECAS. 0 la retire. Plafond : `restaurant.order_discount_max_percent` (Restaurant) ou `restaurant.table_service_discount_max_percent` (Service de table) du montant après remises de ligne ; impossible une fois un règlement gardé. Droit `remise`, ou autorisation `remise` ; `motif` de 3 caractères au moins si `montant` > 0. Audit `order.discount`. Une commande à remise globale ne se règle pas par articles (`items`) avant d'être réglée en entier.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "remise"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "montant"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "montant": {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_validation_client": {
+            "description": "Lot R-4, Service de table seulement : le client a validé la préfacture, `etape` = `customer_validated`. Au Restaurant : `restaurant.etat_incoherent` (`action_profil`).",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "validation_client"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [],
+                    "additionalProperties": false,
+                    "properties": []
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_deplacement_lignes": {
+            "description": "Lot R-4 (Q9) : une seule opération, sur la commande SOURCE ; les lignes citées passent à la commande `vers_commande_uuid` (même point de vente, même profil, même canal au Restaurant, ouverte). `version_cible` = version de la cible au moment du geste : la cible ne change pas de version, sa version suivante porte les lignes reçues (et attend ce fait s'il arrive après). Cible pas encore à `version_cible` : `recue` (`restaurant.attente_version`) ; au-delà : `restaurant.etat_incoherent` (`version_cible`). Un article annulé, réglé, ou offert lié sans son article acheté ne se déplace pas. L'état de la source ne porte plus les lignes déplacées.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "deplacement_lignes"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "vers_commande_uuid",
+                        "version_cible",
+                        "lignes"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "vers_commande_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "version_cible": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100000
+                        },
+                        "lignes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 100,
+                            "uniqueItems": true,
+                            "items": {
+                                "$ref": "commun.json#/$defs/uuid"
+                            }
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_fusion": {
+            "description": "Lot R-4 (Q9) : comme `deplacement_lignes`, pour toutes les lignes actives de la source (OrderTransferService::merge). La source est annulée (`statut` = `cancelled`, motif « Fusionnée dans la commande … ») ; la cible additionne couverts (500 au plus) et remises de commande, et reprend client, nom du client et commentaire de la source quand elle n'en a pas. Refusée si la source a un règlement, ou si sa remise irait sur une cible déjà en partie réglée.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "fusion"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "vers_commande_uuid",
+                        "version_cible"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "vers_commande_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "version_cible": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100000
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
+        "resto_commande_couverts_serveur": {
+            "description": "Lot R-4 : couverts et serveur de la commande, puis de sa table (TableService::setCovers, assignServer). L'état reçu porte les mêmes valeurs.",
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "commande_uuid",
+                "version",
+                "action",
+                "fait",
+                "motif",
+                "autorisations",
+                "etat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100000,
+                    "description": "Version de la commande : 1, 2, 3… sans trou."
+                },
+                "action": {
+                    "const": "couverts_serveur"
+                },
+                "fait": {
+                    "type": "object",
+                    "required": [
+                        "couverts",
+                        "serveur_id"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "couverts": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 500
+                                }
+                            ]
+                        },
+                        "serveur_id": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                                }
+                            ]
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                },
+                "etat": {
+                    "$ref": "#/$defs/etat_commande"
+                }
+            }
+        },
         "contenu_resto_commande": {
-            "description": "Un fait sur une commande et son état résultant (RESTAURANT-1 §4.3). Révisions R-2 (ouverture, lignes, prefacture, transfert_table, annulation, cloture) et R-3 (envoi, annulation_ligne). Les autres actions du §4.3 arrivent avec leur lot.",
+            "description": "Un fait sur une commande et son état résultant (RESTAURANT-1 §4.3). Révisions R-2 (ouverture, lignes, prefacture, transfert_table, annulation, cloture), R-3 (envoi, annulation_ligne) et R-4 (validation, offert, remise_ligne, remise, validation_client, deplacement_lignes, fusion, couverts_serveur ; profil Restaurant) : toutes les actions du contrat. Lot R-5 : promotions, happy hour et tarif du personnel dans `lignes` (profil Restaurant), remise client (`etat.remise_globale_source`).",
             "oneOf": [
                 {
                     "$ref": "#/$defs/resto_commande_ouverture"
@@ -2253,6 +2892,30 @@
                 },
                 {
                     "$ref": "#/$defs/resto_commande_annulation_ligne"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_validation"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_offert"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_remise_ligne"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_remise"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_validation_client"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_deplacement_lignes"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_fusion"
+                },
+                {
+                    "$ref": "#/$defs/resto_commande_couverts_serveur"
                 }
             ]
         },
@@ -2302,7 +2965,7 @@
             }
         },
         "autorisation_restaurant": {
-            "description": "Autorisation hors ligne d'une opération restaurant (RESTAURANT-1 §4.3 bis, décision Q3 ; lot R-3) : celle de la 2.1, plus les types restaurant, admis seulement avec restaurant.v1. La caisse a vérifié localement le code de 8 chiffres de l'approbateur (preuve `code_local|<horodatage>`) ; le serveur revérifie à l'intégration son rôle (manager ou assistant manager), sa propre permission et les plafonds de l'assistant.",
+            "description": "Autorisation hors ligne d'une opération restaurant (RESTAURANT-1 §4.3 bis, décision Q3 ; lot R-3) : celle de la 2.1, plus les types restaurant, admis seulement avec restaurant.v1. La caisse a vérifié localement le code de 8 chiffres de l'approbateur (preuve `code_local|<horodatage>`) ; le serveur revérifie à l'intégration son rôle (manager ou assistant manager), sa propre permission et les plafonds de l'assistant. Lot R-5 : `remboursement` (approbateur détenteur des permissions qui manquent à l’opérateur, plafond de remboursement de l’assistant).",
             "type": "object",
             "required": [
                 "type",
@@ -2319,7 +2982,8 @@
                         "prix_manuel",
                         "resto_modifier_envoye",
                         "resto_offrir",
-                        "resto_annuler_commande"
+                        "resto_annuler_commande",
+                        "remboursement"
                     ]
                 },
                 "approbateur_id": {
@@ -2596,6 +3260,313 @@
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_resto_bons_etats"
+                }
+            }
+        },
+        "contenu_resto_registre_ouvre": {
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "registre_uuid",
+                "date_metier",
+                "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "registre_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Journée du registre créée par la caisse : restaurant_register_days.uuid."
+                },
+                "date_metier": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 2000
+                }
+            },
+            "description": "Ouverture de la journée du registre du terminal (RESTAURANT-1 §4.7, lot R-4). Droit `resto_registre` ; un seul registre ouvert par terminal (`restaurant.registre_deja_ouvert`) ; `date_metier` à plus d'un jour de la date de la caisse dans le fuseau publié : `restaurant.date_metier_invraisemblable`. La session ouverte du terminal y est rattachée."
+        },
+        "resto_registre_ouvre": {
+            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.7, lot R-4) : seule la caisse maîtresse émet ce type. Sans la capacité : rejet_protocole capacite_absente.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "resto_registre_ouvre"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_resto_registre_ouvre"
+                }
+            }
+        },
+        "contenu_resto_registre_clos": {
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "registre_uuid",
+                "note",
+                "z_local"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "registre_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 2000
+                },
+                "z_local": {
+                    "type": "object",
+                    "required": [
+                        "numero",
+                        "total_ventes"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "numero": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 100000000
+                        },
+                        "total_ventes": {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    }
+                }
+            },
+            "description": "Clôture du registre et Z registre (RESTAURANT-1 §4.7, lot R-4). Droit `resto_registre`. Refus : registre inconnu (`restaurant.reference_inconnue`), session ouverte (`restaurant.registre_session_ouverte`), commandes du jour non soldées (`restaurant.registre_commandes_non_soldees`) ; tant qu'une vente ou une version de commande du terminal attend son intégration : `recue` (`restaurant.attente_reglement`). Résultat : `details.z_restaurant` {z_uuid, type `register`, numero} ; `z_local` est gardé pour rapprochement."
+        },
+        "resto_registre_clos": {
+            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.7, lot R-4) : seule la caisse maîtresse émet ce type. Sans la capacité : rejet_protocole capacite_absente.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "resto_registre_clos"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_resto_registre_clos"
+                }
+            }
+        },
+        "contenu_resto_remboursement": {
+            "type": "object",
+            "required": [
+                "maitre_generation",
+                "point_de_vente_uuid",
+                "vente_ref",
+                "commande_uuid",
+                "type",
+                "lignes",
+                "montant",
+                "motif",
+                "autorisations"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "maitre_generation": {
+                    "$ref": "commun.json#/$defs/version",
+                    "description": "Génération de la désignation sous laquelle le fait a été créé."
+                },
+                "point_de_vente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "vente_ref": {
+                    "type": "object",
+                    "required": [
+                        "operation_uuid"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "operation_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Opération `vente` de ce terminal qui a réglé la commande."
+                        }
+                    }
+                },
+                "commande_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Commande que la vente a réglée (son `commande.commande_uuid`)."
+                },
+                "type": {
+                    "enum": [
+                        "retour",
+                        "annulation"
+                    ],
+                    "description": "`retour` : des lignes de la vente, rendues en espèces. `annulation` : toute la vente, rendue sur ses moyens de paiement d’origine ; les quantités réglées reviennent à la commande et une commande soldée est rouverte."
+                },
+                "lignes": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "description": "Au moins une pour `retour`, aucune pour `annulation`.",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "ligne_uuid",
+                            "quantite"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "ligne_uuid": {
+                                "$ref": "commun.json#/$defs/uuid",
+                                "description": "ligne_uuid de la vente."
+                            },
+                            "quantite": {
+                                "$ref": "commun.json#/$defs/quantite",
+                                "description": "En unité de base (quantite_base de la vente)."
+                            }
+                        }
+                    }
+                },
+                "montant": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Montant rendu, calculé par parts archivées comme ReturnService ; différent du calcul serveur : `restaurant.remboursement_incoherent`, rien n’est remboursé."
+                },
+                "motif": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                },
+                "autorisations": {
+                    "type": "array",
+                    "maxItems": 5,
+                    "items": {
+                        "$ref": "#/$defs/autorisation_restaurant"
+                    }
+                }
+            },
+            "description": "Remboursement restaurant de la caisse maîtresse (RESTAURANT-1 §4.10, lot R-5), règles de RefundService : vente de ce terminal intégrée et liée à une commande du Restaurant (profil PRODUCTION) de ce point de vente. Droits `ANNULATION` (annulation) ou `RETOUR_CREER` et `RETOUR_REMBOURSER_ESPECES` (retour), sinon autorisation `remboursement` ; motif obligatoire. Vente pas encore intégrée ou règlement pas encore rapproché : `recue` `restaurant.attente_reglement`. Effet sur le Z restaurant : retours de la session, vente annulée retirée du chiffre."
+        },
+        "resto_remboursement": {
+            "description": "Capacité restaurant.v1 (RESTAURANT-1 §4.10, lot R-5) : seule la caisse maîtresse émet ce type. Sans la capacité : rejet_protocole capacite_absente.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "resto_remboursement"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_resto_remboursement"
                 }
             }
         }

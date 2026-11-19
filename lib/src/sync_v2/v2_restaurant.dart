@@ -468,7 +468,7 @@ extension _V2Restaurant on V2Engine {
       return RestoOutcome.nonEnvoye;
     }
     try {
-      socket.add(offlineTicketBytes(text));
+      socket.add(offlineTicketBytes([for (final line in text) stripAccents(line)]));
       await socket.flush().timeout(const Duration(seconds: 8));
       await socket.close().timeout(const Duration(seconds: 4));
       return RestoOutcome.transmis;

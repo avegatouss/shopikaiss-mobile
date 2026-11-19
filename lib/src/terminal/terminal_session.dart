@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart' show databaseFactory, getDatabasesPath;
 import '../app_settings.dart';
 import '../offline/api.dart';
 import '../offline/caisse_engine.dart';
+import '../offline/models.dart';
 import '../offline/store.dart';
 import '../offline/ticket.dart';
 import '../restaurant/resto_engine.dart';
@@ -90,7 +91,7 @@ class TerminalSession extends ChangeNotifier {
   }
 
   Future<RestoOutcome> _printProductionTicket(List<String> text) async {
-    final result = await channel.printRaw(offlineTicketBytes(text));
+    final result = await channel.printRaw(offlineTicketBytes([for (final line in text) stripAccents(line)]));
     if (result.ok) return RestoOutcome.transmis;
     // Refus avant tout octet (imprimante absente, en chauffe, en démarrage) : échec certain ; sinon issue inconnue.
     const beforeAnyByte = {'printer_not_configured', 'printer_overheated', 'printer_initialising'};

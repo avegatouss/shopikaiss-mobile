@@ -805,12 +805,17 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     final ok = await _run(() async => sent = await _engine.restoSend(_operator, widget.orderUuid), title: 'Envoi impossible');
     if (!ok || sent == null || !mounted) return;
     final tickets = sent!.tickets;
-    if (tickets.isEmpty) return widget.host._toast('Commande validée.');
+    // Comme « Mettre en attente » du web (TBC) : la commande reste ouverte et l'on revient à la salle.
+    if (tickets.isEmpty) {
+      widget.host._toast('Commande validée.');
+      return Navigator.pop(context);
+    }
     final states = {for (final t in await _engine.restoTickets(orderUuid: widget.orderUuid)) t.ticket.uuid: t.state};
     final missed = tickets.where((t) => states[t.uuid] != RestoDeliveryState.delivered).length;
     if (!mounted) return;
     if (missed == 0) {
       widget.host._toast('${tickets.length} bon${tickets.length > 1 ? 's' : ''} envoyé${tickets.length > 1 ? 's' : ''}.');
+      Navigator.pop(context);
     } else {
       await _refuse('$missed bon${missed > 1 ? 's' : ''} sur ${tickets.length} pas reçu${missed > 1 ? 's' : ''} avec certitude : vérifiez au poste depuis « Bons ».',
           title: 'Envoi à vérifier');

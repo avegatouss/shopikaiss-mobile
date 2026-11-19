@@ -1,0 +1,150 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000501",
+    "type": "resto_commande",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 501,
+    "cree_le": "2026-11-18T19:12:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000002",
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000031",
+        "version": 2,
+        "action": "lignes",
+        "fait": {
+            "ajoutees": [
+                "e1000000-0000-4000-8000-000000000031",
+                "e1000000-0000-4000-8000-000000000032",
+                "e1000000-0000-4000-8000-000000000033",
+                "e1000000-0000-4000-8000-000000000034"
+            ],
+            "modifiees": [],
+            "retirees": []
+        },
+        "motif": "Repas de service",
+        "autorisations": [
+            {
+                "type": "remise",
+                "approbateur_id": "3",
+                "motif": "Repas du personnel",
+                "preuve": "code_local|2026-11-18T19:11:40Z"
+            }
+        ],
+        "etat": {
+            "profil": "PRODUCTION",
+            "numero_local": "PF-20261118-L0031",
+            "date_metier": "2026-11-18",
+            "canal": "sur_place",
+            "table_uuid": "7ab1e000-0000-4000-8000-0000000000e1",
+            "menu_uuid": null,
+            "couverts": 2,
+            "serveur_id": "7",
+            "client_uuid": null,
+            "client_nom": null,
+            "reference_externe": null,
+            "commentaire": null,
+            "statut": "open",
+            "etape": null,
+            "prefactures": 0,
+            "remise_globale": 0,
+            "remise_globale_source": "fidelite",
+            "lignes": [
+                {
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000031",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000102",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Mojito",
+                    "quantite": "2.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 3000,
+                    "remise": 1200,
+                    "tarif": "happy_hour",
+                    "statut": "pending",
+                    "poste_uuid": null,
+                    "commentaire": null,
+                    "parent_ligne_uuid": null,
+                    "envoye": "0.000000",
+                    "reglee": "0.000000",
+                    "promotion_uuid": "b0000000-0000-4000-8000-000000000501",
+                    "personnel_id": null
+                },
+                {
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000032",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000103",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Croissant",
+                    "quantite": "2.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 500,
+                    "remise": 0,
+                    "tarif": "standard",
+                    "statut": "pending",
+                    "poste_uuid": null,
+                    "commentaire": null,
+                    "parent_ligne_uuid": null,
+                    "envoye": "0.000000",
+                    "reglee": "0.000000",
+                    "promotion_uuid": "b0000000-0000-4000-8000-000000000502",
+                    "personnel_id": null
+                },
+                {
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000033",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000103",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Croissant",
+                    "quantite": "1.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 500,
+                    "remise": 500,
+                    "tarif": "free",
+                    "statut": "pending",
+                    "poste_uuid": null,
+                    "commentaire": null,
+                    "parent_ligne_uuid": "e1000000-0000-4000-8000-000000000032",
+                    "envoye": "0.000000",
+                    "reglee": "0.000000",
+                    "promotion_uuid": "b0000000-0000-4000-8000-000000000502",
+                    "personnel_id": null
+                },
+                {
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000034",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000101",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Pizza margherita",
+                    "quantite": "1.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 5000,
+                    "remise": 2500,
+                    "tarif": "staff",
+                    "statut": "pending",
+                    "poste_uuid": null,
+                    "commentaire": null,
+                    "parent_ligne_uuid": null,
+                    "envoye": "0.000000",
+                    "reglee": "0.000000",
+                    "promotion_uuid": "b0000000-0000-4000-8000-000000000503",
+                    "personnel_id": "12"
+                }
+            ],
+            "totaux": {
+                "brut": 12500,
+                "remises": 4200,
+                "a_payer": 8300,
+                "regle": 0
+            }
+        }
+    },
+    "empreinte": "0ee1402d4d0666c4cc7e4d21955ef996d2afe9549de869ad9e314e4021f15e57"
+}

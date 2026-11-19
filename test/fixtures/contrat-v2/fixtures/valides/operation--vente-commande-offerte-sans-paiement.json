@@ -1,0 +1,68 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000525",
+    "type": "vente",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 525,
+    "cree_le": "2026-11-18T19:12:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "numero_local": "HL-PAT-000525",
+        "brouillon_uuid": "b1000000-0000-4000-8000-000000000525",
+        "session_uuid": "a0000000-0000-4000-8000-000000000500",
+        "client_uuid": null,
+        "tva": {
+            "taux": "0.000000",
+            "incluse": false
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "e2000000-0000-4000-8000-000000000025",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000101",
+                "conditionnement_uuid": null,
+                "libelle": "Pizza margherita",
+                "quantite": "1.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "1.000000",
+                "prix_unitaire": 5000,
+                "remise": 5000,
+                "total": 0,
+                "revision_prix": "1"
+            }
+        ],
+        "remise_globale": 0,
+        "livraison": 0,
+        "totaux": {
+            "brut": 5000,
+            "remises": 5000,
+            "base_ht": 0,
+            "tva": 0,
+            "a_payer": 0
+        },
+        "paiements": [],
+        "mouvements": [],
+        "autorisations": [],
+        "commande": {
+            "commande_uuid": "c0aa0000-0000-4000-8000-000000000033",
+            "reglement_uuid": "d0000000-0000-4000-8000-000000000525",
+            "type": "full",
+            "lignes": [
+                {
+                    "ligne_commande_uuid": "e1000000-0000-4000-8000-000000000036",
+                    "ligne_vente_uuid": "e2000000-0000-4000-8000-000000000025",
+                    "quantite": "1.000000"
+                }
+            ],
+            "parts": null,
+            "libelle": null
+        }
+    },
+    "empreinte": "39c438eeb7c2d5023274c3d674f07a26b81224442f0fc41b418f4e7a38fb325b"
+}

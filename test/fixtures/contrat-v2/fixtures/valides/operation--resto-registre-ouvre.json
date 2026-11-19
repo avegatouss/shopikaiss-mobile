@@ -1,0 +1,24 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000310",
+    "type": "resto_registre_ouvre",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 370,
+    "cree_le": "2026-11-17T17:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+        "registre_uuid": "e9000000-0000-4000-8000-000000000001",
+        "date_metier": "2026-11-17",
+        "note": "Service du soir"
+    },
+    "empreinte": "8a6879d5c75de4f2cf2249879c257a1953018186dbd80995c0e24481c845ba54"
+}

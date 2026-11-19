@@ -1,0 +1,42 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000524",
+    "type": "resto_remboursement",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 524,
+    "cree_le": "2026-11-18T19:12:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000002",
+        "vente_ref": {
+            "operation_uuid": "a0000000-0000-4000-8000-000000000520"
+        },
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000031",
+        "type": "retour",
+        "lignes": [
+            {
+                "ligne_uuid": "e2000000-0000-4000-8000-000000000002",
+                "quantite": "1.000000"
+            }
+        ],
+        "montant": 3000,
+        "motif": "Boisson renversée",
+        "autorisations": [
+            {
+                "type": "credit",
+                "approbateur_id": "3",
+                "motif": "Retour accepté",
+                "preuve": "code_local|2026-11-18T19:11:52Z"
+            }
+        ]
+    },
+    "empreinte": "83441b662d5b360cd506b6ffb8da96ab78cdf8ee4da462584fe5f6c68ce36ef8"
+}

@@ -339,7 +339,7 @@ void main() {
     final [savonLine, emballage] = [for (final l in view.order.lines) l.uuid];
     view = await e.restoSend(koffi, order);
     expect([for (final t in view.tickets) (t.stationUuid, t.dayNumber, t.firstSend)], [(cuisine, 'CUI-20261118-0008', true), (bar, 'BAR-20261118-0001', true)]);
-    expect(printed, ['poste 192.168.1.50:9100 BON · Cuisine', 'caisse BON · Bar'], reason: 'afficheur absent : échec certain, secours caisse');
+    expect(printed, ['poste 192.168.1.50:9100 BON - Cuisine', 'caisse BON - Bar'], reason: 'afficheur absent : échec certain, secours caisse');
     var tickets = await e.restoTickets(orderUuid: order);
     expect(tickets.every((t) => t.state == RestoDeliveryState.delivered), isTrue);
     await expectLater(e.restoSend(koffi, order), refused('Rien de nouveau'));

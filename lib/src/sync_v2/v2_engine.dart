@@ -1563,7 +1563,8 @@ class V2Engine extends CaisseEngine {
       for (final m in (await v2.entities('moyen_paiement')).values)
         if (m['local'] == true && (m['especes'] == true || declared) && localMethods.contains(m['code']))
           {'code': m['code'], 'nom': m['nom'], 'especes': m['especes'] == true, 'reference': m['reference']},
-    ];
+    ]..sort((a, b) => localMethods.indexOf(a['code'] as String).compareTo(localMethods.indexOf(b['code'] as String)));
+    // Moyen proposé par défaut = premier de l'ordre de la boutique (paiements.moyens_locaux), jamais l'ordre de stockage.
     final rights = <int, List<String>>{};
     final caps = <int, (BigInt?, int?)>{};
     final operators = <Map<String, dynamic>>[];
