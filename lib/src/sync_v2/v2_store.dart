@@ -79,6 +79,9 @@ class V2Keys {
 
   /// Préfixe du Z rendu par le serveur pour une clôture (`details.z`).
   static const zPrefix = 'v2.z.';
+
+  /// Z restaurant rendu par le serveur (`details.z_restaurant` : clôture de session ou de registre), par opération.
+  static const zRestaurantPrefix = 'v2.zr.';
   static const imageWindow = 'v2.images_plage';
 }
 
@@ -97,6 +100,7 @@ const knownRestaurantTypes = {
   'restaurant.point_de_vente', 'restaurant.maitre', 'restaurant.reglages', //
   'restaurant.salle', 'restaurant.table', 'restaurant.menu', 'restaurant.categorie', //
   'restaurant.poste', 'restaurant.routage',
+  'restaurant.canal', // R-4 (profil Restaurant)
 };
 
 /// Résultat de l'application d'une page du journal.
@@ -481,6 +485,8 @@ class V2Store {
     final cursor = (r['couverture'] as Map?)?['curseur'] as String?;
     final z = (r['details'] as Map?)?['z'];
     if (z != null) await write('${V2Keys.zPrefix}$uuid', jsonEncode(z), txn);
+    final zRestaurant = (r['details'] as Map?)?['z_restaurant'];
+    if (zRestaurant != null) await write('${V2Keys.zRestaurantPrefix}$uuid', jsonEncode(zRestaurant), txn);
     await txn.update(
       'v2_operations',
       {

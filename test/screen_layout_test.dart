@@ -190,15 +190,127 @@ class _RestaurantEngine extends OfflineEngine {
       _keep(_resto.cancelLine(orders[orderUuid]!, lineUuid, quantity, reason), 'annulation_ligne');
 
   @override
+  bool restoNeedsApproval(Operator operator, String type) => false;
+
+  @override
+  Future<RestoOrderView> restoOffer(Operator operator, String orderUuid, String lineUuid, String reason, {RestoApproval? approval}) async =>
+      _keep(_resto.offer(orders[orderUuid]!, lineUuid, reason), 'offert');
+
+  @override
+  Future<RestoOrderView> restoDiscountLine(Operator operator, String orderUuid, String lineUuid, {required bool percent, required int value, required String reason, RestoApproval? approval}) async =>
+      _keep(_resto.discountLine(orders[orderUuid]!, lineUuid, percent: percent, value: value, reason: reason), 'remise_ligne');
+
+  @override
+  Future<RestoOrderView> restoDiscountOrder(Operator operator, String orderUuid, int amount, {String? reason, RestoApproval? approval}) async =>
+      _keep(_resto.discountOrder(orders[orderUuid]!, amount, reason: reason), 'remise');
+
+  @override
+  int restoOrderDiscountCeiling(RestoOrder order) => RestoEngine.orderDiscountCeiling(order, 100);
+
+  @override
+  Future<RestoOrderView> restoMoveLines(Operator operator, String orderUuid, String targetUuid, Set<String> lineUuids) async {
+    final r = _resto.moveLines(orders[orderUuid]!, orders[targetUuid]!, lineUuids);
+    orders[targetUuid] = RestoEngine.receive(orders[targetUuid]!, orders[orderUuid]!, r.event.action, r.event.fact);
+    return _keep(r, 'deplacement_lignes');
+  }
+
+  @override
+  Future<RestoOrderView> restoMerge(Operator operator, String orderUuid, String targetUuid, {String? reason}) async {
+    final r = _resto.merge(orders[orderUuid]!, orders[targetUuid]!, reason: reason);
+    orders[targetUuid] = RestoEngine.receive(orders[targetUuid]!, orders[orderUuid]!, r.event.action, r.event.fact);
+    return _keep(r, 'fusion');
+  }
+
+  @override
+  Future<RestoOrderView> restoCoversAndServer(Operator operator, String orderUuid, {int? covers, String? serverId}) async =>
+      _keep(_resto.coversAndServer(orders[orderUuid]!, covers: covers, serverId: serverId), 'couverts_serveur');
+
+  @override
+  Future<RestoOrderView> restoValidateCustomer(Operator operator, String orderUuid) async => _keep(_resto.validateCustomer(orders[orderUuid]!), 'validation_client');
+
+  @override
   Future<List<CartLine>> restoCart(String orderUuid) async => [
     for (final l in orders[orderUuid]!.activeLines) CartLine(product: snapshot!.byId(int.parse(l.productUuid))!, quantity: BigInt.from(l.quantity), fixedPrice: l.unitPrice),
   ];
 
   @override
-  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) async {
+  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid, List<RestoShare>? shares}) async {
     settledWith = payments;
     final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid);
     _keep(_resto.close(orders[orderUuid]!), 'cloture');
+    return sale;
+  }
+}
+
+/// Caisse maîtresse d'un point de vente Restaurant (profil `PRODUCTION`, R-4) : canaux, « Valider », règlements par
+/// articles et par parts, registre ouvert.
+class _ProductionEngine extends _RestaurantEngine {
+  _ProductionEngine({required super.store, required super.transport});
+
+  final _cartLines = Map<CartLine, String>.identity();
+  List<RestoShare>? settledShares;
+
+  @override
+  RestoContext? get restaurant => const RestoContext(
+    pointOfSaleUuid: 'pdv',
+    pointOfSaleName: 'Restaurant',
+    profile: 'PRODUCTION',
+    master: true,
+    generation: '1',
+    tables: [RestoTable(uuid: 't1', name: 'T1', capacity: 4, order: 1)],
+    channels: [
+      RestoChannel(uuid: 'c1', code: 'sur_place', name: 'Sur place', kind: 'dine_in', requiresTable: true, order: 1),
+      RestoChannel(uuid: 'c2', code: 'emporter', name: 'Emporter', kind: 'takeaway', order: 2),
+      RestoChannel(uuid: 'c3', code: 'livraison', name: 'Livraison', kind: 'delivery', requiresReference: true, order: 3),
+    ],
+  );
+
+  @override
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) async =>
+      _keep(_resto.open(prefix: 'PF', businessDay: '2026-11-18', profile: 'PRODUCTION', channel: channelCode, tableUuid: tableUuid, externalReference: reference, customerName: customerName), 'ouverture');
+
+  @override
+  Future<RestoOrderView> restoSend(Operator operator, String orderUuid) async => _keep(_resto.validate(orders[orderUuid]!), 'validation');
+
+  @override
+  Future<RestoRegisterView?> restoRegister() async => RestoRegisterView(uuid: 'r', businessDay: '2026-11-18', openedAt: DateTime(2026, 11, 18, 17), salesTotal: 0);
+
+  @override
+  String? restoRegisterBlocker(Operator operator) => null;
+
+  List<CartLine> _cart(String orderUuid, Map<String, int>? quantities) {
+    final cart = <CartLine>[];
+    for (final l in orders[orderUuid]!.activeLines) {
+      final quantity = quantities == null ? l.quantity - l.settled : quantities[l.uuid] ?? 0;
+      if (quantity <= 0) continue;
+      final line = CartLine(product: snapshot!.byId(int.parse(l.productUuid))!, quantity: BigInt.from(quantity), fixedPrice: l.unitPrice);
+      _cartLines[line] = l.uuid;
+      cart.add(line);
+    }
+    return cart;
+  }
+
+  @override
+  Future<List<CartLine>> restoCart(String orderUuid) async => _cart(orderUuid, null);
+
+  @override
+  Future<List<CartLine>> restoCartItems(String orderUuid, Map<String, int> quantities) async => _cart(orderUuid, quantities);
+
+  @override
+  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid, List<RestoShare>? shares}) async {
+    settledWith = payments;
+    settledShares = shares;
+    final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid);
+    final order = orders[orderUuid]!;
+    for (final c in lines) {
+      order.line(_cartLines[c]!).settled += c.quantity.toInt();
+    }
+    actions.add(shares != null ? 'vente:shares' : 'vente');
+    if (order.activeLines.every((l) => l.settled >= l.quantity)) {
+      _keep(_resto.close(order), 'cloture');
+    } else {
+      notifyListeners();
+    }
     return sale;
   }
 }
@@ -211,6 +323,7 @@ Future<TerminalSession> _session({
   bool rich = false,
   bool approver = false,
   bool restaurant = false,
+  bool production = false,
 }) async {
   final snapshot = _snapshot();
   if (approver) {
@@ -249,7 +362,9 @@ Future<TerminalSession> _session({
       StoreKeys.snapshotAt: DateTime.now().toUtc().toIso8601String(),
       StoreKeys.lastContact: DateTime.now().toUtc().toIso8601String(),
     });
-  final engine = restaurant
+  final engine = production
+      ? _ProductionEngine(store: store, transport: _Offline())
+      : restaurant
       ? _RestaurantEngine(store: store, transport: _Offline())
       : approver
       ? _ApprovalEngine(store: store, transport: _Offline())
@@ -482,6 +597,239 @@ void main() {
       await tester.pumpAndSettle();
       expect(engine.actions.last, 'annulation_ligne:4');
       expect(engine.orders.values.single.activeLines.single.quantity, 1000000);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Service de table (R-4) : offrir, remise d’article et de commande, couverts, fusion avec une autre table', (tester) async {
+      final session = await _session(inches: 10.1, restaurant: true);
+      final engine = session.offline as _RestaurantEngine;
+      final awa = engine.snapshot!.operators.first;
+      // Une commande déjà ouverte à la table 2, cible de la fusion.
+      final other = (await engine.restoOpen(awa, 't2')).order.uuid;
+      await _pump(tester, const Size(1280, 800), session);
+      await tester.tap(find.text('Salle'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('table-t1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 3 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      // Offrir le second article : motif obligatoire.
+      await tester.tap(find.byTooltip('Offrir ou remiser').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Offrir').last);
+      await tester.pumpAndSettle();
+      expect(find.textContaining('3 000 F de remise'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Offrir'));
+      await tester.pumpAndSettle();
+      expect(find.text('Indiquez le motif (3 caractères au moins).'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Motif (obligatoire)'), 'Anniversaire');
+      await tester.tap(find.widgetWithText(FilledButton, 'Offrir'));
+      await tester.pumpAndSettle();
+      expect(engine.actions.last, 'offert:3');
+      expect(find.textContaining('Offert'), findsOneWidget);
+      expect(tester.widgetList<PopupMenuButton<String>>(find.byType(PopupMenuButton<String>)).where((m) => m.tooltip == 'Offrir ou remiser' && m.enabled).length, 1,
+          reason: 'un offert ne se remise plus');
+      // Remise de 10 % sur le premier article.
+      await tester.tap(find.byTooltip('Offrir ou remiser').first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remise').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Pourcentage'));
+      await tester.pump();
+      await tester.enterText(find.byKey(const ValueKey('gesture-value')), '10');
+      await tester.enterText(find.widgetWithText(TextField, 'Motif (obligatoire)'), 'Attente');
+      await tester.tap(find.widgetWithText(FilledButton, 'Appliquer la remise'));
+      await tester.pumpAndSettle();
+      expect(engine.actions.last, 'remise_ligne:4');
+      expect(find.textContaining('Remise 400 F'), findsOneWidget);
+      // Remise sur la commande, plafonnée au montant après remises de ligne.
+      await tester.tap(find.byTooltip('Plus d’actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remise sur la commande'));
+      await tester.pumpAndSettle();
+      expect(find.text('Plafond : 3 600 F'), findsOneWidget);
+      await tester.enterText(find.byKey(const ValueKey('gesture-value')), '5000');
+      await tester.enterText(find.widgetWithText(TextField, 'Motif (obligatoire)'), 'Client fidèle');
+      await tester.tap(find.widgetWithText(FilledButton, 'Appliquer la remise'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('plafonnée'), findsWidgets);
+      await tester.enterText(find.byKey(const ValueKey('gesture-value')), '500');
+      await tester.tap(find.widgetWithText(FilledButton, 'Appliquer la remise'));
+      await tester.pumpAndSettle();
+      expect(engine.actions.last, 'remise:5');
+      expect(find.text('Remise 500 F'), findsOneWidget);
+      expect(find.text('3 100 F'), findsWidgets);
+      // Couverts et serveur.
+      await tester.tap(find.byTooltip('Plus d’actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Couverts et serveur'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.add).last);
+      await tester.pump();
+      await tester.tap(find.widgetWithText(FilledButton, 'Enregistrer'));
+      await tester.pumpAndSettle();
+      expect(engine.actions.last, 'couverts_serveur:6');
+      expect(find.text('5 couverts'), findsOneWidget);
+      // Fusion avec la table 2 : la commande est annulée, retour à la salle.
+      await tester.tap(find.byTooltip('Plus d’actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Fusionner avec une table'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining('T2 ·'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Fusionner'));
+      await tester.pumpAndSettle();
+      expect(engine.actions.last, 'fusion:7');
+      final merged = engine.orders[other]!;
+      expect([merged.version, merged.activeLines.length, merged.globalDiscount, merged.covers], [1, 2, 500, 5]);
+      expect(find.byKey(const ValueKey('table-t1')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Service de table (R-4) sur téléphone 6,5 pouces : gestes de ligne et de commande sans débordement', (tester) async {
+      final session = await _session(inches: 6.5, restaurant: true);
+      await _pump(tester, const Size(412, 892), session);
+      await tester.tap(find.text('Salle'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('table-t1')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ajouter'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Article numéro 1 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Commande (1)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Offrir ou remiser'), findsOneWidget);
+      expect(find.byTooltip('Plus d’actions'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+    testWidgets('Restaurant (R-4) : commandes par canal dès la connexion, nouvelle commande, « Valider », réglée par articles puis par parts', (tester) async {
+      final session = await _session(inches: 10.1, production: true);
+      final engine = session.offline as _ProductionEngine;
+      await _pump(tester, const Size(1280, 800), session);
+      await tester.pumpAndSettle();
+      // Écran restaurant ouvert directement : commandes ouvertes, registre, nouvelle commande.
+      expect(find.byKey(const ValueKey('resto-nouvelle-commande')), findsOneWidget);
+      expect(find.text('Aucune commande ouverte.'), findsOneWidget);
+      expect(find.textContaining('Registre du 2026-11-18 ouvert'), findsOneWidget);
+      expect(find.text('Commandes'), findsOneWidget, reason: 'bascule Commandes / Caisse');
+      await tester.tap(find.byKey(const ValueKey('resto-nouvelle-commande')));
+      await tester.pumpAndSettle();
+      // Sur place exige une table ; Emporter n'en prend pas.
+      await tester.tap(find.byKey(const ValueKey('canal-sur_place')));
+      await tester.pumpAndSettle();
+      expect(find.text('Table'), findsOneWidget);
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      expect(find.text('Choisissez la table.'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('canal-emporter')));
+      await tester.pumpAndSettle();
+      expect(find.text('Table'), findsNothing);
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Emporter · PF-20261118-L0001'), findsOneWidget);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 3 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider'));
+      await tester.pumpAndSettle();
+      expect(engine.actions, ['ouverture:1', 'lignes:2', 'validation:3']);
+      // Retour à la liste : la commande est rangée sous son canal.
+      expect(find.text('Emporter (1)'), findsOneWidget);
+      await tester.tap(find.text('PF-20261118-L0001'));
+      await tester.pumpAndSettle();
+
+      // Par articles : un article 2 réglé, la commande reste ouverte.
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Articles'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Plus').first);
+      await tester.pumpAndSettle();
+      expect(find.text('Sélection : 2 000 F'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('resto-encaisser-suite')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      expect([engine.settledWith!.single.amount, engine.settledShares], [2000, null]);
+      expect(find.text('Règlement enregistré : il reste à payer.'), findsOneWidget);
+      await tester.tap(find.text('Retour à la commande'));
+      await tester.pumpAndSettle();
+      expect(find.text('Réglée en partie'), findsOneWidget);
+
+      // Par parts : le reste (5 000 F) en deux parts payées l'une après l'autre, puis clôture.
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Parts'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Part 1 : 2 500 F'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('resto-encaisser-suite')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Valider la vente'));
+      await tester.pumpAndSettle();
+      expect([for (final s in engine.settledShares!) [s.label, s.amount, s.payments]], [['Part 1', 2500, [0]], ['Part 2', 2500, [1]]]);
+      expect([for (final p in engine.settledWith!) p.amount], [2500, 2500]);
+      expect(engine.actions, ['ouverture:1', 'lignes:2', 'validation:3', 'vente', 'vente:shares', 'cloture:4']);
+      expect(find.text('Commande réglée et close.'), findsOneWidget);
+      await tester.tap(find.text('Retour à la salle'));
+      await tester.pumpAndSettle();
+      expect(find.text('Aucune commande ouverte.'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Restaurant (R-4) sur téléphone 5 pouces : liste, nouvelle commande, choix d’encaissement et registre sans débordement', (tester) async {
+      final session = await _session(inches: 5.0, production: true);
+      await _pump(tester, const Size(360, 640), session);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('resto-nouvelle-commande')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('canal-livraison')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      expect(find.text('Saisissez la référence de la commande.'), findsOneWidget);
+      await tester.enterText(find.widgetWithText(TextField, 'Référence (obligatoire)'), 'GLV-1234');
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Livraison · PF-20261118-L0001'), findsOneWidget);
+      expect(find.text('Réf. GLV-1234'), findsOneWidget);
+      await tester.tap(find.text('Ajouter'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Article numéro 1 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Encaisser'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Articles'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('1 à régler'), findsOneWidget);
+      await tester.tap(find.text('Annuler'));
+      await tester.pumpAndSettle();
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('Livraison (1)'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('resto-registre')));
+      await tester.pumpAndSettle();
+      expect(find.text('Clôturer le registre'), findsOneWidget);
+      expect(find.textContaining('Clôturez d’abord la session'), findsOneWidget);
+      await tester.tap(find.text('Fermer'));
+      await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
     });
 

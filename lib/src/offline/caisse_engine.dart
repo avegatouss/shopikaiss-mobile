@@ -12,6 +12,7 @@ import 'money.dart';
 import 'notifier.dart';
 import 'store.dart';
 import 'web_rules.dart';
+import 'x_z_report.dart';
 
 /// Vérifie un PIN contre l'empreinte bcrypt du serveur (Laravel écrit `$2y$`, équivalent de `$2a$`).
 Future<bool> verifyPinHash(String pin, String hash) => Isolate.run(() => _checkPin([pin, hash]));
@@ -294,12 +295,50 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Annuler un article envoyé exige-t-il l'autorisation d'un responsable pour [operator] ?
   bool restoApprovalRequired(Operator operator) => true;
 
-  /// Responsables qui peuvent autoriser l'annulation d'un envoyé de [amount] F pour [cashier].
-  Future<List<Operator>> restoApprovers(Operator cashier, int amount) async => const [];
+  /// Responsables qui peuvent autoriser l'annulation d'un envoyé de [amount] F pour [cashier] ; [type] : autre geste
+  /// (`resto_offrir`, `remise`, R-4) et [percent] : remise en % arrondi au supérieur (plafond de l'assistant).
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) async => const [];
 
-  /// Vérifie le code de 8 chiffres de [approver] et rend l'autorisation à joindre à l'annulation.
-  Future<RestoApproval> restoAuthorize({required Operator cashier, required Operator approver, required String code, required String reason, required int amount}) =>
+  /// Vérifie le code de 8 chiffres de [approver] et rend l'autorisation à joindre à l'annulation (ou au geste [type]).
+  Future<RestoApproval> restoAuthorize({
+    required Operator cashier,
+    required Operator approver,
+    required String code,
+    required String reason,
+    required int amount,
+    String type = 'resto_modifier_envoye',
+    int? percent,
+  }) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  // ---------------------------------------------------------------- gestes sur une commande (R-4)
+
+  /// Le geste [type] (`resto_offrir`, `remise`) exige-t-il l'autorisation d'un responsable pour [operator] ?
+  bool restoNeedsApproval(Operator operator, String type) => true;
+
+  /// Offre un article (remise = brut de la ligne, quantité inchangée), motif de 3 caractères au moins.
+  Future<RestoOrderView> restoOffer(Operator operator, String orderUuid, String lineUuid, String reason, {RestoApproval? approval}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Remise d'un article : [value] francs, ou [value] % du brut ([percent], arrondi vers le bas) ; motif obligatoire.
+  Future<RestoOrderView> restoDiscountLine(Operator operator, String orderUuid, String lineUuid, {required bool percent, required int value, required String reason, RestoApproval? approval}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Remise de la commande en francs, plafonnée ([restoOrderDiscountCeiling]) ; 0 la retire (droit Remise, sans motif).
+  Future<RestoOrderView> restoDiscountOrder(Operator operator, String orderUuid, int amount, {String? reason, RestoApproval? approval}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Remise de commande maximale pour [order].
+  int restoOrderDiscountCeiling(RestoOrder order) => 0;
+
+  /// Déplace des articles de [orderUuid] vers la commande [targetUuid] (une opération sur la source).
+  Future<RestoOrderView> restoMoveLines(Operator operator, String orderUuid, String targetUuid, Set<String> lineUuids) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Regroupe [orderUuid] dans [targetUuid] : articles, couverts et remises passent à la cible, la source est annulée.
+  Future<RestoOrderView> restoMerge(Operator operator, String orderUuid, String targetUuid, {String? reason}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Couverts et serveur de la commande.
+  Future<RestoOrderView> restoCoversAndServer(Operator operator, String orderUuid, {int? covers, String? serverId}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Le client a validé la préfacture (Service de table).
+  Future<RestoOrderView> restoValidateCustomer(Operator operator, String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Bons de production de ce terminal (d'une commande si [orderUuid]) et état de leur livraison.
   Future<List<RestoTicketView>> restoTickets({String? orderUuid}) async => const [];
@@ -333,9 +372,36 @@ abstract class CaisseEngine extends EngineNotifier {
   Future<List<CartLine>> restoCart(String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Encaisse toute la commande (vente v2 avec `commande` de type `full`), puis la clôt. [lines] : panier rendu par
-  /// [restoCart], inchangé.
-  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) =>
+  /// [restoCart] ou [restoCartItems], inchangé. Profil Restaurant (R-4) : une partie du reste (`items`), ou tout le reste
+  /// partagé en [shares] (`shares`, chaque paiement dans une part et une seule) ; la commande se clôt une fois soldée.
+  Future<OfflineOperation> restoSettle(
+    Operator operator,
+    String orderUuid,
+    List<CartLine> lines,
+    List<CartPayment> payments, {
+    String? draftUuid,
+    List<RestoShare>? shares,
+  }) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Profil Restaurant (R-4) : ouvre une commande sur le canal [channelCode] (table si le canal l'exige, référence
+  /// externe si le canal l'exige).
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Panier d'un règlement par articles (profil Restaurant) : [quantities] par ligne de commande (millionièmes), au plus
+  /// le reste à régler de chacune.
+  Future<List<CartLine>> restoCartItems(String orderUuid, Map<String, int> quantities) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Registre (journée) de cette caisse : le dernier ouvert, clos ou non ; null si aucun.
+  Future<RestoRegisterView?> restoRegister() async => null;
+
+  /// Pourquoi [operator] ne peut pas ouvrir ou clôturer le registre (caisse maîtresse, droit `resto_registre`), ou null.
+  String? restoRegisterBlocker(Operator operator) => 'Restaurant non disponible sur ce terminal.';
+
+  Future<RestoRegisterView> restoRegisterOpen(Operator operator, {String? note}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Clôture du registre et Z local (session close, commandes soldées).
+  Future<RestoRegisterView> restoRegisterClose(Operator operator, {String? note}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Clôt une commande déjà réglée par une vente de ce terminal (clôture interrompue).
   Future<RestoOrderView> restoClose(Operator operator, String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
@@ -387,6 +453,10 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Dernière clôture émise par ce terminal, ou null ; son contenu porte `z` une fois intégrée.
   Future<OfflineOperation?> lastClosure() async => null;
+
+  /// Faits de clôture lus dans la file du terminal (sessions, ventes, retours, clôtures) pour imprimer pré-X, Z et pré-Z
+  /// sans réseau ; null : documents locaux non disponibles sur ce terminal.
+  Future<ClosureFacts?> closureFacts() async => null;
 
   /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
   bool get customersSupported => false;
@@ -626,9 +696,11 @@ abstract class CaisseEngine extends EngineNotifier {
   int checkSale(Snapshot s, List<CartLine> lines, List<CartPayment> payments, [SaleExtras extras = const SaleExtras()]) {
     if (lines.isEmpty) throw const OfflineRefusal('Le panier est vide.');
     if (lines.length > 100) throw const OfflineRefusal('Au plus 100 lignes par vente.');
+    // Règlement d'une commande restaurant : ses remises, autorisées sur la commande, sont de confiance (R-4).
+    final trusted = extras.order?.trusts(lines, extras.globalDiscount) ?? false;
     for (final line in lines) {
       if (line.quantity <= BigInt.zero) throw OfflineRefusal('Quantité invalide pour « ${line.label} ».');
-      if (line.discount > maxLineDiscount(line.base, s.rules.maxLineDiscountPercent)) {
+      if (!trusted && line.discount > maxLineDiscount(line.base, s.rules.maxLineDiscountPercent)) {
         throw OfflineRefusal('Remise sur « ${line.label} » au-delà du maximum hors ligne (${s.rules.maxLineDiscountPercent} %).');
       }
     }

@@ -593,6 +593,200 @@ class _SentCancelDialogState extends State<_SentCancelDialog> {
   }
 }
 
+/// Geste sur une commande (lot R-4) : offrir un article, remise d'un article (montant ou pourcentage) ou de la commande ;
+/// motif obligatoire, puis, si l'opérateur n'a pas le droit, code de 8 chiffres d'un responsable (même mécanique que
+/// [_SentCancelDialog]).
+enum _Gesture { offer, lineDiscount, orderDiscount }
+
+class _GestureDialog extends StatefulWidget {
+  const _GestureDialog({required this.engine, required this.operator, required this.gesture, required this.title, required this.base, this.ceiling, this.current = 0});
+
+  final CaisseEngine engine;
+  final Operator operator;
+  final _Gesture gesture;
+  final String title;
+
+  /// Brut de la ligne (offert, remise de ligne) ou montant après remises de ligne (remise de commande).
+  final int base;
+
+  /// Remise de commande maximale ; null hors remise de commande.
+  final int? ceiling;
+
+  /// Remise de commande actuelle (0 : aucune à retirer).
+  final int current;
+
+  @override
+  State<_GestureDialog> createState() => _GestureDialogState();
+}
+
+class _GestureDialogState extends State<_GestureDialog> {
+  final _value = TextEditingController();
+  final _reason = TextEditingController();
+  final _code = TextEditingController();
+  bool _percent = false;
+  List<Operator>? _approvers;
+  Operator? _approver;
+  String? _error;
+  bool _busy = false;
+
+  String get _type => widget.gesture == _Gesture.offer ? 'resto_offrir' : 'remise';
+  bool get _needsApproval => widget.engine.restoNeedsApproval(widget.operator, _type);
+  int get _entered => int.tryParse(_value.text.trim().replaceAll(' ', '')) ?? 0;
+
+  /// Montant du geste en francs (plafonds de l'assistant).
+  int get _amount => switch (widget.gesture) {
+    _Gesture.offer => widget.base,
+    _Gesture.lineDiscount => _percent ? widget.base * _entered ~/ 100 : _entered,
+    _Gesture.orderDiscount => _entered,
+  };
+
+  /// Pourcentage de la remise arrondi au supérieur (null pour un offert, sans plafond de pourcentage).
+  int? get _percentValue => widget.gesture == _Gesture.offer ? null : (_percent ? _entered : RestoEngine.percentOf(_amount, widget.base));
+
+  @override
+  void initState() {
+    super.initState();
+    _loadApprovers();
+  }
+
+  @override
+  void dispose() {
+    _value.dispose();
+    _reason.dispose();
+    _code.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadApprovers() async {
+    if (!_needsApproval) return;
+    final list = await widget.engine.restoApprovers(widget.operator, _amount, type: _type, percent: _percentValue);
+    if (!mounted) return;
+    setState(() {
+      _approvers = list;
+      if (!list.any((o) => o.id == _approver?.id)) _approver = list.firstOrNull;
+    });
+  }
+
+  Future<void> _confirm() async {
+    if (widget.gesture != _Gesture.offer) {
+      final value = _entered;
+      if (value < 1 || (_percent && value > 100)) return setState(() => _error = _percent ? 'Pourcentage de 1 à 100.' : 'Saisissez un montant d’au moins 1 F.');
+      if (_amount < 1 || (widget.ceiling == null && _amount > widget.base)) return setState(() => _error = 'La remise doit être comprise entre 1 F et ${formatFcfa(widget.base)}.');
+      final ceiling = widget.ceiling;
+      if (ceiling != null && _amount > ceiling) return setState(() => _error = 'La remise de commande est plafonnée à ${formatFcfa(ceiling)}.');
+    }
+    final reason = _reason.text.trim();
+    if (reason.length < 3) return setState(() => _error = 'Indiquez le motif (3 caractères au moins).');
+    RestoApproval? approval;
+    if (_needsApproval) {
+      final approver = _approver;
+      if (approver == null) return setState(() => _error = 'Aucun responsable de ce terminal ne peut autoriser ce geste.');
+      setState(() => _busy = true);
+      try {
+        approval = await widget.engine.restoAuthorize(
+          cashier: widget.operator,
+          approver: approver,
+          code: _code.text.trim(),
+          reason: reason,
+          amount: _amount,
+          type: _type,
+          percent: _percentValue,
+        );
+      } on OfflineRefusal catch (e) {
+        _code.clear();
+        return setState(() {
+          _busy = false;
+          _error = e.message;
+        });
+      }
+    }
+    if (mounted) Navigator.pop(context, (percent: _percent, value: widget.gesture == _Gesture.offer ? widget.base : _entered, reason: reason, approval: approval));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final approvers = _approvers;
+    return AlertDialog(
+      title: Text(widget.title),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (widget.gesture == _Gesture.offer) Text('Article offert : ${formatFcfa(widget.base)} de remise, quantité inchangée.'),
+              if (widget.gesture == _Gesture.lineDiscount)
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    ChoiceChip(label: const Text('Montant'), selected: !_percent, onSelected: (_) {
+                      setState(() => _percent = false);
+                      _loadApprovers();
+                    }),
+                    ChoiceChip(label: const Text('Pourcentage'), selected: _percent, onSelected: (_) {
+                      setState(() => _percent = true);
+                      _loadApprovers();
+                    }),
+                  ],
+                ),
+              if (widget.gesture != _Gesture.offer)
+                TextField(
+                  key: const ValueKey('gesture-value'),
+                  controller: _value,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: InputDecoration(
+                    labelText: _percent ? 'Remise (%)' : 'Remise (F)',
+                    helperText: widget.ceiling == null ? 'Montant de la ligne : ${formatFcfa(widget.base)}' : 'Plafond : ${formatFcfa(widget.ceiling!)}',
+                  ),
+                  onChanged: (_) {
+                    setState(() => _error = null);
+                    _loadApprovers();
+                  },
+                ),
+              TextField(controller: _reason, maxLength: 500, decoration: const InputDecoration(labelText: 'Motif (obligatoire)')),
+              if (_needsApproval) ...[
+                const SizedBox(height: 4),
+                const Text('Un responsable autorise avec son code.', style: TextStyle(color: Colors.black54)),
+                if (approvers == null)
+                  const Padding(padding: EdgeInsets.all(8), child: Center(child: CircularProgressIndicator()))
+                else if (approvers.isEmpty)
+                  const Padding(padding: EdgeInsets.only(top: 8), child: Text('Aucun responsable de ce terminal ne peut autoriser ce geste.', style: TextStyle(color: Colors.red)))
+                else ...[
+                  DropdownButtonFormField<int>(
+                    initialValue: _approver?.id,
+                    decoration: const InputDecoration(labelText: 'Responsable'),
+                    items: [for (final o in approvers) DropdownMenuItem(value: o.id, child: Text(o.name))],
+                    onChanged: (id) => setState(() => _approver = approvers.firstWhere((o) => o.id == id)),
+                  ),
+                  TextField(
+                    controller: _code,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 8,
+                    decoration: const InputDecoration(labelText: 'Code du responsable (8 chiffres)'),
+                  ),
+                ],
+              ],
+              if (_error != null) Text(_error!, style: const TextStyle(color: Colors.red)),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _busy ? null : () => Navigator.pop(context), child: const Text('Retour')),
+        if (widget.gesture == _Gesture.orderDiscount && widget.current > 0)
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.pop(context, (percent: false, value: 0, reason: '', approval: null)),
+            child: const Text('Retirer la remise'),
+          ),
+        FilledButton(onPressed: _busy ? null : _confirm, child: Text(widget.gesture == _Gesture.offer ? 'Offrir' : 'Appliquer la remise')),
+      ],
+    );
+  }
+}
+
 /// Ligne ajoutée à l'écran, pas encore enregistrée : la validation en fait une version `lignes`.
 class _DraftItem {
   _DraftItem(this.line);
@@ -850,6 +1044,206 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     );
   }
 
+  // ---------------------------------------------------------------- gestes sur une commande (R-4)
+
+  Future<({bool percent, int value, String reason, RestoApproval? approval})?> _gesture(_Gesture gesture, String title, int base, {int? ceiling, int current = 0}) =>
+      showDialog<({bool percent, int value, String reason, RestoApproval? approval})>(
+        context: context,
+        builder: (_) => _GestureDialog(engine: _engine, operator: _operator, gesture: gesture, title: title, base: base, ceiling: ceiling, current: current),
+      );
+
+  /// Article : offert, ou remise en montant ou en pourcentage.
+  Future<void> _lineGesture(RestoLine line, String action) async {
+    if (action == 'offrir') {
+      final result = await _gesture(_Gesture.offer, 'Offrir · ${line.label}', line.gross);
+      if (result == null || !mounted) return;
+      await _run(() => _engine.restoOffer(_operator, widget.orderUuid, line.uuid, result.reason, approval: result.approval), title: 'Offert impossible');
+      return;
+    }
+    final result = await _gesture(_Gesture.lineDiscount, 'Remise · ${line.label}', line.gross);
+    if (result == null || !mounted) return;
+    await _run(
+      () => _engine.restoDiscountLine(_operator, widget.orderUuid, line.uuid, percent: result.percent, value: result.value, reason: result.reason, approval: result.approval),
+      title: 'Remise impossible',
+    );
+  }
+
+  Widget _lineMenu(RestoLine line) => PopupMenuButton<String>(
+    tooltip: 'Offrir ou remiser',
+    enabled: !_busy && !_dirty && line.settled == 0 && !line.free,
+    icon: const Icon(Icons.local_offer_outlined),
+    onSelected: (action) => _lineGesture(line, action),
+    itemBuilder: (_) => const [
+      PopupMenuItem(value: 'offrir', child: Text('Offrir')),
+      PopupMenuItem(value: 'remise', child: Text('Remise')),
+    ],
+  );
+
+  /// Remise de la commande (plafonnée) ou son retrait.
+  Future<void> _orderDiscount(RestoOrder order) async {
+    final result = await _gesture(_Gesture.orderDiscount, 'Remise sur la commande', RestoEngine.orderDiscountBase(order),
+        ceiling: _engine.restoOrderDiscountCeiling(order), current: order.globalDiscount);
+    if (result == null || !mounted) return;
+    await _run(
+      () => _engine.restoDiscountOrder(_operator, widget.orderUuid, result.value, reason: result.value == 0 ? null : result.reason, approval: result.approval),
+      title: 'Remise impossible',
+    );
+  }
+
+  /// Autre commande ouverte de la caisse, choisie par sa table.
+  Future<RestoOrderView?> _pickOrder(String title) async {
+    final ctx = _engine.restaurant;
+    final others = [for (final o in await _engine.restaurantOrders()) if (o.order.uuid != widget.orderUuid && !o.paid) o];
+    if (!mounted) return null;
+    if (others.isEmpty) {
+      await _refuse('Aucune autre commande ouverte sur ce terminal.', title: title);
+      return null;
+    }
+    return showDialog<RestoOrderView>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(title),
+        children: [
+          for (final o in others)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(context, o),
+              child: Text('${ctx?.table(o.order.tableUuid)?.name ?? 'Commande'} · ${o.order.localNumber} · ${formatFcfa(o.payable)}', style: const TextStyle(fontSize: 16)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Déplacer des articles vers une autre table : une opération sur cette commande, la cible garde sa version.
+  Future<void> _moveLines(RestoOrder order) async {
+    final target = await _pickOrder('Déplacer vers la table');
+    if (target == null || !mounted) return;
+    final chosen = <String>{};
+    final lines = await showDialog<Set<String>>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: const Text('Articles à déplacer'),
+          content: SizedBox(
+            width: 420,
+            child: ListView(
+              shrinkWrap: true,
+              children: [
+                for (final l in order.activeLines)
+                  CheckboxListTile(
+                    value: chosen.contains(l.uuid),
+                    enabled: l.settled == 0,
+                    title: Text(l.label),
+                    subtitle: Text('${Decimal6.label(l.quantity)} x ${formatFcfa(l.unitPrice)}'),
+                    onChanged: (on) => setDialog(() => on == true ? chosen.add(l.uuid) : chosen.remove(l.uuid)),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(onPressed: chosen.isEmpty ? null : () => Navigator.pop(context, Set.of(chosen)), child: const Text('Déplacer')),
+          ],
+        ),
+      ),
+    );
+    if (lines == null || !mounted) return;
+    await _run(() => _engine.restoMoveLines(_operator, widget.orderUuid, target.order.uuid, lines), title: 'Déplacement impossible');
+  }
+
+  /// Fusionner avec une autre table : tout passe à la cible, cette commande est annulée.
+  Future<void> _merge() async {
+    final target = await _pickOrder('Fusionner avec la table');
+    if (target == null || !mounted) return;
+    final reason = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Fusionner dans ${target.order.localNumber} ?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Articles, couverts et remise passent à cette commande ; celle-ci est annulée.'),
+            TextField(controller: reason, maxLength: 500, decoration: const InputDecoration(labelText: 'Motif')),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Retour')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Fusionner')),
+        ],
+      ),
+    );
+    final text = reason.text.trim();
+    reason.dispose();
+    if (confirmed != true || !mounted) return;
+    final ok = await _run(() => _engine.restoMerge(_operator, widget.orderUuid, target.order.uuid, reason: text.isEmpty ? null : text), title: 'Fusion impossible');
+    if (ok && mounted) Navigator.pop(context);
+  }
+
+  /// Couverts et serveur de la commande.
+  Future<void> _coversAndServer(RestoOrder order) async {
+    final servers = [for (final o in widget.host._snapshot?.operators ?? const <Operator>[]) if (_engine.hasRight(o, 'caisse_table')) o];
+    var covers = order.covers ?? 1;
+    var server = order.serverId;
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: const Text('Couverts et serveur'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton.filledTonal(onPressed: covers > 1 ? () => setDialog(() => covers--) : null, icon: const Icon(Icons.remove)),
+                  Padding(padding: const EdgeInsets.symmetric(horizontal: 16), child: Text('$covers couverts', style: const TextStyle(fontSize: 18))),
+                  IconButton.filledTonal(onPressed: covers < 500 ? () => setDialog(() => covers++) : null, icon: const Icon(Icons.add)),
+                ],
+              ),
+              DropdownButtonFormField<String?>(
+                initialValue: servers.any((o) => '${o.id}' == server) ? server : null,
+                decoration: const InputDecoration(labelText: 'Serveur'),
+                items: [
+                  const DropdownMenuItem<String?>(value: null, child: Text('Aucun')),
+                  for (final o in servers) DropdownMenuItem<String?>(value: '${o.id}', child: Text(o.name)),
+                ],
+                onChanged: (id) => setDialog(() => server = id),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Enregistrer')),
+          ],
+        ),
+      ),
+    );
+    if (result != true || !mounted) return;
+    await _run(() => _engine.restoCoversAndServer(_operator, widget.orderUuid, covers: covers, serverId: server), title: 'Modification impossible');
+  }
+
+  /// Gestes sur la commande entière (menu de la barre).
+  Widget _orderMenu(RestoOrder order) => PopupMenuButton<String>(
+    tooltip: 'Plus d’actions',
+    enabled: !_busy && !_dirty,
+    onSelected: (action) => switch (action) {
+      'remise' => _orderDiscount(order),
+      'deplacer' => _moveLines(order),
+      'fusionner' => _merge(),
+      'couverts' => _coversAndServer(order),
+      _ => _run(() => _engine.restoValidateCustomer(_operator, widget.orderUuid), title: 'Validation impossible'),
+    },
+    itemBuilder: (_) => [
+      if (order.activeLines.isNotEmpty) const PopupMenuItem(value: 'remise', child: Text('Remise sur la commande')),
+      if (order.activeLines.isNotEmpty) const PopupMenuItem(value: 'deplacer', child: Text('Déplacer des articles')),
+      const PopupMenuItem(value: 'fusionner', child: Text('Fusionner avec une table')),
+      const PopupMenuItem(value: 'couverts', child: Text('Couverts et serveur')),
+      if (order.profile == 'TABLE_SERVICE' && order.prebills > 0 && order.stage != RestoStage.customerValidated)
+        const PopupMenuItem(value: 'validation', child: Text('Validée par le client')),
+    ],
+  );
+
   Future<void> _cancel() async {
     final view = _view;
     if (view == null) return;
@@ -865,7 +1259,8 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
       return;
     }
     final reason = TextEditingController();
-    final required = _engine.restaurant?.settings.cancellationReason ?? false;
+    // Profil Restaurant (R-4) : motif toujours exigé.
+    final required = (_engine.restaurant?.settings.cancellationReason ?? false) || (_engine.restaurant?.production ?? false);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -892,27 +1287,75 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     if (snapshot == null || view == null) return;
     if (_dirty) return _refuse('Enregistrez d’abord les modifications de la commande.', title: 'Encaissement impossible');
     if (!_engine.sessionOpen) return _refuse('Aucune session de caisse ouverte : ouvrez-la depuis la caisse.', title: 'Encaissement impossible');
+    // Profil Restaurant (R-4) : tout, par articles ou par parts ; le Service de table règle toujours tout.
+    final production = _engine.restaurant?.production ?? false;
+    final first = view.order.activeLines.every((l) => l.settled == 0);
+    _SettlePlan? plan;
+    if (production) {
+      final rest = [for (final l in view.order.activeLines) if (l.quantity > l.settled) l];
+      final restPayable = first ? view.payable : webTotals(
+        lineBases: [for (final l in rest) Decimal6.amount(l.unitPrice, l.quantity - l.settled)],
+        lineDiscounts: [for (final _ in rest) 0],
+        globalDiscount: 0,
+        vatRate: snapshot.store.vatRate,
+        vatIncluded: snapshot.store.vatIncluded,
+      ).payable;
+      plan = await showDialog<_SettlePlan>(context: context, builder: (_) => _SettleChoiceDialog(order: view.order, payable: restPayable));
+      if (plan == null || !mounted) return;
+    }
     final List<CartLine> lines;
     try {
-      lines = await _engine.restoCart(widget.orderUuid);
+      lines = plan?.items != null ? await _engine.restoCartItems(widget.orderUuid, plan!.items!) : await _engine.restoCart(widget.orderUuid);
       allocateLots(snapshot, lines);
     } on OfflineRefusal catch (e) {
       return _refuse(e.message, title: 'Encaissement impossible');
     }
     if (!mounted) return;
+    // À payer de ce règlement : celui de la commande pour tout régler d'un coup, sinon celui du panier rendu.
+    final payable = plan == null || (plan.mode == _SettleMode.all && first)
+        ? view.payable
+        : webTotals(
+            lineBases: [for (final l in lines) l.base],
+            lineDiscounts: [for (final l in lines) l.discount],
+            globalDiscount: 0,
+            vatRate: snapshot.store.vatRate,
+            vatIncluded: snapshot.store.vatIncluded,
+          ).payable;
     final compact = widget.host._compact;
-    final payments = compact
+    Future<List<CartPayment>?> pay(int amount) async => compact
         ? await Navigator.of(context).push<List<CartPayment>>(
-            MaterialPageRoute(fullscreenDialog: true, builder: (_) => _PaymentDialog(snapshot: snapshot, payable: view.payable, cashDue: _engine.cashDue, fullScreen: true)),
+            MaterialPageRoute(fullscreenDialog: true, builder: (_) => _PaymentDialog(snapshot: snapshot, payable: amount, cashDue: _engine.cashDue, fullScreen: true)),
           )
         : await showDialog<List<CartPayment>>(
             context: context,
             barrierDismissible: false,
-            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: view.payable, cashDue: _engine.cashDue),
+            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: amount, cashDue: _engine.cashDue),
           );
-    if (payments == null || !mounted) return;
+    final List<CartPayment> payments;
+    List<RestoShare>? shares;
+    if (payable == 0) {
+      // Commande à 0 F (entièrement offerte) : réglée sans paiement.
+      payments = const [];
+    } else if (plan?.mode == _SettleMode.shares) {
+      // Une part après l'autre : chaque paiement appartient à sa part.
+      payments = [];
+      shares = [];
+      for (final (i, amount) in _equalShares(payable, plan!.shares).indexed) {
+        if (amount <= 0) continue;
+        widget.host._toast('Part ${i + 1} sur ${plan.shares} : ${formatFcfa(amount)}');
+        final part = await pay(amount);
+        if (part == null || !mounted) return;
+        shares.add(RestoShare(label: 'Part ${i + 1}', amount: amount, payments: [for (var k = 0; k < part.length; k++) payments.length + k]));
+        payments.addAll(part);
+      }
+    } else {
+      final chosen = await pay(payable);
+      if (chosen == null || !mounted) return;
+      payments = chosen;
+    }
+    if (!mounted) return;
     OfflineOperation? operation;
-    final ok = await _run(() async => operation = await _engine.restoSettle(_operator, widget.orderUuid, lines, payments), title: 'Encaissement refusé');
+    final ok = await _run(() async => operation = await _engine.restoSettle(_operator, widget.orderUuid, lines, payments, shares: shares), title: 'Encaissement refusé');
     if (!ok || operation == null || !mounted) return;
     final session = widget.host.widget.session;
     if (session.hasPrinter && payments.any((p) => p.method.isCash)) unawaited(session.channel.openDrawer());
@@ -926,7 +1369,10 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
         builder: (context, setDialog) => AlertDialog(
           icon: Icon(Icons.check_circle, color: _brand, size: 48),
           title: Text('Vente ${operation!.number}'),
-          content: Text(change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : 'Commande réglée et close.', style: const TextStyle(fontSize: 20)),
+          content: Text(
+            change > 0 ? 'Monnaie à rendre : ${formatFcfa(change)}' : (_view?.order.isOpen ?? false) ? 'Règlement enregistré : il reste à payer.' : 'Commande réglée et close.',
+            style: const TextStyle(fontSize: 20),
+          ),
           actions: [
             TextButton(
               onPressed: () async {
@@ -935,12 +1381,13 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               },
               child: Text(printed ? 'Réimprimer' : 'Imprimer le ticket'),
             ),
-            FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Retour à la salle')),
+            FilledButton(onPressed: () => Navigator.pop(context), child: Text((_view?.order.isOpen ?? false) ? 'Retour à la commande' : 'Retour à la salle')),
           ],
         ),
       ),
     );
-    if (mounted) Navigator.pop(context);
+    // Règlement partiel (Restaurant) : on reste sur la commande pour la suite.
+    if (mounted && !(_view?.order.isOpen ?? false)) Navigator.pop(context);
   }
 
   @override
@@ -950,7 +1397,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     final ctx = _engine.restaurant;
     final blocker = _engine.restaurantBlocker(_operator);
     final editable = blocker == null && order != null && order.isOpen && !(view?.paid ?? false);
-    final table = ctx?.table(order?.tableUuid)?.name;
+    final table = ctx?.table(order?.tableUuid)?.name ?? ctx?.channel(order?.channel)?.name;
     return PopScope(
       canPop: !_dirty,
       onPopInvokedWithResult: (didPop, _) async {
@@ -979,8 +1426,9 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
                 icon: Badge(isLabelVisible: (view?.ticketsToCheck ?? 0) > 0, label: Text('${view?.ticketsToCheck ?? 0}'), child: const Icon(Icons.receipt_long_outlined)),
               ),
             if (editable) ...[
-              IconButton(tooltip: 'Transférer', onPressed: _busy || _dirty ? null : _transfer, icon: const Icon(Icons.swap_horiz)),
+              if (order.tableUuid != null) IconButton(tooltip: 'Transférer', onPressed: _busy || _dirty ? null : _transfer, icon: const Icon(Icons.swap_horiz)),
               IconButton(tooltip: 'Annuler la commande', onPressed: _busy || _dirty ? null : _cancel, icon: const Icon(Icons.delete_outline)),
+              _orderMenu(order),
             ],
             if (view?.paid ?? false)
               TextButton(onPressed: _busy ? null : () => _run(() => _engine.restoClose(_operator, widget.orderUuid)), child: const Text('Clôturer')),
@@ -1024,7 +1472,10 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
           children: [
             Chip(label: Text(order.isOpen ? _stageLabel(order.stage) : (order.status == 'settled' ? 'Réglée' : 'Annulée'))),
             if (order.covers != null) Chip(label: Text('${order.covers} couverts')),
+            if (order.globalDiscount > 0) Chip(label: Text('Remise ${formatFcfa(order.globalDiscount)}')),
             if (order.prebills > 0) Chip(label: Text('${order.prebills} préfacture${order.prebills > 1 ? 's' : ''}')),
+            if (order.isOpen && order.activeLines.any((l) => l.settled > 0)) const Chip(label: Text('Réglée en partie')),
+            if (order.externalReference != null) Chip(label: Text('Réf. ${order.externalReference}')),
             if (view.serverNumber != null) Chip(label: Text('Serveur ${view.serverNumber}')),
             if (view.pendingVersions > 0) Chip(avatar: const Icon(Icons.cloud_upload_outlined, size: 16), label: Text('${view.pendingVersions} à transmettre')),
           ],
@@ -1043,6 +1494,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               subtitle: Text([
                 '${Decimal6.label(_quantities[l.uuid] ?? l.quantity)} x ${formatFcfa(l.unitPrice)}',
                 if (l.status == RestoLineStatus.sent) _engine.restaurant?.settings.sendToProduction == true && l.sent > 0 ? 'Envoyé' : 'Validé',
+                if (l.free) 'Offert' else if (l.discount > 0) 'Remise ${formatFcfa(l.discount)}',
                 if (l.comment != null) l.comment!,
               ].join(' · ')),
               trailing: !editable || !l.active
@@ -1053,6 +1505,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(formatFcfa(l.total)),
+                        _lineMenu(l),
                         IconButton(tooltip: 'Annuler l’article', onPressed: _busy || _dirty ? null : () => _cancelSent(l), icon: const Icon(Icons.cancel_outlined)),
                       ],
                     )
@@ -1062,6 +1515,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
                         if (_removed.contains(l.uuid))
                           TextButton(onPressed: () => setState(() => _removed.remove(l.uuid)), child: const Text('Garder'))
                         else ...[
+                          _lineMenu(l),
                           IconButton(
                             tooltip: 'Moins',
                             onPressed: () => setState(() {
@@ -1202,12 +1656,20 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
               ),
               const SizedBox(width: 8),
             ],
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
-              onPressed: _busy || view.order.activeLines.isEmpty ? null : _prebill,
-              icon: const Icon(Icons.receipt_outlined),
-              label: const Text('Préfacture'),
-            ),
+            // Petit téléphone : la préfacture en icône, pour que « Valider » et « Encaisser » tiennent sur la ligne.
+            if (widget.host._compact)
+              IconButton.outlined(
+                tooltip: 'Préfacture',
+                onPressed: _busy || view.order.activeLines.isEmpty ? null : _prebill,
+                icon: const Icon(Icons.receipt_outlined),
+              )
+            else
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(minimumSize: const Size(0, 48)),
+                onPressed: _busy || view.order.activeLines.isEmpty ? null : _prebill,
+                icon: const Icon(Icons.receipt_outlined),
+                label: const Text('Préfacture'),
+              ),
             const SizedBox(width: 8),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: _brand, minimumSize: const Size(0, 48)),

@@ -309,7 +309,7 @@ void main() {
     await e.load('https://boutique.exemple.ci');
     expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
     await e.sync();
-    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant3'));
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant4'));
     final ctx = e.restaurant!;
     expect([ctx.master, ctx.stations.keys.toSet(), ctx.routes[fakeSavon], ctx.sendLabel, ctx.lastTicketNumbers[cuisine]], [true, {cuisine, bar}, cuisine, 'Envoyer', 'CUI-20261118-0007']);
     final ops = {for (final o in e.snapshot!.operators) o.id: o};
@@ -412,6 +412,336 @@ void main() {
     await again.restoEditLines(awa, order, added: [(savon(again), null)]);
     view = await again.restoSend(awa, order);
     expect([view.tickets.single.number, view.tickets.single.dayNumber], [4, 'CUI-20261118-0011']);
+  });
+
+  test('restaurant.v1 (R-4) : offert et remises autorisés, plafonds de l’assistant, déplacement et fusion avec version_cible, couverts, validation client, règlement aux remises de confiance', () async {
+    Matcher refused(String text) => throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains(text)));
+    const pdv = 'b1000000-0000-4000-8000-000000000001';
+    const t1 = 'b4000000-0000-4000-8000-000000000001';
+    const t2 = 'b4000000-0000-4000-8000-000000000002';
+    final moment = DateTime.utc(2026, 11, 19, 19, 30);
+    final codeHash = r'$2y$12$' + 'c' * 53;
+    Map<String, dynamic> operateur(String id, String nom, List<String> droits, {String? approbateur}) => {
+      'operateur_id': id, 'nom': nom, 'pin_empreinte': 'empreinte', 'droits': droits,
+      'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+      if (approbateur != null) ...{'approbateur_restaurant': approbateur, 'code_autorisation_empreinte': codeHash},
+    };
+    serve21(server);
+    server
+      ..capabilities = [...server.capabilities, 'session.cloture', 'restaurant.v1']
+      ..authorizationExpires = '2026-11-21T00:00:00Z'
+      ..restaurant = {'point_de_vente_uuid': pdv, 'profil': 'TABLE_SERVICE', 'maitre': true, 'generation': '4', 'derniers_numeros': {'commande': null, 'bons': <Map<String, dynamic>>[]}}
+      ..put('operateur', 'operateur:7', operateur('7', 'Awa', ['caisse_service_table', 'caisse_table', 'ouverture_session', 'vente']), critical: true)
+      ..put('operateur', 'operateur:3', operateur('3', 'Marie', ['caisse_table', 'resto_offrir', 'remise', 'vente'], approbateur: 'manager'), critical: true)
+      ..put('operateur', 'operateur:4', operateur('4', 'Ali', ['caisse_table', 'remise', 'vente'], approbateur: 'assistant'), critical: true)
+      ..put('restaurant.point_de_vente', pdv, {
+        'code': 'SALLE', 'nom': 'Salle', 'profil': 'TABLE_SERVICE', 'actif': true, 'terminaux': [fakeTerminal], 'membres': null,
+        'reglages_vente': {'changement_client_paiement': true, 'reference_plateforme_avant_envoi': false, 'verrouillage_minutes': null},
+      }, critical: true)
+      ..put('restaurant.maitre', 'maitre:$pdv', {
+        'point_de_vente_uuid': pdv, 'generation': '4', 'terminal_uuid': fakeTerminal, 'appareil_uuid': fakeDevice, 'epoque': 3, 'designe_le': '2026-11-19T09:30:00Z',
+      }, critical: true)
+      ..put('restaurant.reglages', 'reglages:$pdv', {
+        'point_de_vente_uuid': pdv, 'envoi_production': false, 'plusieurs_commandes_par_table': false, 'prefixe_commande': 'PF', 'motif_annulation_commande': false,
+        'registre_obligatoire': false, 'prefacture_a_la_demande': true, 'retard_production_minutes': 15, 'sections_z': <String>[], 'fuseau': 'Africa/Abidjan',
+        'impression_mode': 'register', 'repli_premier_poste_actif': false, 'annulation_envoye_responsable': true,
+        'assistant': {'max_operations_par_jour': 0, 'max_montant_par_operation': 0, 'max_montant_par_jour': 0, 'max_remise_pourcent': 10},
+      }, critical: true)
+      ..put('restaurant.table', t1, {'point_de_vente_uuid': pdv, 'salle_uuid': null, 'nom': 'T1', 'code': 'T1', 'capacite': 4, 'ordre': 1, 'actif': true})
+      ..put('restaurant.table', t2, {'point_de_vente_uuid': pdv, 'salle_uuid': null, 'nom': 'T2', 'code': 'T2', 'capacite': 4, 'ordre': 2, 'actif': true});
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid,
+        pinVerifier: (secret, hash) async => hash == codeHash ? secret == '12345678' : FakeV2Server.pinVerifier(secret, hash),
+        contract21: true, announceRestaurant: true, clock: () => moment);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    await e.sync();
+    final ops = {for (final o in e.snapshot!.operators) o.id: o};
+    final awa = ops[7]!, marie = ops[3]!, ali = ops[4]!;
+    expect(e.restaurant!.settings.assistant.maxDiscountPercent, 10);
+    Future<Map> lastFact() async => (await e.v2.operationsOfType('resto_commande')).last['operation']['contenu'] as Map;
+
+    var view = await e.restoOpen(awa, t1, covers: 2);
+    final a = view.order.uuid;
+    view = await e.restoEditLines(awa, a, added: [(savon(e, units: 2), null), (savon(e), null)]);
+    final [plat, cadeau] = [for (final l in view.order.lines) l.uuid];
+
+    // Offert : Awa n'a pas `resto_offrir` ; seul un responsable qui le détient autorise (Ali ne l'a pas). Le réglage
+    // « toujours un responsable » (annulation d'un envoyé) ne concerne pas les gestes R-4.
+    expect([e.restoNeedsApproval(awa, 'resto_offrir'), e.restoNeedsApproval(marie, 'resto_offrir'), e.restoNeedsApproval(marie, 'remise')], [true, false, false]);
+    await expectLater(e.restoOffer(awa, a, cadeau, 'Anniversaire'), refused('autorisation d’un responsable'));
+    expect([for (final o in await e.restoApprovers(awa, 500, type: 'resto_offrir')) o.name], ['Marie']);
+    final offer = await e.restoAuthorize(cashier: awa, approver: marie, code: '12345678', reason: 'Anniversaire', amount: 500, type: 'resto_offrir');
+    await expectLater(e.restoOffer(awa, a, plat, 'Anniversaire', approval: offer), refused('montant a changé'));
+    view = await e.restoOffer(awa, a, cadeau, 'Anniversaire', approval: offer);
+    expect([view.order.version, view.order.line(cadeau).lineDiscount, view.payable], [3, 500, 1000]);
+    var fact = await lastFact();
+    expect([fact['action'], fact['motif'], (fact['autorisations'] as List).single['type'], (fact['autorisations'] as List).single['approbateur_id']],
+        ['offert', 'Anniversaire', 'resto_offrir', '3']);
+    expect(jsonEncode(fact), isNot(contains('12345678')), reason: 'jamais le code');
+
+    // Remise de ligne : l'assistant autorise jusqu'à 10 % (arrondi au supérieur), le manager au-delà.
+    expect([for (final o in await e.restoApprovers(awa, 100, type: 'remise', percent: 10)) o.name], ['Marie', 'Ali']);
+    expect([for (final o in await e.restoApprovers(awa, 110, type: 'remise', percent: 11)) o.name], ['Marie']);
+    await expectLater(e.restoAuthorize(cashier: awa, approver: ali, code: '12345678', reason: 'Attente', amount: 200, type: 'remise', percent: 20), refused('ne peut pas autoriser ce geste'));
+    final lineDiscount = await e.restoAuthorize(cashier: awa, approver: ali, code: '12345678', reason: 'Attente', amount: 100, type: 'remise', percent: 10);
+    await expectLater(e.restoDiscountLine(awa, a, plat, percent: true, value: 10, reason: 'Autre motif', approval: lineDiscount), refused('motif a changé'));
+    view = await e.restoDiscountLine(awa, a, plat, percent: true, value: 10, reason: 'Attente', approval: lineDiscount);
+    expect([view.order.line(plat).discount, view.payable], [100, 900]);
+    fact = await lastFact();
+    expect([fact['action'], fact['fait'], (fact['autorisations'] as List).single['type']], ['remise_ligne', {'ligne_uuid': plat, 'saisie': {'type': 'pourcentage', 'valeur': 10}}, 'remise']);
+
+    // Remise de commande : plafond du Service de table (100 % du montant après remises de ligne) ; retrait au droit Remise.
+    expect(e.restoOrderDiscountCeiling(view.order), 900);
+    final orderDiscount = await e.restoAuthorize(cashier: awa, approver: marie, code: '12345678', reason: 'Client fidèle', amount: 200, type: 'remise');
+    view = await e.restoDiscountOrder(awa, a, 200, reason: 'Client fidèle', approval: orderDiscount);
+    expect([view.order.globalDiscount, view.payable], [200, 700]);
+    await expectLater(e.restoDiscountOrder(awa, a, 0), refused('pas le droit de retirer'));
+    view = await e.restoDiscountOrder(marie, a, 0);
+    expect([view.order.globalDiscount, (await lastFact())['motif'], (await lastFact())['autorisations']], [0, null, isEmpty]);
+    final again = await e.restoAuthorize(cashier: awa, approver: marie, code: '12345678', reason: 'Client fidèle', amount: 200, type: 'remise');
+    view = await e.restoDiscountOrder(awa, a, 200, reason: 'Client fidèle', approval: again);
+    expect(view.order.version, 7);
+
+    // Déplacement vers la table 2 : une opération sur la source, la cible garde sa version et reçoit l'article.
+    view = await e.restoOpen(awa, t2);
+    final b = view.order.uuid;
+    view = await e.restoEditLines(awa, b, added: [(savon(e), null)]);
+    expect(view.order.version, 2);
+    await expectLater(e.restoMoveLines(awa, a, b, {plat}), refused('dépasserait son montant'));
+    view = await e.restoMoveLines(awa, a, b, {cadeau});
+    expect([view.order.version, view.order.activeLines.map((l) => l.uuid), view.payable], [8, [plat], 700]);
+    fact = await lastFact();
+    expect([fact['action'], fact['commande_uuid'], fact['fait']], ['deplacement_lignes', a, {'vers_commande_uuid': b, 'version_cible': 2, 'lignes': [cadeau]}]);
+    var target = (await e.restaurantOrders()).firstWhere((o) => o.order.uuid == b);
+    expect([target.order.version, target.order.activeLines.length, target.order.line(cadeau).lineDiscount, target.payable], [2, 2, 500, 500]);
+    // Sa version suivante (couverts et serveur) porte les lignes reçues.
+    view = await e.restoCoversAndServer(awa, b, covers: 3, serverId: '3');
+    expect([view.order.version, view.order.activeLines.length, view.order.covers, view.order.serverId], [3, 2, 3, '3']);
+    expect(((await lastFact())['etat']['lignes'] as List).length, 2);
+
+    // Fusion de la table 1 dans la table 2 : source annulée, cible à version_cible inchangée avec couverts et remise additionnés.
+    await expectLater(e.restoMerge(awa, a, a), refused('autre commande'));
+    view = await e.restoMerge(awa, a, b, reason: 'Même tablée');
+    expect([view.order.status, view.order.version, view.order.lines, view.order.globalDiscount], ['cancelled', 9, isEmpty, 200]);
+    expect(((await lastFact())['fait'] as Map), {'vers_commande_uuid': b, 'version_cible': 3});
+    target = (await e.restaurantOrders()).single;
+    expect([target.order.uuid, target.order.version, target.order.activeLines.length, target.order.covers, target.order.globalDiscount, target.payable],
+        [b, 3, 3, 5, 200, 1200]);
+    await expectLater(e.restoOffer(marie, a, plat, 'Encore'), refused('close'));
+
+    // Validation client après la préfacture (Service de table).
+    await expectLater(e.restoValidateCustomer(awa, b), refused('préfacture'));
+    await e.restoPrebill(awa, b);
+    view = await e.restoValidateCustomer(awa, b);
+    expect([view.order.version, view.order.stage], [5, 'customer_validated']);
+
+    // Règlement : Awa n'a pas le droit Remise, les remises de la commande sont de confiance ; jamais au-delà.
+    final cart = await e.restoCart(b);
+    expect([for (final l in cart) l.discount], [0, 500, 100]);
+    cart[2].discount = 150;
+    await expectLater(e.restoSettle(awa, b, cart, [cash(e, 1150)]), refused('Remise au-delà de celle de la commande'));
+    cart[2].discount = 100;
+    final sale = await e.restoSettle(awa, b, cart, [cash(e, 1200)]);
+    final content = (await e.v2.operation(sale.uuid))!['operation']['contenu'] as Map;
+    expect([(content['commande'] as Map)['type'], ((content['commande'] as Map)['lignes'] as List).length], ['full', 3]);
+    expect([for (final l in (content['lignes'] as List).cast<Map>()) l['remise'], content['remise_globale']], [0, 500, 100, 200], reason: 'remises de la commande reprises');
+    final closed = (await e.restaurantOrders(all: true)).firstWhere((o) => o.order.uuid == b);
+    expect([closed.order.status, closed.order.activeLines.every((l) => l.settled == l.quantity)], ['settled', true]);
+
+    // Remontée : tout conforme au contrat (schémas embarqués à l'enregistrement, faux serveur à la réception), dans l'ordre.
+    await e.sync();
+    final sent = [
+      for (final r in server.requests.where((r) => r.path == '/operations'))
+        for (final op in ((r.body as Map)['operations'] as List).cast<Map>())
+          if (op['type'] == 'resto_commande') '${(op['contenu'] as Map)['commande_uuid'] == a ? 'A' : 'B'}:${(op['contenu'] as Map)['action']}:${(op['contenu'] as Map)['version']}' else op['type'],
+    ];
+    expect(sent, [
+      'A:ouverture:1', 'A:lignes:2', 'A:offert:3', 'A:remise_ligne:4', 'A:remise:5', 'A:remise:6', 'A:remise:7', 'B:ouverture:1', 'B:lignes:2',
+      'A:deplacement_lignes:8', 'B:couverts_serveur:3', 'A:fusion:9', 'B:prefacture:4', 'B:validation_client:5', 'B:envoi:6', 'vente', 'B:cloture:7',
+    ]);
+    expect(server.received.values.every((r) => r['etat'] == 'integree'), isTrue);
+  });
+
+  test('restaurant.v1 (R-4) : profil Restaurant sur canaux, « Valider », règlements par articles et par parts, vente à zéro, registre et Z', () async {
+    Matcher refused(String text) => throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains(text)));
+    const pdv = 'b1000000-0000-4000-8000-000000000004';
+    const t1 = 'b4000000-0000-4000-8000-000000000041';
+    const pain = 'c0000000-0000-4000-8000-0000000000a4';
+    const unit = 1000000;
+    final moment = DateTime.utc(2026, 11, 18, 19, 30);
+    Map<String, dynamic> canal(String code, String nom, String type, int ordre, {bool table = false, bool reference = false, bool actif = true}) => {
+      'code': code, 'nom': nom, 'type': type, 'exige_table': table, 'exige_reference': reference, 'suivi_livraison': false, 'ordre': ordre, 'actif': actif,
+    };
+    Map<String, dynamic> operateur(String id, String nom, List<String> droits) => {
+      'operateur_id': id, 'nom': nom, 'pin_empreinte': 'empreinte', 'droits': droits, 'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+    };
+    serve21(server);
+    server
+      ..capabilities = [...server.capabilities, 'session.cloture', 'restaurant.v1']
+      ..authorizationExpires = '2026-11-20T00:00:00Z'
+      ..restaurant = {
+        'point_de_vente_uuid': pdv, 'profil': 'PRODUCTION', 'maitre': true, 'generation': '4',
+        'derniers_numeros': {'commande': null, 'bons': <Map<String, dynamic>>[]},
+      }
+      ..put('operateur', 'operateur:7', operateur('7', 'Awa', ['caisse_cloturer', 'caisse_restaurant', 'caisse_table', 'ouverture_session', 'resto_registre', 'vente']), critical: true)
+      ..put('operateur', 'operateur:8', operateur('8', 'Koffi', ['caisse_restaurant', 'caisse_table']), critical: true)
+      ..put('restaurant.point_de_vente', pdv, {
+        'code': 'RESTO', 'nom': 'Restaurant', 'profil': 'PRODUCTION', 'actif': true, 'terminaux': [fakeTerminal], 'membres': null,
+        'reglages_vente': {'changement_client_paiement': true, 'reference_plateforme_avant_envoi': false, 'verrouillage_minutes': null},
+      }, critical: true)
+      ..put('restaurant.maitre', 'maitre:$pdv', {
+        'point_de_vente_uuid': pdv, 'generation': '4', 'terminal_uuid': fakeTerminal, 'appareil_uuid': fakeDevice, 'epoque': 3, 'designe_le': '2026-11-18T09:30:00Z',
+      }, critical: true)
+      ..put('restaurant.reglages', 'reglages:$pdv', {
+        'point_de_vente_uuid': pdv, 'envoi_production': false, 'plusieurs_commandes_par_table': false, 'prefixe_commande': 'PF', 'motif_annulation_commande': false,
+        'registre_obligatoire': true, 'prefacture_a_la_demande': true, 'retard_production_minutes': 15, 'sections_z': <String>[], 'fuseau': 'Africa/Abidjan',
+        'impression_mode': 'register', 'repli_premier_poste_actif': false, 'annulation_envoye_responsable': false,
+        'assistant': {'max_operations_par_jour': 0, 'max_montant_par_operation': 0, 'max_montant_par_jour': 0, 'max_remise_pourcent': 0},
+      }, critical: true)
+      ..put('restaurant.table', t1, {'point_de_vente_uuid': pdv, 'salle_uuid': null, 'nom': 'T1', 'code': 'T1', 'capacite': 4, 'ordre': 1, 'actif': true})
+      ..put('restaurant.canal', 'c4000000-0000-4000-8000-000000000001', canal('sur_place', 'Sur place', 'dine_in', 10, table: true))
+      ..put('restaurant.canal', 'c4000000-0000-4000-8000-000000000003', canal('livraison', 'Livraison', 'delivery', 30, reference: true))
+      ..put('restaurant.canal', 'c4000000-0000-4000-8000-000000000002', canal('emporter', 'Emporter', 'takeaway', 20))
+      ..put('restaurant.canal', 'c4000000-0000-4000-8000-000000000004', canal('ancien', 'Ancien', 'takeaway', 5, actif: false))
+      ..put('produit', pain, {
+        'nom': 'Pain offert', 'reference': null, 'categorie': null, 'prix': 0, 'stock_illimite': true, 'actif': true, 'vente_locale': true,
+        'categorie_uuid': null, 'marque': null, 'fournisseur': null, 'unite': null, 'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null,
+        'cree_le': null, 'favori': false, 'promotions': <Map<String, dynamic>>[], 'image': null,
+      })
+      ..put('moyen_paiement', 'moyen:wave', {'code': 'wave', 'nom': 'Wave', 'especes': false, 'local': true, 'reference': 'aucune'})
+      ..put('politique', 'paiements.moyens_locaux', {'cle_politique': 'paiements.moyens_locaux', 'valeur': ['especes', 'wave'], 'source': 'boutique', 'verrouillee': false});
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, contract21: true, announceRestaurant: true, declaredPayments: true, clock: () => moment);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    await e.sync();
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant4'));
+    final ctx = e.restaurant!;
+    expect([ctx.production, ctx.restaurantProfile, ctx.tableService, ctx.sendLabel, [for (final c in ctx.channels) c.code]],
+        [true, true, false, 'Valider', ['ancien', 'sur_place', 'emporter', 'livraison']]);
+    expect([ctx.channel('sur_place')!.requiresTable, ctx.channel('livraison')!.requiresReference, ctx.channel('ancien')!.active], [true, true, false]);
+    final ops = {for (final o in e.snapshot!.operators) o.id: o};
+    final awa = ops[7]!, koffi = ops[8]!;
+    expect(e.restaurantBlocker(awa), isNull, reason: 'le profil Restaurant est ouvert hors ligne');
+    final especes = e.snapshot!.methods.firstWhere((m) => m.code == 'especes');
+    final wave = e.snapshot!.methods.firstWhere((m) => m.code == 'wave');
+
+    // Registre obligatoire : aucune commande sans lui ; le serveur de salle ne l'ouvre pas.
+    await expectLater(e.restoOpenOnChannel(awa, 'emporter'), refused('Ouvrez d’abord le registre'));
+    expect(e.restoRegisterBlocker(koffi), contains('n’a pas le droit'));
+    expect(await e.restoRegister(), isNull);
+    var register = await e.restoRegisterOpen(awa, note: 'Service du soir');
+    expect([register.open, register.businessDay, register.note, register.salesTotal], [true, '2026-11-18', 'Service du soir', 0]);
+    await expectLater(e.restoRegisterOpen(awa), refused('déjà ouvert'));
+
+    // Canaux : table seulement si le canal l'exige, référence si le canal l'exige, canal désactivé refusé.
+    await expectLater(e.restoOpenOnChannel(awa, 'sur_place'), refused('exige une table'));
+    await expectLater(e.restoOpenOnChannel(awa, 'emporter', tableUuid: t1), refused('ne prend pas de table'));
+    await expectLater(e.restoOpenOnChannel(awa, 'livraison', reference: '  '), refused('exige une référence'));
+    await expectLater(e.restoOpenOnChannel(awa, 'ancien'), refused('Canal inconnu'));
+    await expectLater(e.restoOpen(awa, t1), refused('canal'));
+    final onSite = (await e.restoOpenOnChannel(awa, 'sur_place', tableUuid: t1, covers: 3)).order.uuid;
+    await expectLater(e.restoOpenOnChannel(awa, 'sur_place', tableUuid: t1), refused('déjà une commande ouverte (PF-20261118-L0001)'));
+    final delivery = await e.restoOpenOnChannel(koffi, 'livraison', reference: 'GLV-1234', customerName: 'Awa K.');
+    expect([delivery.order.channel, delivery.order.externalReference, delivery.order.customerName, delivery.order.serverId], ['livraison', 'GLV-1234', 'Awa K.', '8']);
+    var view = await e.restoOpenOnChannel(awa, 'emporter');
+    final order = view.order.uuid;
+    expect([view.order.localNumber, view.order.channel, view.order.stage, view.order.tableUuid], ['PF-20261118-L0003', 'emporter', null, null]);
+
+    // Envoi en production éteint : « Valider » = action `validation`, lignes figées sans aucun bon.
+    view = await e.restoEditLines(awa, order, added: [(savon(e, units: 4), null)]);
+    final savonLine = view.order.lines.single.uuid;
+    view = await e.restoSend(awa, order);
+    expect([view.order.lines.single.status, view.tickets, view.order.version], [RestoLineStatus.sent, isEmpty, 3]);
+
+    // Règlement par articles : une partie du reste ; la commande reste ouverte et modifiable.
+    await expectLater(e.restoCartItems(order, {savonLine: 5 * unit}), refused('il en reste 4'));
+    await expectLater(e.restoCartItems(order, const {}), refused('au moins un article'));
+    var cart = await e.restoCartItems(order, {savonLine: unit});
+    final partial = await e.restoSettle(awa, order, cart, [CartPayment(method: especes, amount: 500, received: 500)]);
+    view = (await e.restaurantOrders()).firstWhere((o) => o.order.uuid == order);
+    expect([view.order.isOpen, view.order.line(savonLine).settled, view.paid], [true, unit, false]);
+    await expectLater(e.restoCancel(awa, order, 'Client parti'), refused('déjà réglés'));
+
+    // Partage du reste en deux parts : chaque paiement dans une part et une seule, puis clôture.
+    cart = await e.restoCart(order);
+    expect(cart.single.quantity, BigInt.from(3 * unit), reason: 'reste à régler');
+    final payments = [CartPayment(method: especes, amount: 1000, received: 1000), CartPayment(method: wave, amount: 500)];
+    await expectLater(
+      e.restoSettle(awa, order, cart, payments, shares: const [RestoShare(label: 'Awa', amount: 1000, payments: [0]), RestoShare(label: 'Koffi', amount: 500, payments: [0])]),
+      refused('une part et une seule'),
+    );
+    await expectLater(
+      e.restoSettle(awa, order, cart, payments, shares: const [RestoShare(label: 'Awa', amount: 900, payments: [0]), RestoShare(label: 'Koffi', amount: 600, payments: [1])]),
+      refused('ne font pas son montant'),
+    );
+    final shared = await e.restoSettle(awa, order, cart, payments,
+        shares: const [RestoShare(label: 'Awa', amount: 1000, payments: [0]), RestoShare(label: 'Koffi', amount: 500, payments: [1])]);
+    final closed = (await e.restaurantOrders(all: true)).firstWhere((o) => o.order.uuid == order);
+    expect([closed.order.status, closed.order.line(savonLine).settled], ['settled', 4 * unit]);
+    final firstLink = (((await e.v2.operation(partial.uuid))!['operation'] as Map)['contenu'] as Map)['commande'] as Map;
+    final sharedLink = (((await e.v2.operation(shared.uuid))!['operation'] as Map)['contenu'] as Map)['commande'] as Map;
+    expect([firstLink['type'], firstLink['parts'], (firstLink['lignes'] as List).single['quantite']], ['items', null, '1.000000']);
+    expect([sharedLink['type'], sharedLink['libelle'], sharedLink['parts']], [
+      'shares',
+      '2 parts',
+      [{'libelle': 'Awa', 'montant': 1000, 'paiements': [0]}, {'libelle': 'Koffi', 'montant': 500, 'paiements': [1]}],
+    ]);
+
+    // Commande à 0 F : réglée sans paiement ; une vente ordinaire garde au moins un paiement.
+    final painProduct = e.snapshot!.products.firstWhere((p) => p.name == 'Pain offert');
+    view = await e.restoEditLines(koffi, delivery.order.uuid, added: [(CartLine(product: painProduct, quantity: BigInt.from(unit)), null)]);
+    expect(view.payable, 0);
+    await expectLater(e.recordSale([CartLine(product: painProduct, quantity: BigInt.from(unit))], const [], awa), refused('paiements'));
+    final zero = await e.restoSettle(awa, delivery.order.uuid, await e.restoCart(delivery.order.uuid), const []);
+    final zeroContent = (await e.v2.operation(zero.uuid))!['operation']['contenu'] as Map;
+    expect([zeroContent['paiements'], (zeroContent['commande'] as Map)['type'], (zeroContent['totaux'] as Map)['a_payer']], [isEmpty, 'full', 0]);
+
+    // Clôture du registre : après la session, sans commande à solder ; Z local numéroté avec le total des ventes.
+    await e.restoEditLines(awa, onSite, added: [(savon(e), null)]);
+    await expectLater(e.restoRegisterClose(awa), refused('Clôturez d’abord la session'));
+    await e.closeSession(awa, cash: 500);
+    await expectLater(e.restoRegisterClose(awa), refused('PF-20261118-L0001'));
+    await expectLater(e.restoCancel(awa, onSite, null), refused('motif'));
+    await e.restoCancel(awa, onSite, 'Client parti');
+    register = await e.restoRegisterClose(awa, note: 'Fin de service');
+    expect([register.closed, register.zLocalNumber, register.salesTotal], [true, 1, 2000]);
+    await expectLater(e.restoRegisterClose(awa), refused('Aucun registre ouvert'));
+
+    // Remontée : tout est conforme au contrat ; la clôture du registre attend les règlements, puis rend son Z.
+    server
+      ..verdict = ((op) => op['type'] == 'resto_registre_clos' ? 'recue' : 'integree')
+      ..reasonFor = ((op) => op['type'] == 'resto_registre_clos'
+          ? {'code': 'restaurant.attente_reglement', 'message': 'Clôture en attente des règlements du terminal.', 'details': null}
+          : null)
+      ..resultDetails = ((op) => switch (op['type']) {
+        'resto_registre_clos' => {'z_restaurant': {'z_uuid': 'e9100000-0000-4000-8000-000000000041', 'type': 'register', 'numero': 7}},
+        'cloture_session' => {
+          'z': {'cloture_uuid': 'c2000000-0000-4000-8000-000000000041', 'compte': 500, 'theorique': 500, 'ecart': 0, 'mode': 'V1'},
+          'z_restaurant': {'z_uuid': 'e9100000-0000-4000-8000-000000000042', 'type': 'session', 'numero': 3},
+        },
+        _ => null,
+      });
+    await e.sync();
+    register = (await e.restoRegister())!;
+    expect([register.waiting, register.serverMessage, register.serverZNumber], [true, 'Clôture en attente des règlements du terminal.', null]);
+    final types = [
+      for (final r in server.requests.where((r) => r.path == '/operations'))
+        for (final op in ((r.body as Map)['operations'] as List).cast<Map>())
+          op['type'] == 'resto_commande' ? '${(op['contenu'] as Map)['action']}' : op['type'] as String,
+    ];
+    expect(types, containsAllInOrder(['resto_registre_ouvre', 'ouverture', 'validation', 'vente', 'vente', 'cloture', 'vente', 'cloture_session', 'annulation', 'resto_registre_clos']));
+    expect(server.received.values.where((r) => r['etat'] != 'integree').map((r) => (r['operation'] as Map)['type']), ['resto_registre_clos']);
+    final closing = server.received.values.firstWhere((r) => (r['operation'] as Map)['type'] == 'resto_registre_clos');
+    expect(((closing['operation'] as Map)['contenu'] as Map)['z_local'], {'numero': 1, 'total_ventes': 2000});
+    closing
+      ..['etat'] = 'integree'
+      ..['version'] = 2
+      ..['raison'] = null;
+    await e.sync();
+    register = (await e.restoRegister())!;
+    expect([register.waiting, register.serverMessage, register.serverZNumber, register.serverState], [false, null, 7, 'integree']);
+    expect((await e.lastClosure())!.content['z_restaurant'], containsPair('type', 'session'));
   });
 
   test('ticket.modeles : activation sur un poste existant reprend un instantane une seule fois', () async {

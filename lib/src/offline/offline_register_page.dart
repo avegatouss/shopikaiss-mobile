@@ -23,8 +23,10 @@ import 'pass_sheet.dart';
 import 'pending_operations_page.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
+import 'x_z_report.dart';
 
 part 'restaurant_screen.dart';
+part 'restaurant_production_screen.dart';
 
 const _offline = Color(0xFFB45309);
 
@@ -156,8 +158,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final rules = _snapshot?.rules;
     _probe = Timer.periodic(Duration(seconds: rules?.probeSeconds ?? 20), (_) => _tryOnline(automatic: true));
     if (rules != null && !rules.pinRequired) _operator = _snapshot!.operatorById(_snapshot!.lastOperatorId);
-    // TBC : un point de vente Service de table ouvre directement la salle après la connexion.
-    _floor = _engine.restaurant?.tableService ?? false;
+    // TBC : un point de vente restaurant (Service de table ou Restaurant) ouvre directement son écran après la connexion.
+    _floor = _engine.restaurant?.restaurantProfile ?? false;
     _refreshSold();
     _refreshSuspended();
   }
@@ -503,8 +505,106 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     );
     if (closed == true) {
       _changed();
-      _toast('Session clôturée. Le Z arrivera à la prochaine synchronisation.');
+      _toast('Session clôturée. Le Z de la boutique arrivera à la prochaine synchronisation.');
+      if (!mounted || await _engine.closureFacts() == null || !mounted) return;
+      final version = await _askZVersion('Session clôturée', 'Imprimer le Z de session de ce terminal ?', later: true);
+      if (version != null) await _printClosure(ZKind.session, version);
     }
+  }
+
+  /// Menu de session : pré-X (rien n'est clôturé), clôture suivie du Z détaillé ou court, pré-Z du jour pour ce
+  /// terminal, duplicata du dernier Z. Documents calculés et imprimés sur le terminal, sans réseau.
+  Future<void> _sessionMenu() async {
+    final operator = _operator;
+    if (operator == null) return;
+    final canClose = _engine.canCloseSession(operator) && _cart.isEmpty;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.receipt_outlined),
+                title: const Text('Imprimer un pré-X'),
+                subtitle: const Text('Point provisoire de la session ouverte, sans clôturer'),
+                enabled: _engine.sessionOpen,
+                onTap: () => Navigator.pop(context, 'prex'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.lock_outline),
+                title: const Text('Clôturer la session'),
+                subtitle: const Text('Comptage à l’aveugle, puis Z détaillé ou court'),
+                enabled: canClose,
+                onTap: () => Navigator.pop(context, 'cloture'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.today_outlined),
+                title: const Text('Imprimer un pré-Z du jour'),
+                subtitle: const Text('Sessions de ce terminal aujourd’hui, rien n’est clôturé'),
+                enabled: _engine.hasRight(operator, 'caisse_cloturer'),
+                onTap: () => Navigator.pop(context, 'prez'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.copy_outlined),
+                title: const Text('Réimprimer le dernier Z'),
+                subtitle: const Text('Duplicata du Z de la dernière session clôturée ici'),
+                onTap: () => Navigator.pop(context, 'duplicata'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'cloture':
+        return _closeSession();
+      case 'prex':
+        if (await _askZVersion('Pré-X', 'Point provisoire : rien n’est clôturé.') case final version?) await _printClosure(ZKind.preX, version);
+      case 'prez':
+        if (await _askZVersion('Pré-Z du jour', 'Sessions de ce terminal aujourd’hui : rien n’est clôturé.') case final version?) await _printClosure(ZKind.preZ, version);
+      case 'duplicata':
+        if (await _askZVersion('Duplicata du dernier Z', 'Réimpression du Z de la dernière session clôturée sur ce terminal.') case final version?) {
+          await _printClosure(ZKind.session, version, duplicate: true);
+        }
+    }
+  }
+
+  /// Version à imprimer : Z détaillé (article par article) ou Z court (résumé) ; null : rien.
+  Future<String?> _askZVersion(String title, String message, {bool later = false}) => showDialog<String>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: Text(later ? 'Plus tard' : 'Annuler')),
+        TextButton(onPressed: () => Navigator.pop(context, ZVersion.short), child: const Text('Z court')),
+        FilledButton(onPressed: () => Navigator.pop(context, ZVersion.detailed), child: const Text('Z détaillé')),
+      ],
+    ),
+  );
+
+  /// Document de clôture calculé sur les opérations du terminal, imprimé en texte (§3 d'IMPRESSION-X-Z).
+  Future<void> _printClosure(String kind, String version, {bool duplicate = false}) async {
+    final snapshot = _snapshot;
+    final facts = await _engine.closureFacts();
+    if (snapshot == null || facts == null) return _toast('Documents de clôture non disponibles sur ce terminal.');
+    final context = ZContext.of(snapshot);
+    final now = _engine.now;
+    final Map<String, dynamic> model;
+    if (kind == ZKind.preZ) {
+      model = dayZModel(facts, context, day: now, now: now);
+    } else {
+      final session = kind == ZKind.preX ? facts.openSession : facts.lastClosed;
+      if (session == null) return _toast(kind == ZKind.preX ? 'Aucune session ouverte sur ce terminal.' : 'Aucune session clôturée sur ce terminal.');
+      model = sessionZModel(facts, session, context, kind: kind, now: now, duplicate: duplicate);
+    }
+    final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
+    final printout = layoutClosureTicket(closureTicket(model, version), paperWidth: width);
+    await _printText(printout.lines, failure: 'Document non imprimé', bytes: printout.bytes());
   }
 
   /// Choix du client de la vente : recherche par nom ou téléphone, création si le caissier en a le droit.
@@ -883,12 +983,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     : _operator == null
                     ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() {
                           _operator = o;
-                          _floor = (_engine.restaurant?.tableService ?? false) && _cart.isEmpty;
+                          _floor = (_engine.restaurant?.restaurantProfile ?? false) && _cart.isEmpty;
                         })))
                     : !_engine.sessionOpen
                     ? _scrollable(_SessionOpening(engine: _engine, operator: _operator!, onOpened: () => setState(() {})))
                     : _floor && (_engine.restaurant?.tableService ?? false)
                     ? _RestaurantFloor(host: this)
+                    : _floor && (_engine.restaurant?.production ?? false)
+                    ? _RestaurantBoard(host: this)
                     : _register(snapshot),
               ),
             ],
@@ -992,12 +1094,16 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             },
           ),
           const SizedBox(width: 8),
-          if (_engine.restaurant?.tableService ?? false) ...[
+          if (_engine.restaurant?.restaurantProfile ?? false) ...[
             SegmentedButton<bool>(
               showSelectedIcon: false,
               style: const ButtonStyle(visualDensity: VisualDensity.compact),
-              segments: const [
-                ButtonSegment(value: true, icon: Icon(Icons.table_restaurant, size: 18), label: Text('Salle')),
+              segments: [
+                ButtonSegment(
+                  value: true,
+                  icon: const Icon(Icons.table_restaurant, size: 18),
+                  label: Text((_engine.restaurant?.production ?? false) ? 'Commandes' : 'Salle'),
+                ),
                 ButtonSegment(value: false, icon: Icon(Icons.point_of_sale, size: 18), label: Text('Caisse')),
               ],
               selected: {_floor},
@@ -1014,7 +1120,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           if (_tier.cart || (wholesale != null && wholesale.manual && operator != null && _engine.hasRight(operator, wholesale.right)))
             // Comme au web : le mode d'un panier repris est figé.
             action(_tier.cart ? 'Tarif détail' : 'Tarif gros', Icons.sell_outlined, _shared == null ? _toggleWholesale : null),
-          action('Session de caisse', Icons.point_of_sale, canClose ? _closeSession : null),
+          action('Session de caisse', Icons.point_of_sale, operator != null && _cart.isEmpty && (canClose || _engine.sessionOpen) ? _sessionMenu : null),
+          if (operator != null && (_engine.restaurant?.restaurantProfile ?? false)) action('Registre', Icons.event_note, () => _restoRegisterDialog(this)),
           action(_look.hideSoftKeyboard ? 'Clavier masqué' : 'Clavier affiché', _look.hideSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard, () {
             setState(() => _look.hideSoftKeyboard = !_look.hideSoftKeyboard);
             unawaited(widget.session.save());
@@ -1060,6 +1167,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         setState(() => _operator = null);
       } else if (choice == 'cloture') {
         _closeSession();
+      } else if (choice == 'session') {
+        _sessionMenu();
+      } else if (choice == 'registre') {
+        _restoRegisterDialog(this);
       } else if (choice == 'images') {
         _editImageWindow();
       } else if (choice == 'site') {
@@ -1076,6 +1187,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
       if (_operator != null && _engine.canCloseSession(_operator!))
         PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
+      if (_operator != null && (_engine.sessionOpen || _engine.canCloseSession(_operator!)))
+        PopupMenuItem(value: 'session', enabled: _cart.isEmpty, child: const Text('Pré-X, pré-Z et Z')),
+      if (_operator != null && (_engine.restaurant?.restaurantProfile ?? false))
+        const PopupMenuItem(value: 'registre', child: Text('Registre (journée)')),
       if (_operator != null)
         PopupMenuItem(
           value: 'caissier',
@@ -2224,10 +2339,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     await _printText(text, failure: 'Ticket non imprimé', saved: ' : la vente est bien enregistrée.', compact: model?.compact ?? false);
   }
 
-  Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false}) async {
+  Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false, Uint8List? bytes}) async {
     final session = widget.session;
     if (session.hasPrinter) {
-      final result = await session.channel.printRaw(offlineTicketBytes(text, compact: compact));
+      final result = await session.channel.printRaw(bytes ?? offlineTicketBytes(text, compact: compact));
       if (!result.ok) _toast('$failure (${result.error})$saved');
       return;
     }

@@ -16,6 +16,7 @@ import '../offline/engine.dart';
 import '../offline/models.dart';
 import '../offline/store.dart';
 import '../offline/ticket.dart';
+import '../offline/x_z_report.dart';
 import 'contract_schemas.dart';
 import 'schema_validator.dart';
 import 'decimal6.dart';
@@ -496,11 +497,53 @@ class V2Engine extends CaisseEngine {
   bool restoApprovalRequired(Operator operator) => _restoApprovalRequired(operator);
 
   @override
-  Future<List<Operator>> restoApprovers(Operator cashier, int amount) => _restoApprovers(cashier, amount);
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) =>
+      _restoApprovers(cashier, amount, type: type, percent: percent);
 
   @override
-  Future<RestoApproval> restoAuthorize({required Operator cashier, required Operator approver, required String code, required String reason, required int amount}) =>
-      _restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount);
+  Future<RestoApproval> restoAuthorize({
+    required Operator cashier,
+    required Operator approver,
+    required String code,
+    required String reason,
+    required int amount,
+    String type = 'resto_modifier_envoye',
+    int? percent,
+  }) => _restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount, type: type, percent: percent);
+
+  @override
+  bool restoNeedsApproval(Operator operator, String type) => _restoNeedsApproval(operator, type);
+
+  @override
+  Future<RestoOrderView> restoOffer(Operator operator, String orderUuid, String lineUuid, String reason, {RestoApproval? approval}) =>
+      _restoOffer(operator, orderUuid, lineUuid, reason, approval: approval);
+
+  @override
+  Future<RestoOrderView> restoDiscountLine(Operator operator, String orderUuid, String lineUuid, {required bool percent, required int value, required String reason, RestoApproval? approval}) =>
+      _restoDiscountLine(operator, orderUuid, lineUuid, percent: percent, value: value, reason: reason, approval: approval);
+
+  @override
+  Future<RestoOrderView> restoDiscountOrder(Operator operator, String orderUuid, int amount, {String? reason, RestoApproval? approval}) =>
+      _restoDiscountOrder(operator, orderUuid, amount, reason: reason, approval: approval);
+
+  @override
+  int restoOrderDiscountCeiling(RestoOrder order) => _restoOrderDiscountCeiling(order);
+
+  @override
+  Future<RestoOrderView> restoMoveLines(Operator operator, String orderUuid, String targetUuid, Set<String> lineUuids) =>
+      _restoMoveOrMerge(operator, orderUuid, targetUuid, lines: lineUuids);
+
+  @override
+  Future<RestoOrderView> restoMerge(Operator operator, String orderUuid, String targetUuid, {String? reason}) =>
+      _restoMoveOrMerge(operator, orderUuid, targetUuid, reason: reason);
+
+  @override
+  Future<RestoOrderView> restoCoversAndServer(Operator operator, String orderUuid, {int? covers, String? serverId}) =>
+      _restoAct(operator, orderUuid, (engine, order) => engine.coversAndServer(order, covers: covers, serverId: serverId));
+
+  @override
+  Future<RestoOrderView> restoValidateCustomer(Operator operator, String orderUuid) =>
+      _restoAct(operator, orderUuid, (engine, order) => engine.validateCustomer(order));
 
   @override
   Future<List<RestoTicketView>> restoTickets({String? orderUuid}) => _restoTicketViews(orderUuid: orderUuid);
@@ -521,8 +564,33 @@ class V2Engine extends CaisseEngine {
   Future<List<CartLine>> restoCart(String orderUuid) => _restoCart(orderUuid);
 
   @override
-  Future<OfflineOperation> restoSettle(Operator operator, String orderUuid, List<CartLine> lines, List<CartPayment> payments, {String? draftUuid}) =>
-      _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid);
+  Future<OfflineOperation> restoSettle(
+    Operator operator,
+    String orderUuid,
+    List<CartLine> lines,
+    List<CartPayment> payments, {
+    String? draftUuid,
+    List<RestoShare>? shares,
+  }) => _restoSettle(operator, orderUuid, lines, payments, draftUuid: draftUuid, shares: shares);
+
+  @override
+  Future<RestoOrderView> restoOpenOnChannel(Operator operator, String channelCode, {String? tableUuid, String? reference, String? customerName, int? covers}) =>
+      _restoOpenOnChannel(operator, channelCode, tableUuid: tableUuid, reference: reference, customerName: customerName, covers: covers);
+
+  @override
+  Future<List<CartLine>> restoCartItems(String orderUuid, Map<String, int> quantities) => _restoCart(orderUuid, quantities: quantities);
+
+  @override
+  Future<RestoRegisterView?> restoRegister() => _restoRegisterCurrent();
+
+  @override
+  String? restoRegisterBlocker(Operator operator) => _restoRegisterBlocker(operator);
+
+  @override
+  Future<RestoRegisterView> restoRegisterOpen(Operator operator, {String? note}) => _restoRegisterOpen(operator, note: note);
+
+  @override
+  Future<RestoRegisterView> restoRegisterClose(Operator operator, {String? note}) => _restoRegisterClose(operator, note: note);
 
   @override
   Future<RestoOrderView> restoClose(Operator operator, String orderUuid) => _restoCloseNow(operator, orderUuid);
@@ -901,6 +969,32 @@ class V2Engine extends CaisseEngine {
     final uuid = await v2.read(V2Keys.closingOperation);
     final row = uuid == null ? null : await v2.operation(uuid);
     return row == null ? null : _view(row);
+  }
+
+  @override
+  Future<ClosureFacts?> closureFacts() async {
+    if (!paired) return null;
+    // Ordre chronologique, opérations rejetées exclues (comme l'attendu de la clôture).
+    final operations = [
+      for (final row in (await v2.operationRows()).reversed)
+        if (row['etat'] != V2OperationState.rejected) row['operation'] as Map,
+    ];
+    final session = snapshot?.session;
+    final server = session == null ? null : (await v2.entities('session'))['session:${_device['terminal_uuid']}'];
+    final open = session == null ? null : {'session_uuid': session['session_uuid'], 'operateur_id': session['operateur_id'], 'ouverte_le': server?['session_uuid'] == session['session_uuid'] ? server!['ouverte_le'] : null};
+    final categories = <String, String>{};
+    final names = <String, String>{};
+    for (final e in _products.entries) {
+      final product = snapshot?.byId(_ids[e.key] ?? -1);
+      if (product?.category case final String c when c.isNotEmpty) categories[e.key] = c;
+      names[e.key] = product?.name ?? '${e.value['nom'] ?? ''}';
+    }
+    return ClosureFacts(
+      sessions: sessionsFromOperations(operations, openSession: open),
+      openSessionUuid: sessionOpen ? _sessionUuid : null,
+      categories: categories,
+      productNames: names,
+    );
   }
 
   bool _serverOffers(String capability) => (_state?['capacites_serveur'] as List?)?.contains(capability) ?? false;
@@ -1297,14 +1391,16 @@ class V2Engine extends CaisseEngine {
         }
         checkSale(s, lines, payments, extras);
         _requireRight(operator, 'vente', 'vendre');
-        if (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) _requireRight(operator, 'remise', 'accorder une remise');
+        // Règlement d'une commande restaurant (R-4) : remises de confiance, déjà autorisées et auditées sur la commande.
+        final trusted = extras.order?.trusts(lines, extras.globalDiscount) ?? false;
+        if (!trusted && (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0)) _requireRight(operator, 'remise', 'accorder une remise');
         for (final l in lines) {
-          if (l.discount > enterableLineDiscount(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
+          if (!trusted && l.discount > enterableLineDiscount(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
           final entry = l.discountEntry;
           if (entry != null && _entered(entry, l.base) != l.discount) throw OfflineRefusal('Remise sur « ${l.label} » différente de sa saisie.');
         }
         final subtotal = lines.fold<int>(0, (sum, l) => sum + l.base - l.discount);
-        if (extras.globalDiscount > enterableGlobalDiscount(operator, subtotal)) {
+        if (!trusted && extras.globalDiscount > enterableGlobalDiscount(operator, subtotal)) {
           throw OfflineRefusal('Remise globale au-delà du maximum autorisé hors ligne pour ${operator.name}.');
         }
         if (extras.globalEntry != null && _entered(extras.globalEntry!, subtotal) != extras.globalDiscount) {
@@ -1312,11 +1408,11 @@ class V2Engine extends CaisseEngine {
         }
         if (extras.delivery > 0 && deliveryRight != null) _requireRight(operator, deliveryRight!, 'ajouter une livraison');
         final saleCap = enterableSaleDiscount(operator);
-        if (saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) + extras.globalDiscount > saleCap) {
+        if (!trusted && saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) + extras.globalDiscount > saleCap) {
           throw OfflineRefusal('Remises au-delà du plafond de ${operator.name} par vente (${formatFcfa(saleCap)}).');
         }
         // Une autorisation ne figure dans la vente que si les remises dépassent le seuil du caissier.
-        final overLimit = !withinDiscountLimits(operator, lines, extras.globalDiscount);
+        final overLimit = !trusted && !withinDiscountLimits(operator, lines, extras.globalDiscount);
         if (overLimit) {
           final approval = extras.approval;
           if (approval == null) throw OfflineRefusal('Remise au-delà du seuil de ${operator.name} : autorisation d’un responsable requise.');
@@ -1370,6 +1466,9 @@ class V2Engine extends CaisseEngine {
             approval: overLimit ? extras.approval : null,
             passages: passages,
             order: order == null ? null : (orderUuid: order.orderUuid, settlementUuid: order.settlementUuid),
+            orderType: order?.type ?? 'full',
+            orderParts: order?.shares,
+            orderLabel: order?.label,
           ),
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
@@ -1489,7 +1588,11 @@ class V2Engine extends CaisseEngine {
             if (content['client_nom'] != null) 'client_nom': content['client_nom'],
             if (content['tarif'] != null) 'tarif': content['tarif'],
           }
-        : {...content, if (await v2.read('${V2Keys.zPrefix}${op['uuid']}') case final z?) 'z': jsonDecode(z)};
+        : {
+            ...content,
+            if (await v2.read('${V2Keys.zPrefix}${op['uuid']}') case final z?) 'z': jsonDecode(z),
+            if (await v2.read('${V2Keys.zRestaurantPrefix}${op['uuid']}') case final z?) 'z_restaurant': jsonDecode(z),
+          };
     final finalState = state == V2OperationState.integrated || state == V2OperationState.resolved;
     return OfflineOperation(
       uuid: op['uuid'] as String,
