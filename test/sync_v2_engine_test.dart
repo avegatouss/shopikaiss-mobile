@@ -309,7 +309,7 @@ void main() {
     await e.load('https://boutique.exemple.ci');
     expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
     await e.sync();
-    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant4'));
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant5'));
     final ctx = e.restaurant!;
     expect([ctx.master, ctx.stations.keys.toSet(), ctx.routes[fakeSavon], ctx.sendLabel, ctx.lastTicketNumbers[cuisine]], [true, {cuisine, bar}, cuisine, 'Envoyer', 'CUI-20261118-0007']);
     final ops = {for (final o in e.snapshot!.operators) o.id: o};
@@ -615,7 +615,7 @@ void main() {
     await e.load('https://boutique.exemple.ci');
     expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
     await e.sync();
-    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant4'));
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant5'));
     final ctx = e.restaurant!;
     expect([ctx.production, ctx.restaurantProfile, ctx.tableService, ctx.sendLabel, [for (final c in ctx.channels) c.code]],
         [true, true, false, 'Valider', ['ancien', 'sur_place', 'emporter', 'livraison']]);
@@ -742,6 +742,128 @@ void main() {
     register = (await e.restoRegister())!;
     expect([register.waiting, register.serverMessage, register.serverZNumber, register.serverState], [false, null, 7, 'integree']);
     expect((await e.lastClosure())!.content['z_restaurant'], containsPair('type', 'session'));
+  });
+
+  test('restaurant.v1 (R-5) : promotions publiées, happy hour et « X achetés, Y offerts » à la saisie, conditions figées, fonction restreinte', () async {
+    const pdv = 'b1000000-0000-4000-8000-000000000005';
+    const t1 = 'b4000000-0000-4000-8000-000000000051';
+    const salle = 'b3000000-0000-4000-8000-000000000051';
+    const bar = 'ca000000-0000-4000-8000-000000000002', cocktails = 'ca000000-0000-4000-8000-000000000003';
+    const mojitoUuid = 'c0000000-0000-4000-8000-000000000102', croissantUuid = 'c0000000-0000-4000-8000-000000000103';
+    const happyUuid = 'b0000000-0000-4000-8000-000000000501', bxgyUuid = 'b0000000-0000-4000-8000-000000000502';
+    const unit = 1000000;
+    // Vendredi 20/11, 19:12 à Abidjan : happy hour ouvert.
+    final moment = DateTime.utc(2026, 11, 20, 19, 12);
+    Map<String, dynamic> fixture(String name) =>
+        jsonDecode(File('test/fixtures/contrat-v2/fixtures/valides/$name.json').readAsStringSync()) as Map<String, dynamic>;
+    Map<String, dynamic> produit(String nom, int prix, String? categorie) => {
+      'nom': nom, 'reference': null, 'categorie': null, 'prix': prix, 'stock_illimite': true, 'actif': true, 'vente_locale': true,
+      'categorie_uuid': categorie, 'marque': null, 'fournisseur': null, 'unite': null, 'prix_gros': null, 'gros_quantite_min': null, 'seuil_alerte': null,
+      'cree_le': null, 'favori': false, 'promotions': <Map<String, dynamic>>[], 'image': null,
+    };
+    // Happy hour de la fixture sur la catégorie parente « bar » : le mojito est dans « cocktails », enfant de « bar ».
+    final happy = fixture('donnees--restaurant-promotion');
+    serve21(server);
+    server
+      ..capabilities = [...server.capabilities, 'session.cloture', 'restaurant.v1']
+      ..authorizationExpires = '2026-11-22T00:00:00Z'
+      ..restaurant = {
+        'point_de_vente_uuid': pdv, 'profil': 'PRODUCTION', 'maitre': true, 'generation': '5',
+        'derniers_numeros': {'commande': null, 'bons': <Map<String, dynamic>>[]},
+      }
+      ..put('operateur', 'operateur:7', {
+        'operateur_id': '7', 'nom': 'Awa', 'pin_empreinte': 'empreinte', 'droits': ['caisse_restaurant', 'caisse_table', 'ouverture_session', 'vente'],
+        'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
+      }, critical: true)
+      ..put('restaurant.point_de_vente', pdv, {
+        'code': 'RESTO', 'nom': 'Restaurant', 'profil': 'PRODUCTION', 'actif': true, 'terminaux': [fakeTerminal], 'membres': null,
+        'reglages_vente': {'changement_client_paiement': true, 'reference_plateforme_avant_envoi': false, 'verrouillage_minutes': null},
+      }, critical: true)
+      ..put('restaurant.maitre', 'maitre:$pdv', {
+        'point_de_vente_uuid': pdv, 'generation': '5', 'terminal_uuid': fakeTerminal, 'appareil_uuid': fakeDevice, 'epoque': 3, 'designe_le': '2026-11-20T09:30:00Z',
+      }, critical: true)
+      ..put('restaurant.reglages', 'reglages:$pdv', {
+        'point_de_vente_uuid': pdv, 'envoi_production': false, 'plusieurs_commandes_par_table': true, 'prefixe_commande': 'PF', 'motif_annulation_commande': false,
+        'registre_obligatoire': false, 'prefacture_a_la_demande': true, 'retard_production_minutes': 15, 'sections_z': <String>[], 'fuseau': 'Africa/Abidjan',
+        'impression_mode': 'register', 'repli_premier_poste_actif': false, 'annulation_envoye_responsable': false,
+        'assistant': {'max_operations_par_jour': 0, 'max_montant_par_operation': 0, 'max_montant_par_jour': 0, 'max_remise_pourcent': 0},
+      }, critical: true)
+      ..put('restaurant.salle', salle, {'code': 'BAR', 'nom': 'Bar', 'ordre': 1, 'actif': true})
+      ..put('restaurant.table', t1, {'point_de_vente_uuid': pdv, 'salle_uuid': salle, 'nom': 'T1', 'code': 'T1', 'capacite': 4, 'ordre': 1, 'actif': true})
+      ..put('restaurant.canal', 'c4000000-0000-4000-8000-000000000001', {
+        'code': 'sur_place', 'nom': 'Sur place', 'type': 'dine_in', 'exige_table': true, 'exige_reference': false, 'suivi_livraison': false, 'ordre': 10, 'actif': true,
+      })
+      ..put('restaurant.categorie', cocktails, {'parent_uuid': bar, 'poste_uuid': null, 'ordre': 1, 'visible': true})
+      ..put('produit', mojitoUuid, produit('Mojito', 3000, cocktails))
+      ..put('produit', croissantUuid, produit('Croissant', 500, null))
+      ..put('restaurant.promotion', happyUuid, happy)
+      ..put('restaurant.promotion', bxgyUuid, fixture('donnees--restaurant-promotion-x-achetes-y-offerts'));
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, contract21: true, announceRestaurant: true, clock: () => moment);
+    await e.load('https://boutique.exemple.ci');
+    expect(await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai'), isNull);
+    await e.sync();
+    expect(await e.v2.read(V2Keys.contractRevision), endsWith('+restaurant5'), reason: 'nouvel instantané : les promotions déjà publiées sont reçues');
+    expect({for (final p in e.restaurant!.promotions) p.uuid: p.name}, {happyUuid: 'Happy hour bar', bxgyUuid: '2 achetés, 1 offert'});
+    expect(e.restaurant!.categoryParents[cocktails], bar);
+    final awa = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    CartLine article(String name, int units) => CartLine(product: e.snapshot!.products.firstWhere((p) => p.name == name), quantity: BigInt.from(units * unit));
+
+    // Saisie : happy hour (catégorie parente, salle de la table, canal) et « 2 achetés, 1 offert » avec son offert lié.
+    final order = (await e.restoOpenOnChannel(awa, 'sur_place', tableUuid: t1)).order.uuid;
+    var view = await e.restoEditLines(awa, order, added: [(article('Mojito', 2), null), (article('Croissant', 2), null)]);
+    var lines = view.order.lines;
+    expect([for (final l in lines) (l.label, l.quantity, l.lineDiscount, l.promotionUuid, l.free, l.parentLineUuid)], [
+      ('Mojito', 2 * unit, 1200, happyUuid, false, null),
+      ('Croissant', 2 * unit, 0, bxgyUuid, false, null),
+      ('Croissant', unit, 500, bxgyUuid, true, lines[1].uuid),
+    ]);
+    expect(view.payable, 6000 - 1200 + 1000);
+    final mojito = lines[0].uuid, bought = lines[1].uuid, offered = lines[2].uuid;
+
+    // La boutique passe le happy hour à 50 % : la ligne déjà saisie garde 20 % (conditions figées), une nouvelle ligne
+    // prend 50 %. Quatre croissants : deux offerts.
+    server.publish([
+      {'type': 'restaurant.promotion', 'critique': false, 'cle': happyUuid, 'revision': '2', 'action': 'upsert', 'donnees': {...happy, 'pourcentage': '50.000000'}},
+    ]);
+    await e.sync();
+    expect(e.restaurant!.promotion(happyUuid)!.percent, 50 * unit);
+    view = await e.restoEditLines(awa, order, quantities: {mojito: 3 * unit, bought: 4 * unit}, added: [(article('Mojito', 1), null)]);
+    expect([view.order.line(mojito).discount, view.order.lines.last.discount, view.order.line(offered).quantity], [1800, 1500, 2 * unit]);
+    await expectLater(e.restoEditLines(awa, order, quantities: {offered: unit}), throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('suit l’article acheté'))));
+
+    // Fonction restreinte par la boutique (serveur antérieur au lot R-5) : aucune promotion n'est appliquée.
+    server.restricted = [
+      {'fonction': 'restaurant.promotions', 'raison': {'code': 'restaurant.fonction_restreinte', 'message': 'Promotions restreintes.', 'details': null}},
+    ];
+    await e.sync();
+    expect(e.restaurant!.promotions, isEmpty);
+    view = await e.restoEditLines(awa, order, added: [(article('Mojito', 1), null)]);
+    expect([view.order.lines.last.promotionUuid, view.order.lines.last.discount], [null, 0]);
+
+    // Remontée : chaque version conforme au schéma (le faux serveur refuse sinon), champs R-5 toujours présents.
+    await e.sync();
+    final versions = [
+      for (final r in server.received.values)
+        if ((r['operation'] as Map)['type'] == 'resto_commande') r,
+    ];
+    expect(versions.map((r) => r['etat']).toSet(), {'integree'});
+    expect(versions.length, 4);
+    for (final r in versions) {
+      final state = ((r['operation'] as Map)['contenu'] as Map)['etat'] as Map;
+      expect(state.containsKey('remise_globale_source'), isTrue);
+      for (final l in (state['lignes'] as List).cast<Map>()) {
+        expect([l.containsKey('promotion_uuid'), l.containsKey('personnel_id')], [true, true]);
+      }
+    }
+    final first = versions.firstWhere((r) => ((r['operation'] as Map)['contenu'] as Map)['version'] == 2);
+    final content = (first['operation'] as Map)['contenu'] as Map;
+    expect([for (final l in ((content['etat'] as Map)['lignes'] as List).cast<Map>()) (l['tarif'], l['remise'], l['promotion_uuid'], l['parent_ligne_uuid'])], [
+      ('happy_hour', 1200, happyUuid, null),
+      ('standard', 0, bxgyUuid, null),
+      ('free', 500, bxgyUuid, bought),
+    ]);
+    expect(content['fait'], {'ajoutees': [mojito, bought, offered], 'modifiees': [], 'retirees': []});
   });
 
   test('ticket.modeles : activation sur un poste existant reprend un instantane une seule fois', () async {

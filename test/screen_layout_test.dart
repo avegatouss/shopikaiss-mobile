@@ -13,6 +13,7 @@ import 'package:shopikaiss_terminal/src/offline/offline_register_page.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_context.dart';
 import 'package:shopikaiss_terminal/src/restaurant/resto_engine.dart';
+import 'package:shopikaiss_terminal/src/restaurant/resto_promotions.dart';
 import 'package:shopikaiss_terminal/src/terminal/terminal_channel.dart';
 import 'package:shopikaiss_terminal/src/terminal/terminal_session.dart';
 import 'package:shopikaiss_terminal/src/ui/screen_profile.dart';
@@ -123,7 +124,10 @@ class _RestaurantEngine extends OfflineEngine {
   _RestaurantEngine({required super.store, required super.transport});
 
   var _ids = 0;
-  late final _resto = RestoEngine(newUuid: () => '00000000-0000-4000-8000-${(++_ids).toString().padLeft(12, '0')}', now: DateTime.now, stations: const {}, counters: RestoCounters(), sendToStations: false);
+  late final _resto = RestoEngine(newUuid: () => '00000000-0000-4000-8000-${(++_ids).toString().padLeft(12, '0')}', now: DateTime.now, stations: const {}, counters: RestoCounters(), sendToStations: false, promotions: _promotionBook);
+
+  /// Promotions publiées (R-5) ; aucune par défaut.
+  RestoPromotions? get _promotionBook => null;
   final orders = <String, RestoOrder>{};
   final actions = <String>[];
   List<CartPayment>? settledWith;
@@ -315,6 +319,30 @@ class _ProductionEngine extends _RestaurantEngine {
   }
 }
 
+/// Restaurant (R-5) avec des promotions publiées : « 2 achetés, 1 offert » sur l'article 2, 10 % sur l'article 3.
+class _PromotionEngine extends _ProductionEngine {
+  _PromotionEngine({required super.store, required super.transport});
+
+  static const _promotions = [
+    RestoPromotion(uuid: 'b0000000-0000-4000-8000-000000000502', name: 'Deux achetés, un offert', category: 'promotion', type: 'x_achetes_y_offerts', buy: 2, free: 1, products: {'2'}),
+    RestoPromotion(uuid: 'b0000000-0000-4000-8000-000000000503', name: 'Promo du jour', category: 'promotion', type: 'pourcentage', percent: 10000000, products: {'3'}),
+  ];
+
+  @override
+  RestoPromotions? get _promotionBook => RestoPromotions(promotions: _promotions);
+
+  @override
+  RestoContext? get restaurant => RestoContext(
+    pointOfSaleUuid: 'pdv',
+    pointOfSaleName: 'Restaurant',
+    profile: 'PRODUCTION',
+    master: true,
+    generation: '1',
+    channels: const [RestoChannel(uuid: 'c2', code: 'emporter', name: 'Emporter', kind: 'takeaway', order: 2)],
+    promotions: _promotions,
+  );
+}
+
 Future<TerminalSession> _session({
   required double inches,
   String layout = 'auto',
@@ -324,6 +352,7 @@ Future<TerminalSession> _session({
   bool approver = false,
   bool restaurant = false,
   bool production = false,
+  bool promotions = false,
 }) async {
   final snapshot = _snapshot();
   if (approver) {
@@ -362,7 +391,9 @@ Future<TerminalSession> _session({
       StoreKeys.snapshotAt: DateTime.now().toUtc().toIso8601String(),
       StoreKeys.lastContact: DateTime.now().toUtc().toIso8601String(),
     });
-  final engine = production
+  final engine = promotions
+      ? _PromotionEngine(store: store, transport: _Offline())
+      : production
       ? _ProductionEngine(store: store, transport: _Offline())
       : restaurant
       ? _RestaurantEngine(store: store, transport: _Offline())
@@ -789,6 +820,39 @@ void main() {
       await tester.tap(find.text('Retour à la salle'));
       await tester.pumpAndSettle();
       expect(find.text('Aucune commande ouverte.'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Restaurant (R-5) : promotion appliquée à la saisie, affichée sur la ligne, offert lié sans quantité propre', (tester) async {
+      final session = await _session(inches: 10.1, promotions: true);
+      final engine = session.offline as _PromotionEngine;
+      await _pump(tester, const Size(1280, 800), session);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('resto-nouvelle-commande')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('canal-emporter')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ouvrir la commande'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 2 au nom assez long pour un petit écran').first);
+      await tester.tap(find.text('Article numéro 3 au nom assez long pour un petit écran').first);
+      await tester.pump();
+      await tester.tap(find.text('Enregistrer'));
+      await tester.pumpAndSettle();
+      expect(engine.actions, ['ouverture:1', 'lignes:2']);
+      final order = engine.orders.values.single;
+      expect([for (final l in order.lines) (l.productUuid, l.quantity, l.lineDiscount, l.free)], [
+        ('2', 2000000, 0, false),
+        ('2', 1000000, 2000, true),
+        ('3', 1000000, 300, false),
+      ]);
+      // La promotion se lit sur la ligne ; l'offert lié porte « Offert » et le nom de la promotion.
+      expect(find.textContaining('Deux achetés, un offert'), findsNWidgets(2));
+      expect(find.textContaining('Offert · Deux achetés, un offert'), findsOneWidget);
+      expect(find.textContaining('Remise 300 F · Promo du jour'), findsOneWidget);
+      // Ni « Plus » ni « Moins » sur l'offert lié : il suit l'article acheté.
+      expect(find.byTooltip('Plus'), findsNWidgets(2));
       expect(tester.takeException(), isNull);
     });
 

@@ -165,7 +165,7 @@ void main() {
     expect(r.event.state['lignes'][0], {
       'ligne_uuid': pizza, 'produit_uuid': 'pizza', 'conditionnement_uuid': null, 'lot_uuid': null, 'libelle': 'Pizza margherita', 'quantite': '1.000000',
       'coefficient': '1.000000', 'prix_unitaire': 5000, 'remise': 0, 'tarif': 'standard', 'statut': 'pending', 'poste_uuid': null,
-      'commentaire': 'Bien cuite', 'parent_ligne_uuid': null, 'envoye': '0.000000', 'reglee': '0.000000',
+      'commentaire': 'Bien cuite', 'parent_ligne_uuid': null, 'envoye': '0.000000', 'reglee': '0.000000', 'promotion_uuid': null, 'personnel_id': null,
     });
     expect(() => e.editLines(r.order), throwsA(isA<RestoRefusal>()), reason: 'aucune version vide');
     r = e.prebill(r.order);
