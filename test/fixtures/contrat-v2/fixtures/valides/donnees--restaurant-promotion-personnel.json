@@ -1,0 +1,20 @@
+{
+    "nom": "Repas du personnel",
+    "categorie": "staff",
+    "type": "pourcentage",
+    "pourcentage": "50.000000",
+    "montant": null,
+    "achetes": null,
+    "offerts": null,
+    "priorite": 0,
+    "jours": [],
+    "heure_debut": null,
+    "heure_fin": null,
+    "du": null,
+    "au": null,
+    "canaux": [],
+    "salles": [],
+    "produits": [],
+    "categories": [],
+    "max_par_personnel": "1.000000"
+}

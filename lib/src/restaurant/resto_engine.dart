@@ -476,9 +476,9 @@ class RestoTicket {
     final local = createdAt.toLocal();
     return [
       if (duplicate) '*** DUPLICATA ***',
-      '$title · $stationName',
+      '$title - $stationName',
       dayNumber,
-      'Commande $orderNumber${number > 1 ? ' · bon $number' : ''}',
+      'Commande $orderNumber${number > 1 ? ' - bon $number' : ''}',
       if (table != null && table.isNotEmpty) 'Table $table',
       '${two(local.day)}/${two(local.month)} ${two(local.hour)}:${two(local.minute)}',
       '-' * columns,

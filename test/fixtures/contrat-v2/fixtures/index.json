@@ -558,7 +558,7 @@
             "erreur_attendue": "numero_local : format invalide"
         },
         {
-            "fichier": "invalides/operation--resto-commande-action-hors-lot.json",
+            "fichier": "invalides/operation--resto-commande-action-inconnue.json",
             "schema": "operation.json",
             "valide": false,
             "erreur_attendue": "action : valeur attendue"
@@ -644,6 +644,186 @@
             "schema": "operation.json",
             "valide": false,
             "erreur_attendue": "type : valeur hors liste"
+        },
+        {
+            "fichier": "valides/donnees--restaurant-canal.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.canal",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-canal-sans-type.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.canal",
+            "valide": false,
+            "erreur_attendue": "type : obligatoire"
+        },
+        {
+            "fichier": "valides/operation--resto-commande-restaurant-ouverture.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-offert.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-remise-ligne.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-remise.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-validation.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-validation-client.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-deplacement-lignes.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-fusion.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-couverts-serveur.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-registre-ouvre.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-registre-clos.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--vente-reglement-parts.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-resultat--resto-registre-clos.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-2.1--operation-etat-z-restaurant.json",
+            "schema": "donnees-2.1.json#/$defs/operation_etat",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--resto-commande-remise-ligne-saisie-inconnue.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "type : valeur hors liste"
+        },
+        {
+            "fichier": "invalides/operation--resto-commande-deplacement-sans-version-cible.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "version_cible : obligatoire"
+        },
+        {
+            "fichier": "invalides/operation--resto-registre-clos-sans-z-local.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "z_local : obligatoire"
+        },
+        {
+            "fichier": "valides/donnees--restaurant-promotion.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.promotion",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-promotion-personnel.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.promotion",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--restaurant-promotion-x-achetes-y-offerts.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.promotion",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-promotion-categorie-inconnue.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.promotion",
+            "valide": false,
+            "erreur_attendue": "categorie : valeur hors liste"
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-promotion-heure-sans-secondes.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.promotion",
+            "valide": false,
+            "erreur_attendue": "doit correspondre à exactement une variante"
+        },
+        {
+            "fichier": "valides/donnees--restaurant-remise-client.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.remise_client",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--restaurant-remise-client-zero.json",
+            "schema": "donnees-restaurant-1.json#/$defs/restaurant.remise_client",
+            "valide": false,
+            "erreur_attendue": "pourcent : minimum 1"
+        },
+        {
+            "fichier": "valides/operation--resto-commande-lignes-promotions.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-commande-remise-client.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--resto-commande-remise-globale-source-inconnue.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "remise_globale_source : valeur hors liste"
+        },
+        {
+            "fichier": "valides/operation--resto-remboursement-retour.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--resto-remboursement-annulation.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--resto-remboursement-motif-court.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "motif : au moins 3 caractère(s)"
+        },
+        {
+            "fichier": "invalides/operation--resto-remboursement-autorisation-inconnue.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "type : valeur hors liste"
+        },
+        {
+            "fichier": "valides/operation--vente-commande-offerte-sans-paiement.json",
+            "schema": "operation.json",
+            "valide": true
         }
     ]
 }

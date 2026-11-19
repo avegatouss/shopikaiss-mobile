@@ -1,0 +1,10 @@
+{
+    "code": "emporter",
+    "nom": "Emporter",
+    "type": "takeaway",
+    "exige_table": false,
+    "exige_reference": false,
+    "suivi_livraison": false,
+    "ordre": 20,
+    "actif": true
+}

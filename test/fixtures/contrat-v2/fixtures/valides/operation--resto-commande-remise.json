@@ -1,12 +1,12 @@
 {
-    "uuid": "a0000000-0000-4000-8000-000000000202",
+    "uuid": "a0000000-0000-4000-8000-000000000304",
     "type": "resto_commande",
     "appareil": {
         "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
         "epoque": 41
     },
-    "sequence": 351,
-    "cree_le": "2026-11-17T19:41:00Z",
+    "sequence": 364,
+    "cree_le": "2026-11-17T20:33:00Z",
     "operateur_id": "7",
     "versions": {
         "politiques": "12",
@@ -18,11 +18,11 @@
         "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
         "commande_uuid": "c0aa0000-0000-4000-8000-000000000012",
         "version": 3,
-        "action": "offert",
+        "action": "remise",
         "fait": {
-            "ligne_uuid": "e1000000-0000-4000-8000-000000000001"
+            "montant": 1000
         },
-        "motif": null,
+        "motif": "Client fidèle",
         "autorisations": [],
         "etat": {
             "profil": "TABLE_SERVICE",
@@ -40,7 +40,7 @@
             "statut": "open",
             "etape": "waiting",
             "prefactures": 0,
-            "remise_globale": 0,
+            "remise_globale": 1000,
             "lignes": [
                 {
                     "ligne_uuid": "e1000000-0000-4000-8000-000000000001",
@@ -81,11 +81,11 @@
             ],
             "totaux": {
                 "brut": 8000,
-                "remises": 0,
-                "a_payer": 8000,
+                "remises": 1000,
+                "a_payer": 7000,
                 "regle": 0
             }
         }
     },
-    "empreinte": "df458b5cf4048fa3e53ea8eac185a31a95bc1681e3b9543897152f785c01454a"
+    "empreinte": "1c752b2280da3bf50712fda87dbfc5e01bf70c86b1a85bc98addb10e84ece471"
 }

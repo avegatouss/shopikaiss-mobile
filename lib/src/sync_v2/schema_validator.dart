@@ -131,7 +131,10 @@ class SchemaValidator {
     for (final required in (schema['required'] as List? ?? const [])) {
       if (!data.containsKey(required)) errors.add('$path.$required : obligatoire');
     }
-    final properties = schema['properties'] as Map? ?? const {};
+    // `"properties": []` = objet vide encodé par PHP (contrat restaurant-1 R-4/R-5) : aucune propriété déclarée.
+    final raw = schema['properties'];
+    if (raw is List && raw.isNotEmpty) throw SchemaProfileError('properties doit être un objet dans $file');
+    final properties = raw is Map ? raw : const {};
     for (final entry in data.entries) {
       final property = properties[entry.key];
       if (property is Map) {

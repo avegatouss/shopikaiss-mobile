@@ -156,6 +156,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final rules = _snapshot?.rules;
     _probe = Timer.periodic(Duration(seconds: rules?.probeSeconds ?? 20), (_) => _tryOnline(automatic: true));
     if (rules != null && !rules.pinRequired) _operator = _snapshot!.operatorById(_snapshot!.lastOperatorId);
+    // TBC : un point de vente Service de table ouvre directement la salle après la connexion.
+    _floor = _engine.restaurant?.tableService ?? false;
     _refreshSold();
     _refreshSuspended();
   }
@@ -879,7 +881,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 child: reason != null || snapshot == null
                     ? _scrollable(_Blocked(message: reason ?? 'Catalogue absent.', onRetry: () => _tryOnline()))
                     : _operator == null
-                    ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() => _operator = o)))
+                    ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() {
+                          _operator = o;
+                          _floor = (_engine.restaurant?.tableService ?? false) && _cart.isEmpty;
+                        })))
                     : !_engine.sessionOpen
                     ? _scrollable(_SessionOpening(engine: _engine, operator: _operator!, onOpened: () => setState(() {})))
                     : _floor && (_engine.restaurant?.tableService ?? false)

@@ -1,0 +1,80 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000502",
+    "type": "resto_commande",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 502,
+    "cree_le": "2026-11-18T19:12:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000002",
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000032",
+        "version": 3,
+        "action": "lignes",
+        "fait": {
+            "ajoutees": [
+                "e1000000-0000-4000-8000-000000000035"
+            ],
+            "modifiees": [],
+            "retirees": []
+        },
+        "motif": null,
+        "autorisations": [],
+        "etat": {
+            "profil": "PRODUCTION",
+            "numero_local": "PF-20261118-L0031",
+            "date_metier": "2026-11-18",
+            "canal": "sur_place",
+            "table_uuid": "7ab1e000-0000-4000-8000-0000000000e1",
+            "menu_uuid": null,
+            "couverts": 2,
+            "serveur_id": "7",
+            "client_uuid": "c1e00000-0000-4000-8000-000000000001",
+            "client_nom": "Awa",
+            "reference_externe": null,
+            "commentaire": null,
+            "statut": "open",
+            "etape": null,
+            "prefactures": 0,
+            "remise_globale": 500,
+            "remise_globale_source": "customer",
+            "lignes": [
+                {
+                    "ligne_uuid": "e1000000-0000-4000-8000-000000000035",
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000101",
+                    "conditionnement_uuid": null,
+                    "lot_uuid": null,
+                    "libelle": "Pizza margherita",
+                    "quantite": "1.000000",
+                    "coefficient": "1.000000",
+                    "prix_unitaire": 5000,
+                    "remise": 0,
+                    "tarif": "standard",
+                    "statut": "pending",
+                    "poste_uuid": null,
+                    "commentaire": null,
+                    "parent_ligne_uuid": null,
+                    "envoye": "0.000000",
+                    "reglee": "0.000000",
+                    "promotion_uuid": null,
+                    "personnel_id": null
+                }
+            ],
+            "totaux": {
+                "brut": 5000,
+                "remises": 500,
+                "a_payer": 4500,
+                "regle": 0
+            }
+        }
+    },
+    "empreinte": "9830bc6312a37b3aeb5987150a26b915b09b350b50dfae5f8bd4d41548caff89"
+}

@@ -148,7 +148,7 @@ void main() {
     // Bons relus depuis la file : même empreinte.
     final again = RestoTicket.fromJson(r.order.uuid, r.tickets.first.toJson());
     expect(again.fingerprint, r.tickets.first.fingerprint);
-    expect(again.printLines(stationName: 'Cuisine', orderNumber: 'PF-20261118-L0001', table: 'T1').take(3), ['ANNULATION · Cuisine', 'CUI-20261118-0003', 'Commande PF-20261118-L0001 · bon 3']);
+    expect(again.printLines(stationName: 'Cuisine', orderNumber: 'PF-20261118-L0001', table: 'T1').take(3), ['ANNULATION - Cuisine', 'CUI-20261118-0003', 'Commande PF-20261118-L0001 - bon 3']);
   });
 
   test('Service de table (R-2) : une version par validation, étapes du web, clôture après règlement, état relu à l’identique', () {

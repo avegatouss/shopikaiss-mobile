@@ -1,0 +1,23 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000311",
+    "type": "resto_registre_clos",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 371,
+    "cree_le": "2026-11-17T23:40:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "5a11e000-0000-4000-8000-000000000001",
+        "registre_uuid": "e9000000-0000-4000-8000-000000000001",
+        "note": null
+    },
+    "empreinte": "e69384d0b24f1a7630b1e2cd0e9509d37653e5afa1f0a137bb4dde81738b21d6"
+}

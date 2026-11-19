@@ -1,0 +1,20 @@
+{
+    "operation_uuid": "a0000000-0000-4000-8000-000000000313",
+    "etat": "integree",
+    "version_etat": "1763421000000",
+    "raison": null,
+    "details": {
+        "z": {
+            "cloture_uuid": "c1000000-0000-4000-8000-000000000041",
+            "compte": 125000,
+            "theorique": 125000,
+            "ecart": 0,
+            "mode": "COMPLETE"
+        },
+        "z_restaurant": {
+            "z_uuid": "e9100000-0000-4000-8000-000000000002",
+            "type": "session",
+            "numero": 31
+        }
+    }
+}

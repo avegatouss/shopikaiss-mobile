@@ -1,0 +1,18 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000311",
+    "etat": "integree",
+    "version_etat": "1763422800000",
+    "raison": null,
+    "vente": null,
+    "mouvements": [],
+    "couverture": {
+        "curseur": null
+    },
+    "details": {
+        "z_restaurant": {
+            "z_uuid": "e9100000-0000-4000-8000-000000000001",
+            "type": "register",
+            "numero": 7
+        }
+    }
+}

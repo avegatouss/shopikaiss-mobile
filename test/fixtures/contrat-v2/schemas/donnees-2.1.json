@@ -987,6 +987,31 @@
                                     "minimum": 1
                                 }
                             }
+                        },
+                        "z_restaurant": {
+                            "description": "Capacité restaurant.v1 (lot R-4) : Z restaurant figé par le serveur, à la clôture de session d'un terminal restaurant (`session`) ou à la clôture du registre (`register`).",
+                            "type": "object",
+                            "required": [
+                                "z_uuid",
+                                "type",
+                                "numero"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "z_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "type": {
+                                    "enum": [
+                                        "session",
+                                        "register"
+                                    ]
+                                },
+                                "numero": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                }
+                            }
                         }
                     }
                 }

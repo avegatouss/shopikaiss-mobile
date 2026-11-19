@@ -465,6 +465,10 @@ void main() {
       await tester.tap(find.text('Valider'));
       await tester.pumpAndSettle();
       expect(engine.actions, ['ouverture:1', 'lignes:2', 'envoi:3']);
+      // Comme « Mettre en attente » : retour à la salle, la commande reste ouverte.
+      expect(find.byKey(const ValueKey('table-t1')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('table-t1')));
+      await tester.pumpAndSettle();
       expect(find.text('Valider'), findsNothing, reason: 'plus rien en attente');
       expect(find.textContaining('Validé'), findsOneWidget);
       expect(find.byTooltip('Plus'), findsNothing, reason: 'un article validé ne change plus');

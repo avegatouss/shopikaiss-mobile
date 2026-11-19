@@ -1,0 +1,52 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000301",
+    "type": "resto_commande",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 41
+    },
+    "sequence": 361,
+    "cree_le": "2026-11-17T20:01:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000340"
+    },
+    "contenu": {
+        "maitre_generation": "3",
+        "point_de_vente_uuid": "b0b0e000-0000-4000-8000-000000000002",
+        "commande_uuid": "c0aa0000-0000-4000-8000-000000000031",
+        "version": 1,
+        "action": "ouverture",
+        "fait": {},
+        "motif": null,
+        "autorisations": [],
+        "etat": {
+            "profil": "PRODUCTION",
+            "numero_local": "PF-20261117-L0031",
+            "date_metier": "2026-11-17",
+            "canal": "emporter",
+            "table_uuid": null,
+            "menu_uuid": null,
+            "couverts": null,
+            "serveur_id": "7",
+            "client_uuid": null,
+            "client_nom": "Awa",
+            "reference_externe": null,
+            "commentaire": null,
+            "statut": "open",
+            "etape": null,
+            "prefactures": 0,
+            "remise_globale": 0,
+            "lignes": [],
+            "totaux": {
+                "brut": 0,
+                "remises": 0,
+                "a_payer": 0,
+                "regle": 0
+            }
+        }
+    },
+    "empreinte": "7f693b77c3cd893f74b05b026400794b8442a46b66e62b22352cfc54e0275930"
+}
