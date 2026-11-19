@@ -1,6 +1,7 @@
 import '../sync_v2/canonical_json.dart';
 import '../offline/web_rules.dart';
 import '../sync_v2/decimal6.dart';
+import 'resto_promotions.dart';
 
 /// Moteur partagé du restaurant hors connexion (plan PLAN-RESTAURANT-HORS-LIGNE.md, proposition RESTAURANT-1 de A) :
 /// commandes, lignes, routage vers les postes, bons de production par différence, annulations, et planification de la
@@ -95,6 +96,8 @@ class RestoLine {
     this.status = RestoLineStatus.pending,
     this.sent = 0,
     this.settled = 0,
+    this.promotionUuid,
+    this.tariff,
   }) : label = label.length > 160 ? label.substring(0, 160) : label;
 
   final String uuid;
@@ -126,6 +129,13 @@ class RestoLine {
   /// Quantité réglée.
   int settled;
 
+  /// Lot R-5 : promotion appliquée à la saisie (`promotion_uuid`), null sinon ; un offert ou une remise manuelle la
+  /// retirent.
+  String? promotionUuid;
+
+  /// Lot R-5 : tarif de la promotion (`promotion`, `happy_hour`) ; null = tarif déduit (offert, remise, standard).
+  String? tariff;
+
   bool get active => status != RestoLineStatus.cancelled;
   int get gross => Decimal6.amount(unitPrice, quantity);
   int get lineDiscount => free ? gross : discount;
@@ -150,6 +160,8 @@ class RestoLine {
     status: status,
     sent: sent,
     settled: settled,
+    promotionUuid: promotionUuid,
+    tariff: tariff,
   );
 
   Map<String, dynamic> toJson() => {
@@ -162,13 +174,14 @@ class RestoLine {
     'coefficient': Decimal6.format(coefficient),
     'prix_unitaire': unitPrice,
     'remise': lineDiscount,
-    'tarif': free ? 'free' : (discount > 0 ? 'manual_discount' : 'standard'),
+    'tarif': free ? 'free' : (tariff ?? (discount > 0 ? 'manual_discount' : 'standard')),
     'statut': status.name,
     'poste_uuid': stationUuid,
     'commentaire': comment,
     'parent_ligne_uuid': parentLineUuid,
     'envoye': Decimal6.format(sent),
     'reglee': Decimal6.format(settled),
+    'promotion_uuid': promotionUuid,
   };
 
   static RestoLine fromJson(Map m) => RestoLine(
@@ -188,6 +201,8 @@ class RestoLine {
     status: RestoLineStatus.values.byName(m['statut'] as String),
     sent: Decimal6.parse(m['envoye'] as String),
     settled: Decimal6.parse(m['reglee'] as String),
+    promotionUuid: m['promotion_uuid'] as String?,
+    tariff: const {'promotion', 'happy_hour', 'staff'}.contains(m['tarif']) ? m['tarif'] as String : null,
   );
 }
 
@@ -317,7 +332,7 @@ class RestoOrder {
   /// État complet de la commande APRÈS le fait (`etat_commande`, operation.json, lot R-2).
   Map<String, dynamic> state(RestoVat vat) {
     final t = totals(vat);
-    return {
+    return _r5Fields({
       'profil': profile,
       'numero_local': localNumber,
       'date_metier': businessDay,
@@ -336,7 +351,22 @@ class RestoOrder {
       'remise_globale': globalDiscount,
       'lignes': [for (final l in lines) l.toJson()],
       'totaux': {'brut': t.gross, 'remises': t.discounts, 'a_payer': t.payable, 'regle': t.settled},
-    };
+    });
+  }
+
+  /// Lot R-5 : un client R-5 envoie TOUJOURS `promotion_uuid` et `personnel_id` sur chaque ligne et
+  /// `remise_globale_source` sur l'état, même à null (leur absence désigne un client R-4). Valeurs par défaut seulement :
+  /// une valeur déjà posée (tarif du personnel, remise client) est gardée. Sans suivi de la source, une remise de
+  /// commande ne peut venir que du fait `remise` : `manual` (sinon le serveur l'attendrait recalculée comme une remise
+  /// client).
+  Map<String, dynamic> _r5Fields(Map<String, dynamic> state) {
+    state.putIfAbsent('remise_globale_source', () => globalDiscount > 0 ? 'manual' : null);
+    for (final line in (state['lignes'] as List).cast<Map<String, dynamic>>()) {
+      line
+        ..putIfAbsent('promotion_uuid', () => null)
+        ..putIfAbsent('personnel_id', () => null);
+    }
+    return state;
   }
 
   /// Commande relue depuis l'état de sa dernière version (la file des opérations fait foi).
@@ -374,6 +404,7 @@ class RestoNewLine {
     required this.unitPrice,
     this.routing = const RestoRouting(),
     this.comment,
+    this.categoryUuid,
   });
 
   final String productUuid;
@@ -384,6 +415,9 @@ class RestoNewLine {
   final int unitPrice;
   final RestoRouting routing;
   final String? comment;
+
+  /// Catégorie du produit (cibles des promotions, lot R-5).
+  final String? categoryUuid;
 }
 
 // ------------------------------------------------------------------ bons
@@ -511,6 +545,7 @@ class RestoEvent {
     required this.state,
     this.tickets = const [],
     this.authorizations = const [],
+    this.promotionTerms = const {},
   });
 
   final String uuid;
@@ -523,6 +558,10 @@ class RestoEvent {
 
   /// Autorisations d'un approbateur (`autorisation_restaurant`), code vérifié sur la caisse.
   final List<Map<String, dynamic>> authorizations;
+
+  /// Lot R-5 : conditions des promotions figées à la saisie des lignes ajoutées par ce fait, par ligne (à garder pour
+  /// un changement de quantité ultérieur).
+  final Map<String, RestoPromotion> promotionTerms;
 }
 
 /// Résultat d'une action : nouvelle commande, fait à remonter, bons à livrer.
@@ -545,7 +584,8 @@ class RestoEngine {
     this.sendToStations = true,
     this.vat = const RestoVat(),
     this.cancellationReasonRequired = false,
-  });
+    RestoPromotions? promotions,
+  }) : promotions = promotions ?? RestoPromotions();
 
   final String Function() newUuid;
   final DateTime Function() now;
@@ -564,6 +604,9 @@ class RestoEngine {
   /// `restaurant.reglages.motif_annulation_commande`.
   final bool cancellationReasonRequired;
 
+  /// Promotions publiées (lot R-5, profil Restaurant) ; vides : aucune promotion n'est appliquée.
+  final RestoPromotions promotions;
+
   RestoResult _record(
     RestoOrder order,
     String action,
@@ -571,6 +614,7 @@ class RestoEngine {
     String? reason,
     List<RestoTicket> tickets = const [],
     List<Map<String, dynamic>> authorizations = const [],
+    Map<String, RestoPromotion> promotionTerms = const {},
   }) {
     // R-4 : une remise de commande ne dépasse jamais le montant après remises de ligne (offert, déplacement, annulation).
     if (order.isOpen && order.activeLines.isNotEmpty && order.globalDiscount > orderDiscountBase(order)) {
@@ -588,6 +632,7 @@ class RestoEngine {
         state: order.state(vat),
         tickets: tickets,
         authorizations: authorizations,
+        promotionTerms: promotionTerms,
       ),
       tickets,
     );
@@ -666,6 +711,7 @@ class RestoEngine {
     _requireOpen(order);
     final next = order.copy();
     final addedUuids = <String>[], changed = <String>[], removedUuids = <String>[];
+    final terms = <String, RestoPromotion>{};
     for (final item in added) {
       if (item.quantity <= 0) throw const RestoRefusal('Quantité invalide.');
       if (item.unitPrice < 0) throw const RestoRefusal('Prix invalide.');
@@ -682,13 +728,20 @@ class RestoEngine {
       );
       next.lines.add(line);
       addedUuids.add(line.uuid);
+      // Lot R-5 : promotion de la saisie (profil Restaurant) ; un « X achetés, Y offerts » ajoute son offert lié.
+      final offered = _applyPromotion(next, line, item.categoryUuid, terms);
+      if (offered != null) {
+        next.lines.add(offered);
+        addedUuids.add(offered.uuid);
+      }
     }
     for (final uuid in {...quantities.keys, ...comments.keys}) {
       if (removed.contains(uuid)) continue;
       final line = next.line(uuid);
       if (!line.active) throw const RestoRefusal('Cette ligne est annulée.');
-      var touched = false;
+      var touched = false, promoted = false;
       if (quantities.containsKey(uuid) && quantities[uuid] != line.quantity) {
+        if (_linkedOffer(line)) throw RestoRefusal('L’article offert « ${line.label} » suit l’article acheté : changez la quantité de l’article acheté.');
         final quantity = quantities[uuid]!;
         if (quantity <= 0) throw const RestoRefusal('Quantité invalide : retirez l’article.');
         if (quantity < line.settled) throw RestoRefusal('« ${line.label} » est déjà en partie réglé : sa quantité ne descend plus sous le réglé.');
@@ -701,27 +754,119 @@ class RestoEngine {
         }
         line.quantity = quantity;
         touched = true;
+        promoted = line.promotionUuid != null && !line.free;
       }
       if (comments.containsKey(uuid) && _clean(comments[uuid]) != line.comment) {
         if (line.status != RestoLineStatus.pending) throw RestoRefusal('« ${line.label} » est déjà envoyé : son commentaire ne change plus.');
         line.comment = _clean(comments[uuid]);
         touched = true;
       }
-      if (touched) changed.add(uuid);
+      if (touched && !changed.contains(uuid)) changed.add(uuid);
+      // Lot R-5 : une quantité changée garde les conditions de la saisie (`refreshLine` du web).
+      if (promoted) _refreshPromotion(next, line, addedUuids, changed, removedUuids);
     }
     for (final uuid in removed) {
       final line = next.line(uuid);
       if (!line.active) continue;
       if (line.sent > 0 || line.status == RestoLineStatus.sent) throw RestoRefusal('« ${line.label} » est déjà envoyé : annulez-le avec un motif.');
       if (line.settled > 0) throw RestoRefusal('« ${line.label} » est déjà réglé : il ne se retire plus.');
+      if (_linkedOffer(line) && !removed.contains(line.parentLineUuid)) {
+        throw RestoRefusal('L’article offert « ${line.label} » suit l’article acheté : retirez l’article acheté.');
+      }
       line.status = RestoLineStatus.cancelled;
-      removedUuids.add(uuid);
+      if (!removedUuids.contains(uuid)) removedUuids.add(uuid);
+      // Lot R-5 : l'offert lié part avec l'article acheté.
+      for (final offered in next.lines.where((l) => l.parentLineUuid == uuid && _linkedOffer(l) && l.active)) {
+        if (offered.sent > 0 || offered.status == RestoLineStatus.sent) throw RestoRefusal('L’article offert « ${offered.label} » est déjà envoyé : annulez-le avec un motif.');
+        offered.status = RestoLineStatus.cancelled;
+        if (!removedUuids.contains(offered.uuid)) removedUuids.add(offered.uuid);
+      }
     }
     if (addedUuids.isEmpty && changed.isEmpty && removedUuids.isEmpty) throw const RestoRefusal('Aucune modification à enregistrer.');
     if (next.lines.length > 200) throw const RestoRefusal('Une commande compte 200 lignes au plus.');
     next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'lignes', {'ajoutees': addedUuids, 'modifiees': changed, 'retirees': removedUuids},
-        reason: removedUuids.isEmpty ? null : 'Retiré de la commande');
+        reason: removedUuids.isEmpty ? null : 'Retiré de la commande', promotionTerms: terms);
+  }
+
+  // ---------------------------------------------------------------- promotions (lot R-5)
+
+  /// Offert lié d'un « X achetés, Y offerts » : il suit son article acheté (quantité, retrait, déplacement).
+  static bool _linkedOffer(RestoLine line) => line.free && line.parentLineUuid != null && line.promotionUuid != null;
+
+  /// Promotion d'une ligne qui vient d'être saisie (`applyToNewLine` du web), profil Restaurant seulement : tarif et
+  /// remise de la promotion, ou, pour un « X achetés, Y offerts », l'article reste `standard` avec `promotion_uuid` et
+  /// l'offert lié est rendu (null s'il n'y en a pas). Les conditions de la saisie sont figées dans [terms].
+  RestoLine? _applyPromotion(RestoOrder order, RestoLine line, String? categoryUuid, Map<String, RestoPromotion> terms,
+      {List<String> categories = const ['promotion', 'happy_hour']}) {
+    if (order.profile != 'PRODUCTION' || promotions.isEmpty || line.free || line.parentLineUuid != null) return null;
+    final best = promotions.best(
+      RestoPromotionLine(
+        productUuid: line.productUuid,
+        categoryUuid: categoryUuid,
+        unitPrice: line.unitPrice,
+        quantity: line.quantity,
+        coefficient: line.coefficient,
+        channel: order.channel,
+        tableUuid: order.tableUuid,
+      ),
+      now(),
+      categories: categories,
+    );
+    if (best == null) return null;
+    terms[line.uuid] = best;
+    promotions.entryTerms[line.uuid] = best;
+    line.promotionUuid = best.uuid;
+    if (!best.buyXGetY) {
+      line
+        ..tariff = best.category
+        ..discount = best.lineDiscount(line.unitPrice, line.quantity, coefficient: line.coefficient);
+      return null;
+    }
+    final quantity = best.freeQuantity(line.quantity);
+    return quantity == 0 ? null : _offeredLine(line, best, quantity);
+  }
+
+  /// Offert lié : même article, même prix, même poste, entièrement remisé (`free`, `parent_ligne_uuid`, même promotion).
+  RestoLine _offeredLine(RestoLine bought, RestoPromotion promotion, int quantity) => RestoLine(
+    uuid: newUuid(),
+    productUuid: bought.productUuid,
+    packagingUuid: bought.packagingUuid,
+    lotUuid: bought.lotUuid,
+    label: bought.label,
+    quantity: quantity,
+    coefficient: bought.coefficient,
+    unitPrice: bought.unitPrice,
+    stationUuid: bought.stationUuid,
+    parentLineUuid: bought.uuid,
+    free: true,
+    promotionUuid: promotion.uuid,
+  );
+
+  /// Quantité changée d'une ligne promue : remise recalculée avec les conditions de la saisie (jamais une promotion
+  /// modifiée depuis, jamais la fenêtre horaire réévaluée) ; l'offert lié est créé, redimensionné ou retiré.
+  void _refreshPromotion(RestoOrder order, RestoLine line, List<String> added, List<String> changed, List<String> removed) {
+    final terms = promotions.termsOf(line.uuid, line.promotionUuid) ??
+        (throw RestoRefusal('La promotion appliquée à « ${line.label} » est introuvable sur ce terminal : retirez l’article et ajoutez-le à nouveau.'));
+    if (!terms.buyXGetY) {
+      line.discount = terms.lineDiscount(line.unitPrice, line.quantity, coefficient: line.coefficient);
+      return;
+    }
+    final quantity = terms.freeQuantity(line.quantity);
+    final offered = order.lines.where((l) => l.parentLineUuid == line.uuid && _linkedOffer(l) && l.status == RestoLineStatus.pending).firstOrNull;
+    if (offered == null) {
+      if (quantity > 0) {
+        final created = _offeredLine(line, terms, quantity);
+        order.lines.add(created);
+        added.add(created.uuid);
+      }
+    } else if (quantity == 0) {
+      offered.status = RestoLineStatus.cancelled;
+      removed.add(offered.uuid);
+    } else if (offered.quantity != quantity) {
+      offered.quantity = quantity;
+      if (!changed.contains(offered.uuid)) changed.add(offered.uuid);
+    }
   }
 
   static String? _clean(String? comment) {
@@ -984,7 +1129,10 @@ class RestoEngine {
     if (line.free) throw RestoRefusal('« ${line.label} » est déjà offert.');
     line
       ..free = true
-      ..discount = 0;
+      ..discount = 0
+      // Un offert retire la promotion de la ligne (comme au web).
+      ..promotionUuid = null
+      ..tariff = null;
     next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'offert', {'ligne_uuid': lineUuid}, reason: motive, authorizations: authorizations);
   }
@@ -1000,7 +1148,11 @@ class RestoEngine {
     if (value < 1 || (percent && value > 100)) throw const RestoRefusal('Remise invalide.');
     final amount = lineDiscountOf(line, percent: percent, value: value);
     if (amount < 1 || amount > line.gross) throw RestoRefusal('La remise doit être comprise entre 1 F et le montant de la ligne (${line.gross} F).');
-    line.discount = amount;
+    line
+      ..discount = amount
+      // Une remise manuelle retire la promotion de la ligne (comme au web).
+      ..promotionUuid = null
+      ..tariff = null;
     next.stage = RestoStage.afterChange(next.stage);
     return _record(next, 'remise_ligne', {'ligne_uuid': lineUuid, 'saisie': {'type': percent ? 'pourcentage' : 'montant', 'valeur': value}},
         reason: motive, authorizations: authorizations);

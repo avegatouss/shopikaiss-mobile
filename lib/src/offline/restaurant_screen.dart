@@ -1495,9 +1495,12 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
                 '${Decimal6.label(_quantities[l.uuid] ?? l.quantity)} x ${formatFcfa(l.unitPrice)}',
                 if (l.status == RestoLineStatus.sent) _engine.restaurant?.settings.sendToProduction == true && l.sent > 0 ? 'Envoyé' : 'Validé',
                 if (l.free) 'Offert' else if (l.discount > 0) 'Remise ${formatFcfa(l.discount)}',
+                // Lot R-5 : promotion appliquée à la saisie (offert lié d'un « X achetés, Y offerts » compris).
+                if (l.promotionUuid != null) _engine.restaurant?.promotion(l.promotionUuid)?.name ?? 'Promotion',
                 if (l.comment != null) l.comment!,
               ].join(' · ')),
-              trailing: !editable || !l.active
+              // L'offert lié suit son article acheté : ni quantité ni retrait à lui seul.
+              trailing: !editable || !l.active || (l.free && l.parentLineUuid != null && l.promotionUuid != null)
                   ? Text(formatFcfa(l.total))
                   : l.status == RestoLineStatus.sent
                   // Envoyé : il ne change plus, il s'annule avec un motif (on ajoute l'article à nouveau pour en servir plus).

@@ -101,6 +101,7 @@ const knownRestaurantTypes = {
   'restaurant.salle', 'restaurant.table', 'restaurant.menu', 'restaurant.categorie', //
   'restaurant.poste', 'restaurant.routage',
   'restaurant.canal', // R-4 (profil Restaurant)
+  'restaurant.promotion', // R-5 (non critique, profil Restaurant)
 };
 
 /// Résultat de l'application d'une page du journal.

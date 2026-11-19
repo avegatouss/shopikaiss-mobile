@@ -1,4 +1,5 @@
 import 'resto_engine.dart';
+import 'resto_promotions.dart';
 
 /// Réglages restaurant résolus pour le point de vente (`restaurant.reglages`, RESTAURANT-1 §3.3).
 class RestoSettings {
@@ -165,6 +166,8 @@ class RestoContext {
     this.routes = const {},
     this.lastTicketNumbers = const {},
     this.channels = const [],
+    this.promotions = const [],
+    this.categoryParents = const {},
   });
 
   final String? pointOfSaleUuid;
@@ -213,6 +216,15 @@ class RestoContext {
   bool get restaurantProfile => tableService || production;
 
   RestoChannel? channel(String? code) => channels.where((c) => c.code == code).firstOrNull;
+
+  /// Promotions actives publiées (`restaurant.promotion`, lot R-5, profil Restaurant) ; vide si la fonction est
+  /// restreinte ou si le serveur n'en publie pas.
+  final List<RestoPromotion> promotions;
+
+  /// Catégorie parente restaurant de chaque catégorie publiée (`restaurant.categorie.parent_uuid`).
+  final Map<String, String?> categoryParents;
+
+  RestoPromotion? promotion(String? uuid) => uuid == null ? null : promotions.where((p) => p.uuid == uuid).firstOrNull;
 
   /// Libellé de l'action d'envoi : « Envoyer » vers les postes, « Valider » quand l'envoi en production est éteint.
   String get sendLabel => settings.sendToProduction ? 'Envoyer' : 'Valider';
