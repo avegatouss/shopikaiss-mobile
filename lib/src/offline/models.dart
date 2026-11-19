@@ -649,7 +649,7 @@ class SaleExtras {
 
 /// Règlement complet d'une commande restaurant par une vente : chaque ligne du panier règle une ligne de la commande.
 class OrderSettlement {
-  OrderSettlement({required this.orderUuid, required this.settlementUuid, required Map<CartLine, String> lineOf, this.type = 'full', this.shares, this.label})
+  OrderSettlement({required this.orderUuid, required this.settlementUuid, required Map<CartLine, String> lineOf, this.type = 'full', this.shares, this.label, this.trustedLineDiscounts = const {}, this.trustedGlobalDiscount = 0})
     : lineOf = Map.identity()..addAll(lineOf);
 
   final String orderUuid;
@@ -666,6 +666,29 @@ class OrderSettlement {
 
   /// Ligne de commande de chaque ligne du panier (par identité).
   final Map<CartLine, String> lineOf;
+
+  /// Remise de chaque ligne de commande déjà autorisée et auditée sur la commande (offert, remise de ligne, lot R-4).
+  final Map<String, int> trustedLineDiscounts;
+
+  /// Remise de commande déjà autorisée sur la commande (R-4).
+  final int trustedGlobalDiscount;
+
+  /// Remises « de confiance » (RESTAURANT-1 §4.6 étape 1, `trustedGlobalDiscount` du web) : chaque remise de ligne de la
+  /// vente au plus celle de sa ligne de commande, la remise globale au plus celle de la commande. Elles ne demandent alors
+  /// ni le droit REMISE, ni autorisation, ni les plafonds hors ligne.
+  bool trusts(List<CartLine> lines, int globalDiscount) {
+    if (globalDiscount > trustedGlobalDiscount) return false;
+    final byLine = <String, int>{};
+    for (final l in lines) {
+      final uuid = lineOf[l];
+      if (uuid == null) {
+        if (l.discount > 0) return false;
+        continue;
+      }
+      byLine[uuid] = (byLine[uuid] ?? 0) + l.discount;
+    }
+    return byLine.entries.every((e) => e.value <= (trustedLineDiscounts[e.key] ?? 0));
+  }
 }
 
 /// Réglages du module Passes événement pour la boutique (entité `pass_reglages`).

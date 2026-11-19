@@ -497,11 +497,53 @@ class V2Engine extends CaisseEngine {
   bool restoApprovalRequired(Operator operator) => _restoApprovalRequired(operator);
 
   @override
-  Future<List<Operator>> restoApprovers(Operator cashier, int amount) => _restoApprovers(cashier, amount);
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) =>
+      _restoApprovers(cashier, amount, type: type, percent: percent);
 
   @override
-  Future<RestoApproval> restoAuthorize({required Operator cashier, required Operator approver, required String code, required String reason, required int amount}) =>
-      _restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount);
+  Future<RestoApproval> restoAuthorize({
+    required Operator cashier,
+    required Operator approver,
+    required String code,
+    required String reason,
+    required int amount,
+    String type = 'resto_modifier_envoye',
+    int? percent,
+  }) => _restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount, type: type, percent: percent);
+
+  @override
+  bool restoNeedsApproval(Operator operator, String type) => _restoNeedsApproval(operator, type);
+
+  @override
+  Future<RestoOrderView> restoOffer(Operator operator, String orderUuid, String lineUuid, String reason, {RestoApproval? approval}) =>
+      _restoOffer(operator, orderUuid, lineUuid, reason, approval: approval);
+
+  @override
+  Future<RestoOrderView> restoDiscountLine(Operator operator, String orderUuid, String lineUuid, {required bool percent, required int value, required String reason, RestoApproval? approval}) =>
+      _restoDiscountLine(operator, orderUuid, lineUuid, percent: percent, value: value, reason: reason, approval: approval);
+
+  @override
+  Future<RestoOrderView> restoDiscountOrder(Operator operator, String orderUuid, int amount, {String? reason, RestoApproval? approval}) =>
+      _restoDiscountOrder(operator, orderUuid, amount, reason: reason, approval: approval);
+
+  @override
+  int restoOrderDiscountCeiling(RestoOrder order) => _restoOrderDiscountCeiling(order);
+
+  @override
+  Future<RestoOrderView> restoMoveLines(Operator operator, String orderUuid, String targetUuid, Set<String> lineUuids) =>
+      _restoMoveOrMerge(operator, orderUuid, targetUuid, lines: lineUuids);
+
+  @override
+  Future<RestoOrderView> restoMerge(Operator operator, String orderUuid, String targetUuid, {String? reason}) =>
+      _restoMoveOrMerge(operator, orderUuid, targetUuid, reason: reason);
+
+  @override
+  Future<RestoOrderView> restoCoversAndServer(Operator operator, String orderUuid, {int? covers, String? serverId}) =>
+      _restoAct(operator, orderUuid, (engine, order) => engine.coversAndServer(order, covers: covers, serverId: serverId));
+
+  @override
+  Future<RestoOrderView> restoValidateCustomer(Operator operator, String orderUuid) =>
+      _restoAct(operator, orderUuid, (engine, order) => engine.validateCustomer(order));
 
   @override
   Future<List<RestoTicketView>> restoTickets({String? orderUuid}) => _restoTicketViews(orderUuid: orderUuid);
@@ -1349,14 +1391,16 @@ class V2Engine extends CaisseEngine {
         }
         checkSale(s, lines, payments, extras);
         _requireRight(operator, 'vente', 'vendre');
-        if (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0) _requireRight(operator, 'remise', 'accorder une remise');
+        // Règlement d'une commande restaurant (R-4) : remises de confiance, déjà autorisées et auditées sur la commande.
+        final trusted = extras.order?.trusts(lines, extras.globalDiscount) ?? false;
+        if (!trusted && (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0)) _requireRight(operator, 'remise', 'accorder une remise');
         for (final l in lines) {
-          if (l.discount > enterableLineDiscount(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
+          if (!trusted && l.discount > enterableLineDiscount(operator, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${operator.name}.');
           final entry = l.discountEntry;
           if (entry != null && _entered(entry, l.base) != l.discount) throw OfflineRefusal('Remise sur « ${l.label} » différente de sa saisie.');
         }
         final subtotal = lines.fold<int>(0, (sum, l) => sum + l.base - l.discount);
-        if (extras.globalDiscount > enterableGlobalDiscount(operator, subtotal)) {
+        if (!trusted && extras.globalDiscount > enterableGlobalDiscount(operator, subtotal)) {
           throw OfflineRefusal('Remise globale au-delà du maximum autorisé hors ligne pour ${operator.name}.');
         }
         if (extras.globalEntry != null && _entered(extras.globalEntry!, subtotal) != extras.globalDiscount) {
@@ -1364,11 +1408,11 @@ class V2Engine extends CaisseEngine {
         }
         if (extras.delivery > 0 && deliveryRight != null) _requireRight(operator, deliveryRight!, 'ajouter une livraison');
         final saleCap = enterableSaleDiscount(operator);
-        if (saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) + extras.globalDiscount > saleCap) {
+        if (!trusted && saleCap != null && lines.fold<int>(0, (sum, l) => sum + l.discount) + extras.globalDiscount > saleCap) {
           throw OfflineRefusal('Remises au-delà du plafond de ${operator.name} par vente (${formatFcfa(saleCap)}).');
         }
         // Une autorisation ne figure dans la vente que si les remises dépassent le seuil du caissier.
-        final overLimit = !withinDiscountLimits(operator, lines, extras.globalDiscount);
+        final overLimit = !trusted && !withinDiscountLimits(operator, lines, extras.globalDiscount);
         if (overLimit) {
           final approval = extras.approval;
           if (approval == null) throw OfflineRefusal('Remise au-delà du seuil de ${operator.name} : autorisation d’un responsable requise.');

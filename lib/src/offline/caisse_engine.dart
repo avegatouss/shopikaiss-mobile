@@ -295,12 +295,50 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Annuler un article envoyé exige-t-il l'autorisation d'un responsable pour [operator] ?
   bool restoApprovalRequired(Operator operator) => true;
 
-  /// Responsables qui peuvent autoriser l'annulation d'un envoyé de [amount] F pour [cashier].
-  Future<List<Operator>> restoApprovers(Operator cashier, int amount) async => const [];
+  /// Responsables qui peuvent autoriser l'annulation d'un envoyé de [amount] F pour [cashier] ; [type] : autre geste
+  /// (`resto_offrir`, `remise`, R-4) et [percent] : remise en % arrondi au supérieur (plafond de l'assistant).
+  Future<List<Operator>> restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) async => const [];
 
-  /// Vérifie le code de 8 chiffres de [approver] et rend l'autorisation à joindre à l'annulation.
-  Future<RestoApproval> restoAuthorize({required Operator cashier, required Operator approver, required String code, required String reason, required int amount}) =>
+  /// Vérifie le code de 8 chiffres de [approver] et rend l'autorisation à joindre à l'annulation (ou au geste [type]).
+  Future<RestoApproval> restoAuthorize({
+    required Operator cashier,
+    required Operator approver,
+    required String code,
+    required String reason,
+    required int amount,
+    String type = 'resto_modifier_envoye',
+    int? percent,
+  }) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  // ---------------------------------------------------------------- gestes sur une commande (R-4)
+
+  /// Le geste [type] (`resto_offrir`, `remise`) exige-t-il l'autorisation d'un responsable pour [operator] ?
+  bool restoNeedsApproval(Operator operator, String type) => true;
+
+  /// Offre un article (remise = brut de la ligne, quantité inchangée), motif de 3 caractères au moins.
+  Future<RestoOrderView> restoOffer(Operator operator, String orderUuid, String lineUuid, String reason, {RestoApproval? approval}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Remise d'un article : [value] francs, ou [value] % du brut ([percent], arrondi vers le bas) ; motif obligatoire.
+  Future<RestoOrderView> restoDiscountLine(Operator operator, String orderUuid, String lineUuid, {required bool percent, required int value, required String reason, RestoApproval? approval}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Remise de la commande en francs, plafonnée ([restoOrderDiscountCeiling]) ; 0 la retire (droit Remise, sans motif).
+  Future<RestoOrderView> restoDiscountOrder(Operator operator, String orderUuid, int amount, {String? reason, RestoApproval? approval}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Remise de commande maximale pour [order].
+  int restoOrderDiscountCeiling(RestoOrder order) => 0;
+
+  /// Déplace des articles de [orderUuid] vers la commande [targetUuid] (une opération sur la source).
+  Future<RestoOrderView> restoMoveLines(Operator operator, String orderUuid, String targetUuid, Set<String> lineUuids) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Regroupe [orderUuid] dans [targetUuid] : articles, couverts et remises passent à la cible, la source est annulée.
+  Future<RestoOrderView> restoMerge(Operator operator, String orderUuid, String targetUuid, {String? reason}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Couverts et serveur de la commande.
+  Future<RestoOrderView> restoCoversAndServer(Operator operator, String orderUuid, {int? covers, String? serverId}) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
+  /// Le client a validé la préfacture (Service de table).
+  Future<RestoOrderView> restoValidateCustomer(Operator operator, String orderUuid) => throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
 
   /// Bons de production de ce terminal (d'une commande si [orderUuid]) et état de leur livraison.
   Future<List<RestoTicketView>> restoTickets({String? orderUuid}) async => const [];
@@ -658,9 +696,11 @@ abstract class CaisseEngine extends EngineNotifier {
   int checkSale(Snapshot s, List<CartLine> lines, List<CartPayment> payments, [SaleExtras extras = const SaleExtras()]) {
     if (lines.isEmpty) throw const OfflineRefusal('Le panier est vide.');
     if (lines.length > 100) throw const OfflineRefusal('Au plus 100 lignes par vente.');
+    // Règlement d'une commande restaurant : ses remises, autorisées sur la commande, sont de confiance (R-4).
+    final trusted = extras.order?.trusts(lines, extras.globalDiscount) ?? false;
     for (final line in lines) {
       if (line.quantity <= BigInt.zero) throw OfflineRefusal('Quantité invalide pour « ${line.label} ».');
-      if (line.discount > maxLineDiscount(line.base, s.rules.maxLineDiscountPercent)) {
+      if (!trusted && line.discount > maxLineDiscount(line.base, s.rules.maxLineDiscountPercent)) {
         throw OfflineRefusal('Remise sur « ${line.label} » au-delà du maximum hors ligne (${s.rules.maxLineDiscountPercent} %).');
       }
     }

@@ -153,7 +153,8 @@ extension _V2Restaurant on V2Engine {
   /// Commandes de la file, groupées par uuid, dernière version de chacune.
   Future<Map<String, _RestoTrack>> _restoTracks() async {
     final tracks = <String, _RestoTrack>{};
-    for (final row in await v2.operationsOfType('resto_commande')) {
+    final rows = await v2.operationsOfType('resto_commande');
+    for (final row in rows) {
       final operation = row['operation'] as Map;
       final content = operation['contenu'] as Map;
       final uuid = content['commande_uuid'] as String;
@@ -172,6 +173,8 @@ extension _V2Restaurant on V2Engine {
       if (state == V2OperationState.rejected || state == V2OperationState.arbitration) track.blocked = true;
       if (version == 1 && row['numero_serveur'] != null) track.serverNumber = row['numero_serveur'] as String;
     }
+    // Déplacements et fusions reçus (R-4) d'abord : le réglé porte ensuite sur l'état fusionné.
+    _restoReceiveMoves(tracks, rows);
     // Réglé (R-4, règlements partiels) : quantités des ventes de ce terminal qui règlent chaque ligne, portées par la
     // version suivante (`reglee`) ; le serveur accepte un réglé en avance sur les ventes qu'il a intégrées.
     final settled = await _restoSettledQuantities();
@@ -185,6 +188,47 @@ extension _V2Restaurant on V2Engine {
     }
     return tracks;
   }
+
+  /// Q9 (R-4) : un déplacement ou une fusion est une opération de la SOURCE ; la cible ne consomme pas de version. Tant que
+  /// la cible est à `version_cible`, son état courant est celui de sa dernière version plus les lignes reçues (et, pour
+  /// une fusion, couverts, remises et client) ; sa version suivante, enregistrée depuis cet état, les porte.
+  void _restoReceiveMoves(Map<String, _RestoTrack> tracks, List<Map<String, dynamic>> rows) {
+    final states = <String, Map<int, Map>>{};
+    final moves = <String, List<(String, int, String, Map)>>{};
+    for (final row in rows) {
+      final content = (row['operation'] as Map)['contenu'] as Map;
+      final uuid = content['commande_uuid'] as String;
+      final version = content['version'] as int;
+      (states[uuid] ??= {})[version] = content['etat'] as Map;
+      final action = content['action'] as String;
+      if (action == 'deplacement_lignes' || action == 'fusion') {
+        final fact = content['fait'] as Map;
+        (moves[fact['vers_commande_uuid'] as String] ??= []).add((uuid, version, action, fact));
+      }
+    }
+    if (moves.isEmpty) return;
+    final memo = <String, RestoOrder?>{};
+    // État d'une commande à une version, lignes reçues comprises ; la source est relue juste avant son geste (récursion
+    // vers des opérations toujours plus anciennes de la file).
+    RestoOrder? at(String uuid, int version) {
+      final key = '$uuid|$version';
+      if (memo.containsKey(key)) return memo[key];
+      final state = states[uuid]?[version];
+      if (state == null) return memo[key] = null;
+      var order = RestoOrder.fromState(uuid, version, state);
+      for (final (source, sourceVersion, action, fact) in moves[uuid] ?? const <(String, int, String, Map)>[]) {
+        if (fact['version_cible'] != version) continue;
+        final before = at(source, sourceVersion - 1);
+        if (before != null) order = RestoEngine.receive(order, before, action, fact);
+      }
+      return memo[key] = order;
+    }
+
+    for (final track in tracks.values) {
+      if (moves.containsKey(track.uuid)) track.order = at(track.uuid, track.order!.version) ?? track.order;
+    }
+  }
+
 
   /// Quantités réglées par les ventes de ce terminal (hors quarantaine), par commande puis par ligne de commande.
   Future<Map<String, Map<String, int>>> _restoSettledQuantities() async {
@@ -398,13 +442,16 @@ extension _V2Restaurant on V2Engine {
 
   /// Approbateurs restaurant de ce terminal pour une annulation de [amount] F : autre personne que l'opérateur, manager
   /// ou assistant qui détient lui-même `resto_modifier_envoye`, avec un code publié ; un assistant dans ses plafonds.
-  Future<List<Operator>> _restoApprovers(Operator cashier, int amount) async {
+  Future<List<Operator>> _restoApprovers(Operator cashier, int amount, {String type = 'resto_modifier_envoye', int? percent}) async {
     final ctx = _resto;
     if (ctx == null) return const [];
     final caps = ctx.settings.assistant;
     final ledger = await _restoLedger();
+    final right = _restoRightOf(type);
     bool within(Operator o) {
       if (o.restaurantApprover == 'manager') return true;
+      // Remise (R-4) : pourcentage de la ligne ou de la commande, arrondi au supérieur ; 0 = l'assistant n'en autorise pas.
+      if (percent != null && percent > caps.maxDiscountPercent) return false;
       final mine = [for (final e in ledger) if (e['a'] == o.id) e['m'] as int];
       if (caps.amountPerOperation > 0 && amount > caps.amountPerOperation) return false;
       if (caps.operationsPerDay > 0 && mine.length >= caps.operationsPerDay) return false;
@@ -417,23 +464,130 @@ extension _V2Restaurant on V2Engine {
         if (o.id != cashier.id &&
             (o.restaurantApprover == 'manager' || o.restaurantApprover == 'assistant') &&
             (o.approvalCodeHash?.isNotEmpty ?? false) &&
-            hasRight(o, 'resto_modifier_envoye') &&
+            hasRight(o, right) &&
             within(o))
           o,
     ];
   }
 
-  Future<RestoApproval> _restoAuthorize({required Operator cashier, required Operator approver, required String code, required String reason, required int amount}) async {
-    if (!(await _restoApprovers(cashier, amount)).any((o) => o.id == approver.id)) {
-      throw OfflineRefusal('${approver.name} ne peut pas autoriser cette annulation (droit, code ou plafonds).');
+  Future<RestoApproval> _restoAuthorize({
+    required Operator cashier,
+    required Operator approver,
+    required String code,
+    required String reason,
+    required int amount,
+    String type = 'resto_modifier_envoye',
+    int? percent,
+  }) async {
+    final cancel = type == 'resto_modifier_envoye' || type == 'resto_annuler_commande';
+    if (!(await _restoApprovers(cashier, amount, type: type, percent: percent)).any((o) => o.id == approver.id)) {
+      throw OfflineRefusal('${approver.name} ne peut pas autoriser ${cancel ? 'cette annulation' : 'ce geste'} (droit, code ou plafonds).');
     }
     final motive = reason.trim();
-    if (motive.length < 3 || motive.length > 500) throw const OfflineRefusal('Indiquez le motif de l’annulation (3 à 500 caractères).');
+    if (motive.length < 3 || motive.length > 500) throw OfflineRefusal('Indiquez le motif ${cancel ? 'de l’annulation' : 'du geste'} (3 à 500 caractères).');
     final wait = await approvalLockedFor(approver);
     if (wait != null) throw OfflineRefusal('Trop d’essais : réessayez dans ${wait.inSeconds + 1} s.');
     if (!await checkApprovalCode(approver, code)) throw const OfflineRefusal('Code d’autorisation incorrect.');
-    return RestoApproval(approverId: approver.id, type: 'resto_modifier_envoye', reason: motive, verifiedAt: now.toUtc().toIso8601String(), amount: amount);
+    return RestoApproval(approverId: approver.id, type: type, reason: motive, verifiedAt: now.toUtc().toIso8601String(), amount: amount);
   }
+
+  // ---------------------------------------------------------------- gestes sur une commande (R-4)
+
+  /// Droit de l'opérateur qui dispense d'autorisation, par type d'autorisation (§4.3 bis).
+  static String _restoRightOf(String type) => switch (type) {
+    'resto_offrir' => 'resto_offrir',
+    'remise' => 'remise',
+    _ => 'resto_modifier_envoye',
+  };
+
+  /// Remise de commande hors ligne : `restaurant.table_service_discount_max_percent` (Service de table) et
+  /// `restaurant.order_discount_max_percent` (Restaurant) ne sont pas publiés ; la caisse applique leur valeur par défaut
+  /// du web (100 % et 20 %), le serveur revérifie avec la valeur de la boutique.
+  static int _restoOrderDiscountPercent(RestoOrder order) => order.profile == 'PRODUCTION' ? 20 : 100;
+
+  /// [type] (`resto_offrir`, `remise`) exige-t-il l'autorisation d'un responsable pour [operator] ? Les gestes R-4 ne
+  /// suivent pas `annulation_envoye_responsable` (droit OU autorisation).
+  bool _restoNeedsApproval(Operator operator, String type) =>
+      type == 'resto_modifier_envoye' || type == 'resto_annuler_commande' ? _restoApprovalRequired(operator) : !hasRight(operator, _restoRightOf(type));
+
+  List<Map<String, dynamic>> _restoGestureAuthorizations(Operator operator, String type, RestoApproval? approval, String reason) {
+    if (!_restoNeedsApproval(operator, type)) return const [];
+    if (approval == null || approval.type != type) {
+      throw OfflineRefusal('${operator.name} n’a pas le droit ${type == 'resto_offrir' ? 'd’offrir un article' : 'd’accorder une remise'} : l’autorisation d’un responsable est requise.');
+    }
+    if (approval.approverId == operator.id) throw const OfflineRefusal('Le responsable doit être une autre personne que l’opérateur.');
+    if (approval.reason != reason.trim()) throw const OfflineRefusal('Le motif a changé depuis l’autorisation : faites-la de nouveau.');
+    return [approval.toJson()];
+  }
+
+  /// Une autorisation vaut pour le montant vérifié (plafonds de l'assistant), pas pour un autre.
+  static void _restoSameAmount(List<Map<String, dynamic>> authorizations, RestoApproval? approval, int Function() amount) {
+    if (authorizations.isNotEmpty && approval!.amount != amount()) throw const OfflineRefusal('Le montant a changé depuis l’autorisation : faites-la de nouveau.');
+  }
+
+  Future<RestoOrderView> _restoOffer(Operator operator, String orderUuid, String lineUuid, String reason, {RestoApproval? approval}) async {
+    final authorizations = _restoGestureAuthorizations(operator, 'resto_offrir', approval, reason);
+    return _restoAct(
+      operator,
+      orderUuid,
+      (engine, order) {
+        _restoSameAmount(authorizations, approval, () => order.line(lineUuid).gross);
+        return engine.offer(order, lineUuid, reason, authorizations: authorizations);
+      },
+      approvals: [if (authorizations.isNotEmpty) approval!],
+    );
+  }
+
+  Future<RestoOrderView> _restoDiscountLine(Operator operator, String orderUuid, String lineUuid, {required bool percent, required int value, required String reason, RestoApproval? approval}) async {
+    final authorizations = _restoGestureAuthorizations(operator, 'remise', approval, reason);
+    return _restoAct(
+      operator,
+      orderUuid,
+      (engine, order) {
+        _restoSameAmount(authorizations, approval, () => RestoEngine.lineDiscountOf(order.line(lineUuid), percent: percent, value: value));
+        return engine.discountLine(order, lineUuid, percent: percent, value: value, reason: reason, authorizations: authorizations);
+      },
+      approvals: [if (authorizations.isNotEmpty) approval!],
+    );
+  }
+
+  /// Remise de commande ; [amount] = 0 la retire (droit REMISE de l'opérateur, sans motif ni autorisation possible).
+  Future<RestoOrderView> _restoDiscountOrder(Operator operator, String orderUuid, int amount, {String? reason, RestoApproval? approval}) async {
+    if (amount == 0 && !hasRight(operator, 'remise')) throw OfflineRefusal('${operator.name} n’a pas le droit de retirer la remise de la commande.');
+    final authorizations = amount > 0 ? _restoGestureAuthorizations(operator, 'remise', approval, reason ?? '') : const <Map<String, dynamic>>[];
+    return _restoAct(
+      operator,
+      orderUuid,
+      (engine, order) {
+        _restoSameAmount(authorizations, approval, () => amount);
+        return engine.discountOrder(order, amount, reason: reason, maxPercent: _restoOrderDiscountPercent(order), authorizations: authorizations);
+      },
+      approvals: [if (authorizations.isNotEmpty) approval!],
+    );
+  }
+
+  /// Plafond de la remise de commande pour [order] (montant après remises de ligne × plafond du profil).
+  int _restoOrderDiscountCeiling(RestoOrder order) => RestoEngine.orderDiscountCeiling(order, _restoOrderDiscountPercent(order));
+
+  /// Déplacement de lignes ([lines]) ou fusion (null) de [sourceUuid] vers [targetUuid] : une opération sur la source,
+  /// qui cite la version courante de la cible (lignes reçues comprises).
+  Future<RestoOrderView> _restoMoveOrMerge(Operator operator, String sourceUuid, String targetUuid, {Set<String>? lines, String? reason}) => serialized(() async {
+    final ctx = _requireResto(operator);
+    final tracks = await _restoTracks();
+    final source = tracks[sourceUuid] ?? (throw const OfflineRefusal('Commande introuvable sur ce terminal.'));
+    final target = tracks[targetUuid] ?? (throw const OfflineRefusal('Commande de destination introuvable sur ce terminal.'));
+    for (final t in [source, target]) {
+      if (t.blocked) throw OfflineRefusal('La commande ${t.order!.localNumber} attend un arbitrage de la boutique.');
+    }
+    final paid = await _paidOrders();
+    if (paid.contains(sourceUuid) || paid.contains(targetUuid)) throw const OfflineRefusal('Une des deux commandes est déjà réglée : elle ne se modifie plus.');
+    try {
+      final engine = await _restoEngine(ctx);
+      return await _restoRecord(ctx, operator, lines == null ? engine.merge(source.order!, target.order!, reason: reason) : engine.moveLines(source.order!, target.order!, lines));
+    } on RestoRefusal catch (e) {
+      throw OfflineRefusal(e.message);
+    }
+  });
 
   // ---------------------------------------------------------------- livraison des bons (R-3, plan §2)
 
@@ -919,7 +1073,11 @@ extension _V2Restaurant on V2Engine {
       final packagingId = l.packagingUuid == null ? null : _ids[l.packagingUuid];
       final packaging = packagingId == null ? null : product.packagings.where((p) => p.id == packagingId).firstOrNull;
       if (l.packagingUuid != null && packaging == null) throw OfflineRefusal('Conditionnement de « ${l.label} » retiré : réglez cette commande en ligne.');
-      final line = CartLine(product: product, packaging: packaging, quantity: BigInt.from(quantity), fixedPrice: l.unitPrice);
+      // Remise de la ligne de commande (offert, remise de ligne, R-4), de confiance à la vente ; règlement par
+      // articles : part au prorata de la quantité, arrondie sur le cumul (la somme des parts redonne la remise).
+      int share(int q) => l.quantity == 0 ? 0 : (BigInt.from(l.lineDiscount) * BigInt.from(q) ~/ BigInt.from(l.quantity)).toInt();
+      final discount = quantity == l.quantity ? l.lineDiscount : share(l.settled + quantity) - share(l.settled);
+      final line = CartLine(product: product, packaging: packaging, quantity: BigInt.from(quantity), fixedPrice: l.unitPrice, discount: discount);
       _restoCartLines[line] = (orderUuid, l.uuid);
       lines.add(line);
     }
@@ -958,6 +1116,13 @@ extension _V2Restaurant on V2Engine {
     }
     final type = ctx.production ? _restoSettlementType(order, covered, expected, whole, payments, shares) : 'full';
     if (ctx.production) await _restoRequireRegister(ctx);
+    // R-4 : la vente reprend les remises de la commande, sans jamais les dépasser.
+    final trusted = {for (final l in order.activeLines) l.uuid: l.lineDiscount};
+    final discounts = <String, int>{};
+    for (final l in lines) {
+      discounts[lineOf[l]!] = (discounts[lineOf[l]!] ?? 0) + l.discount;
+    }
+    if (discounts.entries.any((e) => e.value > trusted[e.key]!)) throw const OfflineRefusal('Remise au-delà de celle de la commande : rouvrez l’encaissement.');
     // Règle du web : encaisser envoie ce qui est encore en attente, sans jamais refuser la vente (au Restaurant,
     // seulement si l'envoi en production est actif).
     if (order.lines.any((l) => l.toSend > 0) && (!ctx.production || ctx.settings.sendToProduction)) {
@@ -969,6 +1134,7 @@ extension _V2Restaurant on V2Engine {
     }
     final sale = await recordSale(lines, payments, operator, draftUuid: draftUuid,
         extras: SaleExtras(
+          globalDiscount: order.globalDiscount,
           order: OrderSettlement(
             orderUuid: orderUuid,
             settlementUuid: _newUuid(),
@@ -976,6 +1142,8 @@ extension _V2Restaurant on V2Engine {
             type: type,
             shares: type == 'shares' ? [for (final share in shares!) share.toJson()] : null,
             label: type == 'shares' ? '${shares!.length} parts' : null,
+            trustedLineDiscounts: trusted,
+            trustedGlobalDiscount: order.globalDiscount,
           ),
         ));
     if (!(await _paidOrders()).contains(orderUuid)) return sale; // règlement partiel : la commande reste ouverte
