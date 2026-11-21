@@ -1061,6 +1061,25 @@ class V2Engine extends CaisseEngine {
   bool get saleEditSupported =>
       v2.contract21 && _serverOffers(CaisseV2Client.saleEditCapability) && (_shopRules?['modification_ticket'] as Map?)?['actif'] == true;
 
+  @override
+  String? get saleEditUnavailable {
+    if (!v2.contract21 || !_serverOffers(CaisseV2Client.saleEditCapability)) return 'Le serveur de la boutique ne propose pas encore cette fonction.';
+    if ((_shopRules?['modification_ticket'] as Map?)?['actif'] != true) {
+      return 'Option désactivée : Paramètres › Règles de gestion › Correction d’une vente.';
+    }
+    return null;
+  }
+
+  @override
+  Future<OfflineOperation?> saleReplacement(String operationUuid) async {
+    for (final row in await v2.operationRows()) {
+      final operation = row['operation'] as Map;
+      if (operation['type'] != 'vente_modification' || row['etat'] == V2OperationState.rejected) continue;
+      if (((operation['contenu'] as Map)['vente_ref'] as Map)['operation_uuid'] == operationUuid) return saleStatus(operation['uuid'] as String);
+    }
+    return null;
+  }
+
   List<Operator> _editApprovers = const [];
 
   @override
@@ -1088,7 +1107,8 @@ class V2Engine extends CaisseEngine {
 
   @override
   String? saleEditBlocker(Operator? operator, OfflineOperation sale) {
-    if (!saleEditSupported) return 'Modification de ticket non disponible sur ce terminal.';
+    final unavailable = saleEditUnavailable;
+    if (unavailable != null) return unavailable;
     if (operator == null) return 'Identifiez le caissier.';
     if (!hasRight(operator, 'vente')) return '${operator.name} n’a pas le droit de vendre.';
     if (!sale.isSale) return 'Seul un ticket de vente se modifie.';

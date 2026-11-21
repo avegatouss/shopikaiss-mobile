@@ -83,11 +83,36 @@ void main() {
     var e = await engine();
     expect(e.saleEditSupported, isFalse);
     final sale = await e.recordSale([CartLine(product: savon(e))], [cash(e, 500)], awa(e));
-    expect(await e.saleEditCheck(awa(e), sale), contains('non disponible'));
+    expect(await e.saleEditCheck(awa(e), sale), 'Le serveur de la boutique ne propose pas encore cette fonction.');
 
     serve(option: false);
     e = await engine();
     expect(e.saleEditSupported, isFalse, reason: 'option éteinte : clé absente de boutique.regles');
+    expect(e.saleEditUnavailable, 'Option désactivée : Paramètres › Règles de gestion › Correction d’une vente.');
+  });
+
+  test('adaptateur : coupure entre ticket de remplacement et effacement du panier ; réglages du ticket figés', () async {
+    serve();
+    final e = await engine();
+    final sale = await e.recordSale([CartLine(product: savon(e), quantity: qty(2))], [cash(e, 1000)], awa(e));
+    var adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    await adapter.execute('startSaleEdit', {'sale_id': sale.uuid}, null);
+    for (final (command, args) in [('setDelivery', {'amount': 100}), ('setNote', {'text': 'x'}), ('setWholesale', {'active': true})]) {
+      await expectLater(adapter.execute(command, args, null), throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'modification_en_cours')));
+    }
+    // Le moteur enregistre le ticket de remplacement, puis l'hôte s'arrête avant d'effacer le panier de correction.
+    final mariam = await e.identifyEditApprover('12345678');
+    await e.recordSaleEdit(awa(e), sale, [CartLine(product: savon(e))], approver: mariam, method: null, reason: null);
+    await adapter.close();
+    adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    final view = await adapter.execute('view', {}, null);
+    expect((view['sale_edit'], (view['lines'] as List).isEmpty), (null, true), reason: 'panier de correction libéré à la reprise');
+    expect(await e.openDrafts(), isEmpty);
+    await adapter.close();
   });
 
   test('code responsable seul : un seul responsable reconnu ; inconnu compté ; doublon refusé', () async {

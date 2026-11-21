@@ -116,6 +116,7 @@ class LocalRegisterAdapter {
     if (_started) return;
     final current = (await engine.openDrafts()).where((d) => d.content['suspendu'] != true).firstOrNull;
     _draft = current == null ? _Draft(_newUuid()) : _Draft.fromStored(current);
+    await _releaseConsumedEdit();
     engine.addListener(_engineChanged);
     // Hôte sans imprimante de caisse joignable (Windows : l'interface imprime) : les bons lui sont confiés par une file
     // durable ; un acquittement conservé mais pas encore journalisé repasse au moteur.
@@ -239,12 +240,16 @@ class LocalRegisterAdapter {
       case 'setLineLot':
         return _setLineLot(_text(args, 'line_id', max: 64), args['lot_uuid'] as String?);
       case 'setWholesale':
+        _refuseDuringEdit();
         return _setWholesale(args['active'] == true);
       case 'setGlobalDiscount':
+        _refuseDuringEdit();
         return _setGlobalDiscount(_entry(args));
       case 'setDelivery':
+        _refuseDuringEdit();
         return _setDelivery(_int(args, 'amount'));
       case 'setNote':
+        _refuseDuringEdit();
         return _setNote(args['text'] == null ? null : _text(args, 'text', max: 2000));
       case 'clear':
         await _releaseHeld();
@@ -256,6 +261,7 @@ class LocalRegisterAdapter {
         if (_draft.edit != null) throw const AdapterFailure('modification_en_cours', 'Modification du ticket en cours : validez-la ou abandonnez-la.');
         return _suspend(label: args['label'] as String?);
       case 'resumeShared':
+        _refuseDuringEdit();
         return _resumeShared(_text(args, 'shared_id', max: 36));
       case 'deleteShared':
         return _deleteShared(_text(args, 'shared_id', max: 36));
@@ -266,6 +272,7 @@ class LocalRegisterAdapter {
       case 'setImageSettings':
         return _setImageSettings(args);
       case 'resumeDraft':
+        _refuseDuringEdit();
         return _resume(_text(args, 'draft_id', max: 64));
       case 'deleteDraft':
         return _deleteDraft(_text(args, 'draft_id', max: 64));
@@ -286,6 +293,7 @@ class LocalRegisterAdapter {
       case 'createCustomer':
         return _createCustomer(args, operationId);
       case 'setCustomer':
+        _refuseDuringEdit();
         return _setCustomer(args);
       case 'verifyPass':
         return _verifyPass(_text(args, 'code', max: 120));
@@ -374,11 +382,7 @@ class LocalRegisterAdapter {
       // Catalogue hors connexion (2.1 lot 10) : capacité accordée et droit du caissier connecté.
       'product_create': cap(engine.productCreateBlocker(_operator)),
       // Modifier un ticket (2.1 lot 11) : capacité, option de la boutique et droit de vendre ; le ticket se lit par vente.
-      'sale_edit': cap(!engine.saleEditSupported
-          ? 'Modification de ticket non disponible sur ce terminal.'
-          : _operator == null
-          ? 'Identifiez le caissier.'
-          : null),
+      'sale_edit': cap(engine.saleEditUnavailable ?? (_operator == null ? 'Identifiez le caissier.' : null)),
       'product_edit': cap(engine.productEditBlocker(_operator)),
       'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
@@ -898,6 +902,9 @@ class LocalRegisterAdapter {
   // ------------------------------------------------------------------ Modifier un ticket (2.1 lot 11)
 
   Future<OfflineOperation> _editedSale() async {
+    if (await _releaseConsumedEdit()) {
+      throw const AdapterFailure('modification_deja_faite', 'Ce ticket a déjà été modifié : le panier de correction est libéré.');
+    }
     final id = _draft.edit?['vente_id'] as String?;
     final sale = id == null ? null : await engine.saleStatus(id);
     if (sale == null) throw const AdapterFailure('aucune_modification', 'Aucune modification de ticket en cours.');
@@ -909,6 +916,21 @@ class LocalRegisterAdapter {
     final lines = [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))];
     if (lines.any((l) => l == null)) throw const AdapterFailure('panier_invalide', 'Un article du panier n’est plus au catalogue local : retirez-le.');
     return lines.cast<CartLine>();
+  }
+
+  void _refuseDuringEdit() {
+    if (_draft.edit != null) throw const AdapterFailure('modification_en_cours', 'Modification du ticket en cours : validez-la ou abandonnez-la.');
+  }
+
+  /// Coupure entre l'enregistrement du ticket de remplacement et l'effacement du panier : le brouillon de correction,
+  /// et lui seul, est libéré. Vrai s'il l'a été.
+  Future<bool> _releaseConsumedEdit() async {
+    final id = _draft.edit?['vente_id'] as String?;
+    if (id == null || await engine.saleReplacement(id) == null) return false;
+    await engine.deleteDraft(_draft.uuid);
+    _draft = _Draft(_newUuid());
+    _emit('panier');
+    return true;
   }
 
   /// Les articles du ticket reviennent dans le panier, au prix du catalogue (prix saisi gardé pour un produit coché).
@@ -937,7 +959,12 @@ class LocalRegisterAdapter {
           entered: packagingId == null && product.priceEditable && unit != usual ? unit : null,
         ));
       }
-      _draft.edit = {'vente_id': sale.uuid, 'numero': sale.number, 'total_origine': sale.total};
+      final globalDiscount = (sale.content['remise_globale'] as int?) ?? 0;
+      _draft
+        ..globalDiscount = globalDiscount
+        ..globalEntry = globalDiscount == 0 ? null : DiscountEntry('montant', '$globalDiscount')
+        ..delivery = (sale.content['livraison'] as int?) ?? 0
+        ..edit = {'vente_id': sale.uuid, 'numero': sale.number, 'total_origine': sale.total};
     });
   }
 

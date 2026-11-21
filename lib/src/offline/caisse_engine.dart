@@ -261,8 +261,15 @@ abstract class CaisseEngine extends EngineNotifier {
   /// boutique `regles.modification_ticket.actif`.
   bool get saleEditSupported => false;
 
+  /// Pourquoi la modification de ticket est indisponible sur ce terminal, ou null : serveur sans la capacité, ou option
+  /// éteinte pour la boutique (deux textes distincts, affichés tels quels).
+  String? get saleEditUnavailable => 'Le serveur de la boutique ne propose pas encore cette fonction.';
+
   /// Pourquoi [operator] ne peut pas modifier [sale], ou null.
-  String? saleEditBlocker(Operator? operator, OfflineOperation sale) => 'Modification de ticket non disponible sur ce terminal.';
+  String? saleEditBlocker(Operator? operator, OfflineOperation sale) => saleEditUnavailable;
+
+  /// Ticket de remplacement déjà enregistré pour la vente [operationUuid], ou null (reprise après coupure).
+  Future<OfflineOperation?> saleReplacement(String operationUuid) async => null;
 
   /// [saleEditBlocker] plus les contrôles qui lisent la file : ticket déjà remplacé, retour déjà fait.
   Future<String?> saleEditCheck(Operator? operator, OfflineOperation sale) async => saleEditBlocker(operator, sale);
