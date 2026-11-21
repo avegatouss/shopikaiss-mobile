@@ -393,7 +393,7 @@ void main() {
     expect(count(duplicate, cut), 1);
     final bare = const ReceiptSettings(qrEnabled: false).saleBytes(lines, paperWidth: 80);
     expect((count(bare, cut), count(bare, raster)), (1, 0), reason: 'sans logo ni QR : texte seul');
-    expect(bare.sublist(0, 5), [0x1B, 0x40, 0x1B, 0x64, 3], reason: 'trois lignes avant le texte (marges C 398a128)');
+    expect(bare.sublist(0, 5), [0x1B, 0x40, 0x1B, 0x64, 2], reason: 'deux lignes avant le texte (marges C 9e044dd)');
     expect(bare.sublist(bare.length - 7), [0x1B, 0x64, 2, 0x1D, 0x56, 66, 0], reason: 'deux lignes avant la coupe');
 
   });

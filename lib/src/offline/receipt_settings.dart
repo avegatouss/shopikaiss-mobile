@@ -70,8 +70,8 @@ class ReceiptSettings {
     final logo = logoPng == null ? null : receiptLogoRaster(logoPng!, paperWidth);
     final out = BytesBuilder(copy: false);
     for (var i = 0; i < copyCount(copies ?? this.copies); i++) {
-      // Marges de C (`398a128`) : trois lignes avant le logo ou le texte, deux après le dernier QR (dans receiptBytesWithQr).
-      out.add([...EscPos.init(), EscPos.esc, 0x64, 3]);
+      // Marges de C (`398a128`, puis `9e044dd`) : deux lignes avant le logo ou le texte, deux après le dernier QR (dans receiptBytesWithQr).
+      out.add([...EscPos.init(), EscPos.esc, 0x64, 2]);
       if (logo != null) out.add(logo);
       out.add(ticket);
     }

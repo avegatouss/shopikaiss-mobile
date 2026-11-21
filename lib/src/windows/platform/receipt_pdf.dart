@@ -36,7 +36,7 @@ buildReceiptPdf(
                 double.infinity,
                 marginLeft: 4 * PdfPageFormat.mm,
                 marginRight: 4 * PdfPageFormat.mm,
-                marginTop: 27,
+                marginTop: 18,
                 marginBottom: 18,
               ),
         theme: pw.ThemeData.withFont(base: font),

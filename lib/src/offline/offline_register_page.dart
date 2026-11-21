@@ -603,7 +603,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final methods = _snapshot!.methods.where((m) => !m.isCash).toList();
     final cash = TextEditingController();
     final comment = TextEditingController();
-    final amounts = {for (final m in methods) m.code: TextEditingController()};
+    // Autres moyens préremplis à 0 (demande utilisateur, C `0fecbe5`) ; les espèces restent à saisir après comptage.
+    final amounts = {for (final m in methods) m.code: TextEditingController(text: '0')};
     final notes = {for (final m in methods) m.code: TextEditingController()};
     String? error;
     final closed = await showDialog<bool>(
@@ -623,14 +624,40 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: const InputDecoration(labelText: 'Espèces comptées (F)'),
                 ),
+                if (methods.isNotEmpty) const SizedBox(height: 16),
                 for (final m in methods) ...[
-                  TextField(
-                    controller: amounts[m.code],
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: InputDecoration(labelText: '${m.name} compté (facultatif)'),
-                  ),
-                  TextField(controller: notes[m.code], maxLength: 500, decoration: InputDecoration(labelText: 'Justification ${m.name}')),
+                  // Tablette : une ligne par moyen (montant, justification) ; téléphone : l'un sous l'autre.
+                  if (_compact) ...[
+                    TextField(
+                      controller: amounts[m.code],
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: InputDecoration(labelText: '${m.name} (F)'),
+                    ),
+                    TextField(controller: notes[m.code], maxLength: 500, decoration: InputDecoration(labelText: 'Justification ${m.name} (facultative)')),
+                  ] else
+                    SizedBox(
+                      width: (MediaQuery.sizeOf(context).width - 160).clamp(280.0, 560.0),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: amounts[m.code],
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: InputDecoration(labelText: '${m.name} (F)'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 3,
+                            child: TextField(controller: notes[m.code], maxLength: 500, decoration: const InputDecoration(labelText: 'Justification (facultative)')),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
                 TextField(
                   controller: comment,
