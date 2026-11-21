@@ -115,6 +115,10 @@ class TerminalChannel {
 
   Future<NativeResult> hideCustomerDisplay() => _call('hideCustomerDisplay');
 
+  /// Caisse hors ligne : [script] remet l'état du panier à `ShopiKaissDisplay.push` de la page affichée sur le second
+  /// écran, sans réseau ; si aucune page d'afficheur n'y est chargée, le natif ouvre d'abord la page locale [html].
+  Future<NativeResult> pushCustomerDisplay(String script, String html) => _call('pushCustomerDisplay', {'script': script, 'html': html});
+
   /// Recharge l'afficheur client (URL courante, jeton renouvelé), sinon rouvre la dernière URL demandée.
   Future<NativeResult> reloadCustomerDisplay() => _call('reloadCustomerDisplay');
 

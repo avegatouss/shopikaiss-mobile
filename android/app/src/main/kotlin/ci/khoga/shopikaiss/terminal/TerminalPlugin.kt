@@ -64,6 +64,10 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
                 display.hide()
                 result.success(OK)
             }
+            "pushCustomerDisplay" -> {
+                val error = display.push(call.argument<String>("script").orEmpty(), call.argument<String>("html").orEmpty())
+                result.success(if (error == null) OK else failure(error))
+            }
             "bluetoothDevices" -> {
                 if (!BluetoothPrinterDriver.hasPermission(activity)) requestBluetoothPermission()
                 result.success(BluetoothPrinterDriver.bonded(activity))

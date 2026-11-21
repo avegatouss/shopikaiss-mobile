@@ -1479,12 +1479,15 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
     final compact = widget.host._compact;
     Future<List<CartPayment>?> pay(int amount) async => compact
         ? await Navigator.of(context).push<List<CartPayment>>(
-            MaterialPageRoute(fullscreenDialog: true, builder: (_) => _PaymentDialog(snapshot: snapshot, payable: amount, cashDue: _engine.cashDue, fullScreen: true)),
+            MaterialPageRoute(
+              fullscreenDialog: true,
+              builder: (_) => OfflinePaymentDialog(methods: snapshot.methods, payable: amount, cashDue: _engine.cashDue, fullScreen: true),
+            ),
           )
         : await showDialog<List<CartPayment>>(
             context: context,
             barrierDismissible: false,
-            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: amount, cashDue: _engine.cashDue),
+            builder: (_) => OfflinePaymentDialog(methods: snapshot.methods, payable: amount, cashDue: _engine.cashDue),
           );
     final List<CartPayment> payments;
     List<RestoShare>? shares;
