@@ -9,6 +9,73 @@ import 'image_schedule.dart';
 import '../platform/customer_display.dart';
 import 'customer_display_settings.dart';
 
+class _LocalPriceSettings extends StatefulWidget {
+  const _LocalPriceSettings({required this.host});
+  final WindowsHost host;
+  @override
+  State<_LocalPriceSettings> createState() => _LocalPriceSettingsState();
+}
+
+class _LocalPriceSettingsState extends State<_LocalPriceSettings> {
+  bool? enabled;
+  bool busy = false;
+  String? error;
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    try {
+      final result = await widget.host.call(HostCommand.localPriceSettings);
+      if (mounted) setState(() => enabled = result['enabled'] == true);
+    } catch (_) {
+      if (mounted) setState(() => error = 'Réglage des prix indisponible.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    children: [
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('Mémoriser les prix saisis sur ce poste'),
+        subtitle: const Text(
+          'Les prochains ajouts utilisent le dernier prix saisi pour ce produit, si les droits le permettent. Désactiver efface les prix mémorisés ; les paniers existants restent inchangés.',
+        ),
+        value: enabled == true,
+        onChanged: enabled == null || busy
+            ? null
+            : (value) async {
+                setState(() {
+                  busy = true;
+                  error = null;
+                });
+                try {
+                  final result = await widget.host.call(
+                    HostCommand.setLocalPriceSettings,
+                    arguments: {'enabled': value},
+                  );
+                  if (mounted) {
+                    setState(() => enabled = result['enabled'] == true);
+                  }
+                } on HostFailure catch (e) {
+                  if (mounted) setState(() => error = e.message);
+                } catch (_) {
+                  if (mounted) {
+                    setState(() => error = 'Enregistrement impossible.');
+                  }
+                } finally {
+                  if (mounted) setState(() => busy = false);
+                }
+              },
+      ),
+      if (error != null) Text(error!),
+    ],
+  );
+}
+
 /// Local presentation preferences only; never changes shop policies or totals.
 class ScreenSettings {
   bool compact = false;
@@ -129,7 +196,7 @@ class ScreenSettingsPanel extends StatelessWidget {
             children: [
               const Expanded(
                 child: Text(
-                  'Réglages de l’écran',
+                  'Paramètres de la caisse',
                   style: TextStyle(fontSize: 22),
                 ),
               ),
@@ -202,9 +269,9 @@ class ScreenSettingsPanel extends StatelessWidget {
           ListTile(
             contentPadding: EdgeInsets.zero,
             leading: const Icon(Icons.settings_outlined),
-            title: const Text('Mode d’impression : caisse ou A4'),
+            title: const Text('Tickets : logo, QR et impression'),
             subtitle: const Text(
-              'ESC/POS brut par défaut ; PDF disponible en secours.',
+              'Importer le logo, lien site/Facebook, 1 à 3 exemplaires, papier et mode d’impression.',
             ),
             onTap: () async {
               try {
@@ -221,6 +288,10 @@ class ScreenSettingsPanel extends StatelessWidget {
             },
           ),
           const _TestReceiptButton(),
+          const Text(
+            'Version Windows : ${String.fromEnvironment('SHOPIKAISS_BUILD_VERSION', defaultValue: 'développement')}',
+          ),
+          if (host != null) _LocalPriceSettings(host: host!),
           const SizedBox(height: 16),
           const Text('Couleur principale'),
           Wrap(

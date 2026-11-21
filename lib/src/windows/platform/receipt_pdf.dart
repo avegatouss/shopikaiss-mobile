@@ -61,10 +61,11 @@ buildReceiptPdf(
                   child: pw.Column(
                     children: [
                       pw.SizedBox(height: 8),
-                      pw.Text(
-                        code.label,
-                        style: const pw.TextStyle(fontSize: 9),
-                      ),
+                      if (code.label.isNotEmpty)
+                        pw.Text(
+                          code.label,
+                          style: const pw.TextStyle(fontSize: 9),
+                        ),
                       pw.Padding(
                         padding: const pw.EdgeInsets.all(8),
                         child: pw.BarcodeWidget(

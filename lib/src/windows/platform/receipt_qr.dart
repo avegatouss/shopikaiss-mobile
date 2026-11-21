@@ -45,7 +45,7 @@ List<ReceiptQr> receiptQrCodes(
         summary.add(text);
       }
     }
-    codes.add(ReceiptQr('Informations du ticket', summary.join('\n')));
+    codes.add(ReceiptQr('', summary.join('\n')));
   }
   if (link.trim().isNotEmpty && validReceiptLink(link.trim())) {
     codes.add(ReceiptQr('Retrouvez-nous en ligne', link.trim()));
@@ -64,7 +64,7 @@ Uint8List receiptBytesWithQr(
   final out = BytesBuilder()
     ..add(base.sublist(0, base.length - EscPos.feedAndCut().length));
   for (final code in codes) {
-    out.add(latin1.encode('${code.label}\n'));
+    if (code.label.isNotEmpty) out.add(latin1.encode('${code.label}\n'));
     final qr = QrImage(
       QrCode.fromData(
         data: code.data,

@@ -6,6 +6,7 @@ class WindowsPlatform {
     this.channel = const MethodChannel('ci.khoga.shopikaiss/windows'),
   });
   final MethodChannel channel;
+  Future<void> closeWindow() => channel.invokeMethod<void>('closeWindow');
   Future<bool> toggleFullscreen() async =>
       await channel.invokeMethod<bool>('toggleFullscreen') ?? false;
 

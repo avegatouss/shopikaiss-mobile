@@ -15,6 +15,11 @@ import '../platform/receipt_printing.dart';
 import 'register_app.dart';
 import 'brand_logo.dart';
 import 'register_controller.dart';
+import 'touch_keyboard.dart';
+import 'web_destinations.dart';
+import '../platform/windows_platform.dart';
+
+import 'package:url_launcher/url_launcher.dart';
 
 /// Explicit integration build only. No path received from the server is run.
 class WindowsBootstrap extends StatefulWidget {
@@ -216,6 +221,31 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
     }
   }
 
+  Future<void> _leave({bool web = false}) => _run(() async {
+    if (web) {
+      if (controller?.uncertainOperation != null ||
+          (profiles != null &&
+              await hasUnresolvedSiteIntent(profiles!.dataDirectory)) ||
+          (status['pending'] as num? ?? 0) > 0) {
+        throw const HostFailure(
+          'pending',
+          'Synchronisez et vérifiez les opérations en attente avant de passer à la caisse web. Vous pouvez fermer l’application sans supprimer ces opérations.',
+        );
+      }
+      final uri = await resolveCaisseStartWebsite(
+        status['web_origin'] as String?,
+      );
+      if (uri == null ||
+          !await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+        throw const HostFailure('web', 'Impossible d’ouvrir la caisse web.');
+      }
+    }
+    await productionQueue?.close();
+    productionQueue = null;
+    await host?.close();
+    await const WindowsPlatform().closeWindow();
+  });
+
   @override
   void dispose() {
     controller?.dispose();
@@ -251,8 +281,18 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
     }
     final operators = (status['operators'] as List? ?? []).whereType<Map>();
     return MaterialApp(
+      builder: (context, child) => TouchKeyboard(child: child!),
       home: Scaffold(
-        appBar: AppBar(title: const Text('Shopikaiss Windows · Recette')),
+        appBar: AppBar(
+          title: const Text('Shopikaiss Windows · Recette'),
+          actions: [
+            IconButton(
+              tooltip: 'Fermer l’application',
+              icon: const Icon(Icons.close),
+              onPressed: busy ? null : () => _leave(),
+            ),
+          ],
+        ),
         body: Center(
           child: SingleChildScrollView(
             child: SizedBox(
@@ -270,6 +310,23 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
                       style: TextStyle(fontSize: 24),
                     ),
                     const SizedBox(height: 16),
+                    Builder(
+                      builder: (context) => OutlinedButton.icon(
+                        icon: const Icon(Icons.receipt_long_outlined),
+                        label: const Text(
+                          'Paramètres tickets : logo, QR, exemplaires',
+                        ),
+                        onPressed: () => ReceiptPrinting.configure(context),
+                      ),
+                    ),
+                    if (status['paired'] == true)
+                      TextButton.icon(
+                        onPressed: busy ? null : () => _leave(web: true),
+                        icon: const Icon(Icons.open_in_browser),
+                        label: const Text(
+                          'Quitter la caisse locale et ouvrir la caisse web',
+                        ),
+                      ),
                     if (profiles != null) ...[
                       Text('Connexion : ${profiles!.names[profiles!.active]}'),
                       Builder(

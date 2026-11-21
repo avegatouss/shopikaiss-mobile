@@ -15,6 +15,7 @@ void main() {
   test('summary preserves printed values and optional link has its own QR', () {
     final codes = receiptQrCodes(lines, link: 'https://example.com/tbc');
     expect(codes, hasLength(2));
+    expect(codes.first.label, isEmpty);
     expect(codes.first.data, contains('TBC-0001'));
     expect(codes.first.data, contains('2500 F'));
     expect(codes.first.data, isNot(contains('Prive')));

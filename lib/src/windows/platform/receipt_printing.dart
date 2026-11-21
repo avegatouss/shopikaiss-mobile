@@ -72,12 +72,11 @@ class ReceiptPrinting {
     }
   }
 
-  static Future<void> configure(BuildContext context) async {
-    if (!await _file.exists()) {
-      if (context.mounted) await choose(context);
-      if (!await _file.exists()) return;
-    }
-    final saved = jsonDecode(await _file.readAsString()) as Map;
+  static Future<void> configure(BuildContext context, {File? settingsFile}) async {
+    final file = settingsFile ?? _file;
+    final saved = await file.exists()
+        ? jsonDecode(await file.readAsString()) as Map
+        : <String, dynamic>{};
     var mode = saved['mode'] as String? ?? 'raw';
     var fallback = saved['pdf_fallback'] != false;
     var width = saved['paper_width'] == 58 ? 58 : 80;
@@ -92,14 +91,14 @@ class ReceiptPrinting {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
-          title: const Text('Mode d’impression du poste'),
+          title: const Text('Tickets : logo, QR et impression'),
           scrollable: true,
           content: SizedBox(
             width: 460,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('${saved['name']}'),
+                Text('${saved['name'] ?? 'Aucune imprimante sélectionnée'}'),
                 if (logo != null) Image.memory(base64Decode(logo!), height: 70),
                 TextFormField(
                   decoration: const InputDecoration(
@@ -253,7 +252,8 @@ class ReceiptPrinting {
       ),
     );
     if (options != null) {
-      await _file.writeAsString(
+      await file.parent.create(recursive: true);
+      await file.writeAsString(
         jsonEncode({...saved, ...options}),
         flush: true,
       );

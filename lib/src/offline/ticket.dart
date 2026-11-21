@@ -92,10 +92,7 @@ List<String> offlineTicketLines({
         if (payment.change > 0) out.add(pair('Monnaie rendue', money(payment.change)));
       }
     },
-    'operations': () {
-      out.add('-' * cols);
-      wrap('Numero definitif attribue par la boutique au retour de la connexion.');
-    },
+    'operations': () {},
     'pied': () => filled(model?.footer ?? store.footer),
   };
   for (final block in model?.top ?? TicketModel.originTop) {

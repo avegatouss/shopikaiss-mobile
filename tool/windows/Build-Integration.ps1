@@ -13,6 +13,8 @@ try {
         $sqliteHash = (Get-FileHash -LiteralPath (Join-Path $bundle 'lib/sqlite3.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
         $defines = @('--dart-define=SHOPIKAISS_WINDOWS_REVIEW_ENGINE=true', "--dart-define=SHOPIKAISS_ENGINE_SHA256=$engineHash", "--dart-define=SHOPIKAISS_SQLITE_SHA256=$sqliteHash")
     }
+    $buildVersion = (& git rev-parse --short HEAD).Trim()
+    $defines += "--dart-define=SHOPIKAISS_BUILD_VERSION=$buildVersion"
     & $flutter build windows @defines --release --no-pub --target lib/src/windows/main_windows.dart
     if ($LASTEXITCODE -ne 0) { throw 'Compilation Windows impossible : consulter les prérequis documentés.' }
     $exe = Join-Path $repoRoot 'build/windows/x64/runner/Release/shopikaiss_terminal.exe'

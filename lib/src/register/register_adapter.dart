@@ -205,6 +205,18 @@ class LocalRegisterAdapter {
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
       case 'setLinePrice':
         return _setLinePrice(_text(args, 'line_id', max: 64), args['amount']);
+      case 'localPriceSettings':
+        return _localPrices();
+      case 'setLocalPriceSettings':
+        if (args['enabled'] is! bool) throw const AdapterFailure('argument_invalide', 'Choix activé/désactivé requis.');
+        if (_operator == null || !engine.editablePriceSupported || !engine.hasRight(_operator!, 'prix_vente_modifier')) {
+          throw const AdapterFailure('prix_refuse', 'Le droit de modifier les prix est requis.');
+        }
+        final prices = await _localPrices();
+        final enabled = args['enabled'] == true;
+        await engine.store.write(_localPriceKey, jsonEncode({'enabled': enabled, 'prices': enabled ? prices['prices'] : <String, dynamic>{}}));
+        _emit('prix_locaux');
+        return _localPrices();
       case 'setLineLot':
         return _setLineLot(_text(args, 'line_id', max: 64), args['lot_uuid'] as String?);
       case 'setWholesale':
@@ -401,6 +413,11 @@ class LocalRegisterAdapter {
 
   Future<Map<String, dynamic>> _view() async {
     final snapshot = engine.snapshot;
+    final remembered = snapshot == null ? <String, dynamic>{} : await _localPrices();
+    int displayedPrice(Product product) {
+      final price = (remembered['prices'] as Map?)?['${product.id}'];
+      return remembered['enabled'] == true && price is int && price >= 0 && price <= CaisseEngine.maxEnteredPrice && engine.enteredPriceBlocker(_operator, CartLine(product: product)) == null ? price : product.price;
+    }
     final reason = engine.blockReason;
     final sold = snapshot == null ? const <int, BigInt>{} : await engine.soldSinceSnapshot();
     final resolved = snapshot == null ? const <(_DraftLine, CartLine?)>[] : [for (final l in _draft.lines) (l, l.materialize(snapshot, _tierOf(_draft)))];
@@ -530,7 +547,7 @@ class LocalRegisterAdapter {
               'image': p.image == null
                   ? null
                   : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height, 'path': engine.imagePath(p.image!)},
-              'price_label': formatFcfa(p.price, currency),
+              'price_label': formatFcfa(displayedPrice(p), currency),
               'wholesale_price_label': p.wholesalePrice == null || engine.wholesaleRules == null ? null : formatFcfa(p.wholesalePrice!, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'stock_after_label': p.unlimitedStock ? '' : _stockLabel(p, (sold[p.id] ?? BigInt.zero) + (demand[p.id] ?? BigInt.zero)),
@@ -786,12 +803,19 @@ class LocalRegisterAdapter {
     if (packagingId != null && product.packaging(packagingId) == null) {
       throw const AdapterFailure('conditionnement_inconnu', 'Conditionnement inconnu pour ce produit.');
     }
+    final remembered = await _localPrices();
+    final candidate = _DraftLine(id: _newUuid(), productId: productId, packagingId: packagingId, quantity: BigInt.from(1000000));
+    final price = (remembered['prices'] as Map)['$productId'];
+    final cart = candidate.materialize(_snapshot(), _tierOf(_draft));
+    if (remembered['enabled'] == true && price is int && price >= 0 && price <= CaisseEngine.maxEnteredPrice && cart != null && engine.enteredPriceBlocker(_operator, cart) == null) {
+      candidate.entered = price;
+    }
     return _mutate(() {
       final existing = _draft.lines.where((l) => l.productId == productId && l.packagingId == packagingId).firstOrNull;
       if (existing != null) {
         existing.quantity += BigInt.from(1000000);
       } else {
-        _draft.lines.add(_DraftLine(id: _newUuid(), productId: productId, packagingId: packagingId, quantity: BigInt.from(1000000)));
+        _draft.lines.add(candidate);
       }
     });
   }
@@ -829,7 +853,28 @@ class LocalRegisterAdapter {
       final blocker = engine.enteredPriceBlocker(_operator, cart);
       if (blocker != null) throw AdapterFailure('prix_refuse', blocker);
     }
-    return _mutate(() => line.entered = price);
+    final result = await _mutate(() => line.entered = price);
+    final remembered = await _localPrices();
+    if (remembered['enabled'] == true) {
+      final prices = Map<String, dynamic>.from(remembered['prices'] as Map);
+      if (price == null) {
+        prices.remove('${line.productId}');
+      } else {
+        prices['${line.productId}'] = price;
+      }
+      await engine.store.write(_localPriceKey, jsonEncode({'enabled': true, 'prices': prices}));
+      _emit('prix_locaux');
+      return _view();
+    }
+    return result;
+  }
+
+  String get _localPriceKey => 'local-prices-v1:${(_snapshot().raw['boutique'] as Map?)?['uuid'] ?? _snapshot().store.name}';
+
+  Future<Map<String, dynamic>> _localPrices() async {
+    final raw = await engine.store.read(_localPriceKey);
+    if (raw == null) return {'enabled': false, 'prices': <String, dynamic>{}};
+    return Map<String, dynamic>.from(jsonDecode(raw) as Map);
   }
 
   /// Lot de la ligne ; null = choix automatique selon la règle de la boutique.
