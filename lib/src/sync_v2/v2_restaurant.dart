@@ -736,7 +736,8 @@ extension _V2Restaurant on V2Engine {
           address: address,
           fallback: fallback,
           operatorId: operator?.id,
-          lines: text,
+          // Accents retirés comme sur l'imprimante réseau : l'encodeur ESC/POS n'imprime que l'ASCII.
+          lines: [for (final line in text) stripAccents(line)],
         ));
         return null;
       } catch (_) {

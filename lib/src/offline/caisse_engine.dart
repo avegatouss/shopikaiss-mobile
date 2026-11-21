@@ -510,6 +510,9 @@ abstract class CaisseEngine extends EngineNotifier {
   /// sans réseau ; null : documents locaux non disponibles sur ce terminal.
   Future<ClosureFacts?> closureFacts() async => null;
 
+  /// Codes des moyens de paiement publiés comme espèces (booléen `especes`), locaux ou non ; vide hors contrat v2.
+  Future<Set<String>> publishedCashCodes() async => const {};
+
   /// Document de clôture prêt à imprimer ([ZKind.preX], [ZKind.session], [ZKind.preZ]), calculé sans réseau à partir
   /// de [closureFacts] ; null : documents locaux non disponibles. Lève [ClosureUnavailable] s'il n'y a pas de session à
   /// imprimer. Commun à Android et à l'hôte Windows (qui rend `ticket`).
@@ -517,7 +520,7 @@ abstract class CaisseEngine extends EngineNotifier {
     final facts = await closureFacts();
     final s = snapshot;
     if (facts == null || s == null) return null;
-    return buildClosureDocument(facts, ZContext.of(s), kind: kind, version: version, now: now, duplicate: duplicate);
+    return buildClosureDocument(facts, ZContext.of(s, publishedCashCodes: await publishedCashCodes()), kind: kind, version: version, now: now, duplicate: duplicate);
   }
 
   /// Audit d'une édition provisoire imprimée (pré-X, pré-Z ; lot Z local) : une opération par impression, avec son

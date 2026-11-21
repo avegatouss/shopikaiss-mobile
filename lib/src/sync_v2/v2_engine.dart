@@ -1023,6 +1023,11 @@ class V2Engine extends CaisseEngine {
   /// Lot Z local accordé par le serveur et reçu dans la projection (`z.local` avec `contrat.2_1`).
   bool get zLocalSupported => v2.zLocal && _serverOffers(CaisseV2Client.zLocalCapability);
 
+  @override
+  Future<Set<String>> publishedCashCodes() async => {
+    for (final m in (await v2.entities('moyen_paiement')).values) if (m['especes'] == true && m['code'] is String) m['code'] as String,
+  };
+
   /// Bloc de détail de la session ouverte, au format du contrat, tel que le Z de session l'imprimera ; null s'il ne
   /// peut être calculé ou n'est pas conforme (la clôture part alors sans détail : le serveur calcule le sien).
   Future<Map<String, dynamic>?> _closingDetail() async {
@@ -1030,7 +1035,7 @@ class V2Engine extends CaisseEngine {
     final s = snapshot;
     final open = facts?.openSession;
     if (facts == null || s == null || open == null) return null;
-    final detail = detailToContract(sessionDetail(facts, open, ZContext.of(s)));
+    final detail = detailToContract(sessionDetail(facts, open, ZContext.of(s, publishedCashCodes: await publishedCashCodes())));
     return v2.validator.validate(detail, r'donnees-z-local-1.json#/$defs/detail_cloture').isEmpty ? detail : null;
   }
 

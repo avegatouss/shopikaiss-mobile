@@ -138,6 +138,34 @@ void main() {
       expect(_flat(printout), contains('Fond initial inconnu'));
     });
 
+    test('remboursement en ligne par un moyen espèces non local : compté en espèces (booléen publié, réponse 19)', () {
+      final z = _zSession();
+      final online = Map<String, dynamic>.from((z['retours'] as List).first as Map);
+      online['remboursements'] = [
+        {'moyen': 'especes_bar', 'montant': online['montant']},
+      ];
+      final facts = _facts(zSession: {...z, 'retours': [online]});
+      String? refunds(ZContext context) {
+        final model = buildClosureDocument(facts, context, kind: ZKind.preX, version: ZVersion.detailed, now: _now).model;
+        return (model['especes'] as List).cast<Map>().where((l) => l['libelle'] == 'Remboursements').firstOrNull?['montant'] as String?;
+      }
+
+      final published = ZContext(
+        storeName: _context.storeName,
+        terminalName: _context.terminalName,
+        methods: _context.methods,
+        operatorName: _context.operatorName,
+        publishedCashCodes: const {'especes_bar'},
+      );
+      expect(refunds(_context), '-1000', reason: 'seul le retour du terminal, sans le booléen publié');
+      expect(refunds(published), '${-1000 - (online['montant'] as int)}');
+    });
+
+    test('pied des documents locaux : « Ventes de ce terminal seulement » (réponse 16)', () {
+      final printout = buildClosureDocument(_facts(zSession: _zSession()), _context, kind: ZKind.preX, version: ZVersion.detailed, now: _now).layout(paperWidth: 80);
+      expect(_flat(printout), contains('Ventes de ce terminal seulement'));
+    });
+
     test('z.session d’une autre session : rien n’est ajouté', () {
       final facts = _facts(zSession: {..._zSession(), 'session_uuid': '5e55a0d1-0000-4000-8000-0000000000ff'});
       expect([facts.openSession!.float, facts.openSession!.onlineReturns], [null, isEmpty]);
