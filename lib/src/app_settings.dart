@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'terminal/terminal_channel.dart';
+import 'web/start_route.dart';
 
 /// Réglages de l'application, conservés sur le terminal.
 class AppSettings {
@@ -25,7 +28,22 @@ class AppSettings {
     this.imageMode = 'top',
     this.imageFit = 'cover',
     this.ticketMode = 'ask',
+    this.startRouteMissing,
   });
+
+  /// Préférence dédiée : `/caisse/demarrer` absente du serveur (404/405), notée par origine (voir web/start_route.dart).
+  static const startRouteMissingKey = 'startRouteMissing';
+
+  /// Route de démarrage absente de cette origine depuis moins de 24 h : la caisse ouvre `/caisse` directement. Jamais
+  /// écrit par [save] ; l'adresse enregistrée n'est pas modifiée.
+  StartRouteMemory? startRouteMissing;
+
+  /// Note l'absence de la route de démarrage pour l'origine de la boutique.
+  Future<void> rememberStartRouteMissing(DateTime now) async {
+    startRouteMissing = StartRouteMemory(origin, now.toUtc());
+    final p = await SharedPreferences.getInstance();
+    await p.setString(startRouteMissingKey, jsonEncode(startRouteMissing!.toJson()));
+  }
 
   /// Ticket après une vente : `ask` (demandé au caissier) ou `auto`.
   String ticketMode;
@@ -131,7 +149,23 @@ class AppSettings {
       imageMode: p.getString('imageMode') ?? 'top',
       imageFit: p.getString('imageFit') ?? 'cover',
       ticketMode: p.getString('ticketMode') ?? 'ask',
+      startRouteMissing: await _startRouteMemory(p),
     );
+  }
+
+  /// Souvenir de la route absente, oublié (et effacé) si l'origine a changé ou s'il a plus de 24 h.
+  static Future<StartRouteMemory?> _startRouteMemory(SharedPreferences p) async {
+    final raw = p.getString(startRouteMissingKey);
+    if (raw == null) return null;
+    StartRouteMemory? memory;
+    try {
+      memory = StartRouteMemory.fromJson(jsonDecode(raw));
+    } on FormatException {
+      memory = null;
+    }
+    if (memory != null && memory.appliesTo(p.getString('shopUrl') ?? '', DateTime.now())) return memory;
+    await p.remove(startRouteMissingKey);
+    return null;
   }
 
   Future<void> save() async {

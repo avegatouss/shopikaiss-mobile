@@ -18,6 +18,7 @@ import '../settings/settings_page.dart';
 import '../terminal/terminal_channel.dart';
 import '../terminal/terminal_session.dart';
 import 'bridge_script.dart';
+import 'start_route.dart';
 
 /// La caisse ShopiKaiss en plein écran, avec le pont natif `window.ShopiKaissNative`.
 class CaissePage extends StatefulWidget {
@@ -50,6 +51,12 @@ class _CaissePageState extends State<CaissePage> {
 
   /// Terminal pilote revenu volontairement à la caisse web : la caisse locale ne se rouvre pas d'elle-même.
   bool _stayOnWeb = false;
+
+  /// Repli vers `/caisse` déjà tenté pour le chargement en cours (une seule tentative, jamais de boucle).
+  bool _startFallbackTried = false;
+
+  /// Adresse d'ouverture de la caisse : l'adresse enregistrée, ou `/caisse` si `/caisse/demarrer` manque sur ce serveur.
+  String get _startUrl => startUrlFor(_settings.shopUrl, _settings.startRouteMissing, DateTime.now());
 
   TerminalSession get _session => widget.session;
   AppSettings get _settings => _session.settings;
@@ -154,7 +161,7 @@ class _CaissePageState extends State<CaissePage> {
 
   /// Vue web de la caisse, créée une fois pour toutes (les reconstructions de l'écran ne la touchent pas).
   late final Widget _webView = InAppWebView(
-      initialUrlRequest: URLRequest(url: WebUri(_settings.shopUrl)),
+      initialUrlRequest: URLRequest(url: WebUri(_startUrl)),
       initialUserScripts: UnmodifiableListView([_userScript()]),
       initialSettings: InAppWebViewSettings(
         // Inspectable (chrome://inspect) hors release : recette sur terminal avec le banc de test du pont.
@@ -208,6 +215,20 @@ class _CaissePageState extends State<CaissePage> {
       onLoadStop: (controller, url) {
         setState(() => _error = null);
         _showForcedDisplay(url?.toString());
+      },
+      onReceivedHttpError: (controller, request, response) {
+        // Serveur sans route de démarrage (404/405) : `/caisse` aussitôt, sans page d'erreur, une fois par chargement.
+        final fallback = fallbackUrlFor(
+          shopUrl: _settings.shopUrl,
+          failedUrl: request.url.toString(),
+          statusCode: response.statusCode,
+          isMainFrame: request.isForMainFrame ?? true,
+          alreadyTried: _startFallbackTried,
+        );
+        if (fallback == null) return;
+        _startFallbackTried = true;
+        unawaited(_settings.rememberStartRouteMissing(DateTime.now()));
+        unawaited(controller.loadUrl(urlRequest: URLRequest(url: WebUri(fallback))));
       },
       onReceivedError: (controller, request, error) {
         if (request.isForMainFrame ?? true) {
@@ -474,7 +495,8 @@ class _CaissePageState extends State<CaissePage> {
 
   void _reload() {
     setState(() => _error = null);
-    _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(_settings.shopUrl)));
+    _startFallbackTried = false;
+    _controller?.loadUrl(urlRequest: URLRequest(url: WebUri(_startUrl)));
   }
 
   void _onCornerTap() {
