@@ -12,6 +12,7 @@ import 'customer_display_settings.dart';
 /// Local presentation preferences only; never changes shop policies or totals.
 class ScreenSettings {
   bool compact = false;
+  bool scannerAutoFocus = true;
   double tileWidth = 175;
   int cataloguePercent = 58;
   static const accents = <String, int>{
@@ -65,6 +66,7 @@ class ScreenSettings {
         result.imageFit = data['image_fit'] as String;
       }
       if (data['ticket_mode'] == 'auto') result.ticketMode = 'auto';
+      result.scannerAutoFocus = data['scanner_auto_focus'] != false;
       result.compact = data['compact'] == true;
       result.tileWidth = (data['tile_width'] as num).toDouble().clamp(150, 330);
       result.cataloguePercent = (data['catalogue_percent'] as num)
@@ -83,6 +85,7 @@ class ScreenSettings {
     await target.writeAsString(
       jsonEncode({
         'compact': compact,
+        'scanner_auto_focus': scannerAutoFocus,
         'tile_width': tileWidth,
         'catalogue_percent': cataloguePercent,
         'accent': accent,
@@ -237,6 +240,18 @@ class ScreenSettingsPanel extends StatelessWidget {
                   },
                 ),
             ],
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Focus automatique du lecteur code-barres'),
+            subtitle: const Text(
+              'Désactiver pour privilégier la saisie tactile. F2 permet toujours de scanner.',
+            ),
+            value: settings.scannerAutoFocus,
+            onChanged: (value) {
+              settings.scannerAutoFocus = value;
+              onChanged();
+            },
           ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,

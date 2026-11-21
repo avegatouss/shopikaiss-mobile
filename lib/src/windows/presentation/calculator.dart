@@ -11,7 +11,7 @@ class DeskCalculator extends StatefulWidget {
 
 class _DeskCalculatorState extends State<DeskCalculator> {
   final input = TextEditingController();
-  final focus = FocusNode();
+  final focus = FocusNode(debugLabel: 'calculator');
   final history = <({String expression, String result})>[];
   String? error;
   String memory = '0';
@@ -30,7 +30,10 @@ class _DeskCalculatorState extends State<DeskCalculator> {
           final result = calculateExpression(expression);
           history.insert(0, (expression: expression, result: result));
           if (history.length > 20) history.removeLast();
-          input.text = result;
+          input.value = TextEditingValue(
+            text: result,
+            selection: TextSelection.collapsed(offset: result.length),
+          );
           evaluated = true;
         } on FormatException catch (e) {
           error = e.message;
@@ -59,7 +62,24 @@ class _DeskCalculatorState extends State<DeskCalculator> {
         return;
       }
       if (value == '±') {
-        if (input.text.isNotEmpty) input.text = '-(${input.text})';
+        if (input.text.isNotEmpty) {
+          final text = input.text;
+          final negative = RegExp(r'\(-([0-9]+(?:[.,][0-9]*)?)\)$')
+              .firstMatch(text);
+          final match =
+              negative ?? RegExp(r'([0-9]+(?:[.,][0-9]*)?)$').firstMatch(text);
+          if (match != null) {
+            final updated = text.replaceRange(
+              match.start,
+              match.end,
+              negative != null ? negative.group(1)! : '(-${match.group(0)})',
+            );
+            input.value = TextEditingValue(
+              text: updated,
+              selection: TextSelection.collapsed(offset: updated.length),
+            );
+          }
+        }
         evaluated = false;
       } else if (value == '⌫') {
         final selection = input.selection;

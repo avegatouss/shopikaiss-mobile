@@ -22,6 +22,7 @@ import 'quantity_step.dart';
 import 'multiple_payments.dart';
 import 'searchable_choice.dart';
 import 'calculator.dart';
+import 'touch_keyboard.dart';
 import 'discount_approval.dart';
 import 'web_destinations.dart';
 import 'customer_picker.dart';
@@ -39,6 +40,7 @@ class WindowsRegisterApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
+    builder: (context, child) => TouchKeyboard(child: child!),
     title: 'Shopikaiss · Caisse',
     theme: ThemeData(
       useMaterial3: true,
@@ -231,6 +233,9 @@ class _RegisterState extends State<_Register> {
   bool get _compact => _screen.compact;
   Timer? _saveSettings;
   void _screenChanged() {
+    if (!_screen.scannerAutoFocus && _scanFocus.hasFocus) {
+      _scanFocus.unfocus();
+    }
     setState(() {});
     _saveSettings?.cancel();
     _saveSettings = Timer(const Duration(milliseconds: 400), () async {
@@ -250,7 +255,7 @@ class _RegisterState extends State<_Register> {
     });
   }
 
-  final _scanFocus = FocusNode();
+  final _scanFocus = FocusNode(debugLabel: 'barcode');
   final _searchFocus = FocusNode();
   final _categoriesScroll = ScrollController();
   void _scrollCategories(int direction) {
@@ -570,7 +575,7 @@ class _RegisterState extends State<_Register> {
     await c.command(HostCommand.scan, {'code': _scan.text.trim()});
     if (!mounted) return;
     if (c.message == null) _scan.clear();
-    _scanFocus.requestFocus();
+    if (_screen.scannerAutoFocus) _scanFocus.requestFocus();
   }
 
   Future<void> _addProduct(Map<String, dynamic> product) async {
@@ -1040,7 +1045,7 @@ class _RegisterState extends State<_Register> {
               child: TextField(
                 controller: _scan,
                 focusNode: _scanFocus,
-                autofocus: true,
+                autofocus: _screen.scannerAutoFocus,
                 enabled: c.ready && !c.busy && c.uncertainOperation == null,
                 decoration: InputDecoration(
                   isDense: true,

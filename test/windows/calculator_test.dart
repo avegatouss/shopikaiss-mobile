@@ -74,6 +74,16 @@ void main() {
     expect(value(), '120');
     await press('4');
     expect(value(), '4');
+    await press('AC');
+    for (final key in ['1', '0', '+', '2', '±', '=']) {
+      await press(key);
+    }
+    expect(value(), '8');
+    await press('AC');
+    for (final key in ['2', '±', '±', '=']) {
+      await press(key);
+    }
+    expect(value(), '2');
     await press('MC');
     expect(find.text('Mémoire : 120'), findsNothing);
     expect(tester.takeException(), isNull);
