@@ -38,6 +38,7 @@ class _SettingsPageState extends State<SettingsPage> {
   late String _btAddress = _settings.bluetoothAddress;
   late String _usbDevice = _settings.usbDevice;
   late bool _hideKeyboard = _settings.hideSoftKeyboard;
+  late bool _scanAutoFocus = _settings.scanAutoFocus;
   late String _screenLayout = _settings.screenLayout;
   late bool _appPrinterFirst = _settings.appPrinterFirst;
   late bool _fastRendering = _settings.fastRendering;
@@ -262,6 +263,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 subtitle: const Text('Activé par défaut : le clavier Android ne s’ouvre plus au toucher des champs de la caisse (bloqué aussi par Android). '
                     'Le clavier externe et la douchette saisissent toujours. Le bouton ⌨ en bas à gauche de la caisse l’autorise à tout moment.'),
               ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _scanAutoFocus,
+                onChanged: (v) => setState(() => _scanAutoFocus = v),
+                title: const Text('Curseur automatique dans le champ du scanner (caisse hors ligne)'),
+                subtitle: const Text('Activé par défaut, pour la douchette. Désactivé : le curseur n’y va qu’au toucher du champ ou avec F2.'),
+              ),
             ]),
             _Section(title: 'Affichage', children: [
               SwitchListTile(
@@ -393,6 +401,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ..bluetoothAddress = _btAddress
       ..usbDevice = _usbDevice
       ..hideSoftKeyboard = _hideKeyboard
+      ..scanAutoFocus = _scanAutoFocus
       ..screenLayout = _screenLayout
       ..appPrinterFirst = _appPrinterFirst
       ..fastRendering = _fastRendering

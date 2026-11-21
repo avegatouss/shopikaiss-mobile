@@ -17,6 +17,7 @@ class AppSettings {
     required this.usbDevice,
     required this.adminCode,
     this.hideSoftKeyboard = true,
+    this.scanAutoFocus = true,
     this.customerDisplayUrl = '',
     this.screenLayout = 'auto',
     this.appPrinterFirst = true,
@@ -94,6 +95,10 @@ class AppSettings {
   /// `hideSoftKeyboard`, enregistrée à false par défaut, n'est plus lue).
   bool hideSoftKeyboard;
 
+  /// Caisse hors ligne : le curseur revient seul dans le champ du scanner (ouverture, après un ajout ou une vente).
+  /// Désactivé, il n'y va que sur demande (toucher, F2) : utile quand on saisit au doigt sans douchette (C, `cdf860a`).
+  bool scanAutoFocus;
+
   /// Lien imposé à l'afficheur client (second écran), même origine que la boutique ; vide = lien envoyé par la caisse.
   /// Typiquement le lien « page web » copié depuis Réglages › Afficheur client, pour vérifier l'affichage.
   String customerDisplayUrl;
@@ -138,6 +143,7 @@ class AppSettings {
       usbDevice: p.getString('usbDevice') ?? '',
       adminCode: p.getString('adminCode') ?? '',
       hideSoftKeyboard: !(p.getBool('softKeyboardAllowed') ?? false),
+      scanAutoFocus: p.getBool('scanAutoFocus') ?? true,
       customerDisplayUrl: p.getString('customerDisplayUrl') ?? '',
       screenLayout: p.getString('screenLayout') ?? 'auto',
       appPrinterFirst: p.getBool('appPrinterFirst') ?? true,
@@ -179,6 +185,7 @@ class AppSettings {
     await p.setString('usbDevice', usbDevice);
     await p.setString('adminCode', adminCode);
     await p.setBool('softKeyboardAllowed', !hideSoftKeyboard);
+    await p.setBool('scanAutoFocus', scanAutoFocus);
     await p.setString('customerDisplayUrl', customerDisplayUrl);
     await p.setString('screenLayout', screenLayout);
     await p.setBool('appPrinterFirst', appPrinterFirst);

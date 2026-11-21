@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 import '../offline/engine.dart';
+import '../offline/local_prices.dart';
 import '../offline/models.dart';
 import '../offline/money.dart';
 import '../offline/ticket.dart';
@@ -209,12 +210,11 @@ class LocalRegisterAdapter {
         return _localPrices();
       case 'setLocalPriceSettings':
         if (args['enabled'] is! bool) throw const AdapterFailure('argument_invalide', 'Choix activé/désactivé requis.');
-        if (_operator == null || !engine.editablePriceSupported || !engine.hasRight(_operator!, 'prix_vente_modifier')) {
+        try {
+          await LocalPrices.setEnabled(engine, _operator, args['enabled'] == true);
+        } on StateError {
           throw const AdapterFailure('prix_refuse', 'Le droit de modifier les prix est requis.');
         }
-        final prices = await _localPrices();
-        final enabled = args['enabled'] == true;
-        await engine.store.write(_localPriceKey, jsonEncode({'enabled': enabled, 'prices': enabled ? prices['prices'] : <String, dynamic>{}}));
         _emit('prix_locaux');
         return _localPrices();
       case 'setLineLot':
@@ -413,11 +413,8 @@ class LocalRegisterAdapter {
 
   Future<Map<String, dynamic>> _view() async {
     final snapshot = engine.snapshot;
-    final remembered = snapshot == null ? <String, dynamic>{} : await _localPrices();
-    int displayedPrice(Product product) {
-      final price = (remembered['prices'] as Map?)?['${product.id}'];
-      return remembered['enabled'] == true && price is int && price >= 0 && price <= CaisseEngine.maxEnteredPrice && engine.enteredPriceBlocker(_operator, CartLine(product: product)) == null ? price : product.price;
-    }
+    final remembered = await LocalPrices.read(engine);
+    int displayedPrice(Product product) => remembered.priceFor(engine, _operator, CartLine(product: product)) ?? product.price;
     final reason = engine.blockReason;
     final sold = snapshot == null ? const <int, BigInt>{} : await engine.soldSinceSnapshot();
     final resolved = snapshot == null ? const <(_DraftLine, CartLine?)>[] : [for (final l in _draft.lines) (l, l.materialize(snapshot, _tierOf(_draft)))];
@@ -803,13 +800,10 @@ class LocalRegisterAdapter {
     if (packagingId != null && product.packaging(packagingId) == null) {
       throw const AdapterFailure('conditionnement_inconnu', 'Conditionnement inconnu pour ce produit.');
     }
-    final remembered = await _localPrices();
+    final remembered = await LocalPrices.read(engine);
     final candidate = _DraftLine(id: _newUuid(), productId: productId, packagingId: packagingId, quantity: BigInt.from(1000000));
-    final price = (remembered['prices'] as Map)['$productId'];
     final cart = candidate.materialize(_snapshot(), _tierOf(_draft));
-    if (remembered['enabled'] == true && price is int && price >= 0 && price <= CaisseEngine.maxEnteredPrice && cart != null && engine.enteredPriceBlocker(_operator, cart) == null) {
-      candidate.entered = price;
-    }
+    if (cart != null) candidate.entered = remembered.priceFor(engine, _operator, cart);
     return _mutate(() {
       final existing = _draft.lines.where((l) => l.productId == productId && l.packagingId == packagingId).firstOrNull;
       if (existing != null) {
@@ -854,28 +848,14 @@ class LocalRegisterAdapter {
       if (blocker != null) throw AdapterFailure('prix_refuse', blocker);
     }
     final result = await _mutate(() => line.entered = price);
-    final remembered = await _localPrices();
-    if (remembered['enabled'] == true) {
-      final prices = Map<String, dynamic>.from(remembered['prices'] as Map);
-      if (price == null) {
-        prices.remove('${line.productId}');
-      } else {
-        prices['${line.productId}'] = price;
-      }
-      await engine.store.write(_localPriceKey, jsonEncode({'enabled': true, 'prices': prices}));
+    if (await LocalPrices.remember(engine, line.productId, price)) {
       _emit('prix_locaux');
       return _view();
     }
     return result;
   }
 
-  String get _localPriceKey => 'local-prices-v1:${(_snapshot().raw['boutique'] as Map?)?['uuid'] ?? _snapshot().store.name}';
-
-  Future<Map<String, dynamic>> _localPrices() async {
-    final raw = await engine.store.read(_localPriceKey);
-    if (raw == null) return {'enabled': false, 'prices': <String, dynamic>{}};
-    return Map<String, dynamic>.from(jsonDecode(raw) as Map);
-  }
+  Future<Map<String, dynamic>> _localPrices() async => (await LocalPrices.read(engine)).toJson();
 
   /// Lot de la ligne ; null = choix automatique selon la règle de la boutique.
   Future<Map<String, dynamic>> _setLineLot(String lineId, String? lot) async {
@@ -1211,16 +1191,6 @@ class LocalRegisterAdapter {
 
   // ------------------------------------------------------------------ Paiement et encaissement
 
-  String _composition(List<CartLine> lines) {
-    final quantities = <String, BigInt>{};
-    for (final line in lines) {
-      final key = '${line.product.id}:${line.packaging?.id}';
-      quantities[key] = (quantities[key] ?? BigInt.zero) + line.quantity;
-    }
-    final keys = quantities.keys.toList()..sort();
-    return keys.map((key) => '$key=${quantities[key]}').join('|');
-  }
-
   Future<Map<String, dynamic>> _preparePayment() async {
     final snapshot = _snapshot();
     final operator = _operator;
@@ -1242,12 +1212,10 @@ class LocalRegisterAdapter {
       throw AdapterFailure('vente_refusee', e.message);
     }
     final payable = _payable(snapshot);
-    final previous = (await engine.history()).reversed.where((o) => o.isSale).firstOrNull;
-    final same = previous != null && lines.isNotEmpty &&
-        _composition(lines.cast<CartLine>()) == _composition(engine.ticketParts(previous).$1);
+    final same = await engine.sameAsPreviousSale(lines.cast<CartLine>());
     return {
       'cash_due': engine.cashDue(payable),
-      'previous_basket_warning': same ? 'Le ticket précédent contient les mêmes articles et quantités. Vous pouvez encaisser ce nouveau client.' : null,
+      'previous_basket_warning': same ? CaisseEngine.sameBasketWarning : null,
       'payable': payable,
       'payable_label': formatFcfa(payable),
       'methods': [for (final m in snapshot.methods) {'code': m.code, 'name': m.name, 'cash': m.isCash, 'reference': m.referenceMode}],

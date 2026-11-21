@@ -14,16 +14,20 @@ import '../sync_v2/decimal6.dart';
 import '../terminal/terminal_session.dart';
 import '../web/shop_browser_page.dart';
 import '../web/shop_browser_policy.dart';
+import '../windows/platform/receipt_logo.dart';
+import '../windows/platform/receipt_qr.dart';
 import '../windows/presentation/brand_logo.dart';
 import '../windows/presentation/calculator.dart';
 import '../windows/presentation/searchable_choice.dart';
 import 'customer_display.dart';
 import 'engine.dart';
+import 'local_prices.dart';
 import 'models.dart';
 import 'money.dart';
 import 'pass_sheet.dart';
 import 'payment_dialog.dart';
 import 'pending_operations_page.dart';
+import 'receipt_settings.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
 import 'x_z_report.dart';
@@ -167,6 +171,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Map<int, BigInt> _sold = {};
 
   AppSettings get _look => widget.session.settings;
+
+  /// Retour automatique du curseur au scanner, selon le réglage (F2 et le toucher le placent toujours).
+  void _autoFocusScan() {
+    if (_look.scanAutoFocus) _searchFocus.requestFocus();
+  }
   Color get _brand => Color(_look.brandColor);
   ColorScheme get _palette => ColorScheme.fromSeed(seedColor: _brand);
   bool get _listView => _look.catalogList;
@@ -252,10 +261,50 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   bool get _compact => widget.session.isCompact(context);
   Snapshot? get _snapshot => _engine.snapshot;
 
+  /// Prix mémorisés de ce terminal (même règle et même clé que Windows, voir [LocalPrices]).
+  LocalPrices _localPrices = LocalPrices.empty;
+
+  Future<void> _reloadLocalPrices() async {
+    final value = await LocalPrices.read(_engine);
+    if (mounted) setState(() => _localPrices = value);
+  }
+
+  /// Prix affiché au catalogue : le prix mémorisé s'il s'applique à ce caissier, sinon le prix habituel.
+  int _shownPrice(Product product) => _localPrices.priceFor(_engine, _operator, CartLine(product: product)) ?? product.price;
+
+  bool get _canRememberPrices => _operator != null && _engine.editablePriceSupported && _engine.hasRight(_operator!, 'prix_vente_modifier');
+
+  Future<void> _toggleLocalPrices() async {
+    final enabling = !_localPrices.enabled;
+    if (!enabling && _localPrices.prices.isNotEmpty) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Ne plus mémoriser les prix ?'),
+          content: Text('Les ${_localPrices.prices.length} prix mémorisés sur ce terminal seront oubliés. Les paniers en cours gardent leurs prix.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Oublier les prix')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    try {
+      final value = await LocalPrices.setEnabled(_engine, _operator, enabling);
+      if (!mounted) return;
+      setState(() => _localPrices = value);
+      _toast(enabling ? 'Les prix saisis seront repris au prochain ajout du produit sur ce terminal.' : 'Prix mémorisés oubliés.');
+    } on StateError catch (e) {
+      _toast(e.message);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _engine.addListener(_changed);
+    unawaited(_reloadLocalPrices());
     FocusManager.instance.addListener(_syncKeyboard);
     HardwareKeyboard.instance.addHandler(_onKey);
     final rules = _snapshot?.rules;
@@ -554,7 +603,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final methods = _snapshot!.methods.where((m) => !m.isCash).toList();
     final cash = TextEditingController();
     final comment = TextEditingController();
-    final amounts = {for (final m in methods) m.code: TextEditingController()};
+    // Autres moyens préremplis à 0 (demande utilisateur, C `0fecbe5`) ; les espèces restent à saisir après comptage.
+    final amounts = {for (final m in methods) m.code: TextEditingController(text: '0')};
     final notes = {for (final m in methods) m.code: TextEditingController()};
     String? error;
     final closed = await showDialog<bool>(
@@ -574,14 +624,40 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   decoration: const InputDecoration(labelText: 'Espèces comptées (F)'),
                 ),
+                if (methods.isNotEmpty) const SizedBox(height: 16),
                 for (final m in methods) ...[
-                  TextField(
-                    controller: amounts[m.code],
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: InputDecoration(labelText: '${m.name} compté (facultatif)'),
-                  ),
-                  TextField(controller: notes[m.code], maxLength: 500, decoration: InputDecoration(labelText: 'Justification ${m.name}')),
+                  // Tablette : une ligne par moyen (montant, justification) ; téléphone : l'un sous l'autre.
+                  if (_compact) ...[
+                    TextField(
+                      controller: amounts[m.code],
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                      decoration: InputDecoration(labelText: '${m.name} (F)'),
+                    ),
+                    TextField(controller: notes[m.code], maxLength: 500, decoration: InputDecoration(labelText: 'Justification ${m.name} (facultative)')),
+                  ] else
+                    SizedBox(
+                      width: (MediaQuery.sizeOf(context).width - 160).clamp(280.0, 560.0),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            flex: 2,
+                            child: TextField(
+                              controller: amounts[m.code],
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: InputDecoration(labelText: '${m.name} (F)'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            flex: 3,
+                            child: TextField(controller: notes[m.code], maxLength: 500, decoration: const InputDecoration(labelText: 'Justification (facultative)')),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
                 TextField(
                   controller: comment,
@@ -1098,7 +1174,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 child: reason != null || snapshot == null
                     ? _scrollable(_Blocked(message: reason ?? 'Catalogue absent.', onRetry: () => _tryOnline()))
                     : _operator == null
-                    ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() {
+                    ? _scrollable(_OperatorLogin(engine: _engine, version: widget.session.appVersion, onLogged: (o) => setState(() {
                           _operator = o;
                           _floor = (_engine.restaurant?.restaurantProfile ?? false) && _cart.isEmpty;
                         })))
@@ -1294,6 +1370,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _openShopWeb(admin: false);
       } else if (choice == 'reglages') {
         _openSettings();
+      } else if (choice == 'prix_locaux') {
+        _toggleLocalPrices();
+      } else if (choice == 'tickets') {
+        _ticketSettings();
       }
     },
     itemBuilder: (context) => [
@@ -1302,6 +1382,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       const PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
       if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
+      if (_operator != null && _engine.canCloseSession(_operator!)) const PopupMenuItem(value: 'tickets', child: Text('Tickets : logo, QR et exemplaires')),
+      if (_canRememberPrices) CheckedPopupMenuItem(value: 'prix_locaux', checked: _localPrices.enabled, child: const Text('Mémoriser les prix saisis')),
       if (_operator != null && _engine.canCloseSession(_operator!))
         PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
       if (_operator != null && (_engine.sessionOpen || _engine.canCloseSession(_operator!)))
@@ -1454,7 +1536,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 child: TextField(
                   controller: _scanInput,
                   focusNode: _searchFocus,
-                  autofocus: true,
+                  autofocus: _look.scanAutoFocus,
                   decoration: InputDecoration(
                     isDense: true,
                     filled: true,
@@ -1646,7 +1728,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           ?_wholesaleHint(product),
         ],
       ),
-      trailing: Text(formatFcfa(product.price), style: const TextStyle(fontWeight: FontWeight.bold)),
+      trailing: Text(formatFcfa(_shownPrice(product)), style: const TextStyle(fontWeight: FontWeight.bold)),
       onTap: () => _add(product, null),
     );
   }
@@ -1691,7 +1773,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: Text(formatFcfa(product.price), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      child: Text(formatFcfa(_shownPrice(product)), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
                   ),
                   CircleAvatar(radius: 12, backgroundColor: _palette.primary, child: const Icon(Icons.add, size: 16, color: Colors.white)),
@@ -1724,7 +1806,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     }
     _scanInput.clear();
     setState(() {});
-    _searchFocus.requestFocus();
+    _autoFocusScan();
   }
 
   Future<void> _add(Product product, Packaging? packaging) async {
@@ -1735,22 +1817,28 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         builder: (context) => SimpleDialog(
           title: Text(product.name),
           children: [
-            SimpleDialogOption(onPressed: () => Navigator.pop(context, null), child: Text('À l’unité — ${formatFcfa(product.price)}')),
+            SimpleDialogOption(onPressed: () => Navigator.pop(context, null), child: Text('À l’unité — ${formatFcfa(_shownPrice(product))}')),
             for (final p in product.packagings)
               SimpleDialogOption(onPressed: () => Navigator.pop(context, p), child: Text('${p.name} — ${formatFcfa(p.price)}')),
           ],
         ),
       );
     }
+    // Prix mémorisé : repris seulement si le moteur accepte un prix saisi sur cette ligne pour ce caissier.
+    final remembered = await LocalPrices.read(_engine);
+    if (!mounted) return;
     setState(() {
+      _localPrices = remembered;
       final existing = _cart.where((l) => l.product.id == product.id && l.packaging?.id == chosen?.id && l.lot == null).firstOrNull;
       if (existing != null) {
         existing.quantity += BigInt.from(1000000);
       } else {
-        _cart.add(CartLine(product: product, packaging: chosen, tier: _tier));
+        final line = CartLine(product: product, packaging: chosen, tier: _tier);
+        line.enteredPrice = remembered.priceFor(_engine, _operator, line);
+        _cart.add(line);
       }
     });
-    _searchFocus.requestFocus();
+    _autoFocusScan();
   }
 
   /// [footer] : total et bouton « Encaisser » sous le panier (la disposition compacte les porte dans sa barre fixe).
@@ -2127,6 +2215,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     line.discountEntry = null;
                   }
                 });
+                if (priceEditable) {
+                  unawaited(LocalPrices.remember(_engine, line.product.id, line.enteredPrice).then((changed) => changed ? _reloadLocalPrices() : null));
+                }
                 Navigator.pop(context);
               },
               child: const Text('Valider'),
@@ -2193,6 +2284,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       approval = await _askApproval(globalDiscount);
       if (approval == null || !mounted) return;
     }
+    // Même panier que le ticket précédent : simple avertissement, l'encaissement continue (parité Windows a0236dc).
+    final sameBasket = await _engine.sameAsPreviousSale(_cart);
+    if (!mounted) return;
+    if (sameBasket) _toast(CaisseEngine.sameBasketWarning);
     // Répartition validée par le moteur avant de fermer la fenêtre : un refus s'affiche sur les lignes saisies.
     String? check(List<CartPayment> payments) {
       try {
@@ -2328,7 +2423,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         ),
       ),
     );
-    _searchFocus.requestFocus();
+    _autoFocusScan();
   }
 
   /// Retour en espèces d'une vente de ce terminal : quantités par ligne, montant calculé, motif obligatoire.
@@ -2513,7 +2608,113 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       duplicate: duplicate,
       model: model,
     );
-    await _printText(text, failure: 'Ticket non imprimé', saved: ' : la vente est bien enregistrée.', compact: model?.compact ?? false);
+    // Logo, QR et « DONT TVA » comme Windows ; les exemplaires du réglage pour le ticket de la vente, un seul pour un duplicata.
+    final settings = await ReceiptSettings.read(_engine);
+    final printed = ReceiptSettings.saleLines(text);
+    final compact = model?.compact ?? false;
+    await _printText(
+      printed,
+      failure: 'Ticket non imprimé',
+      saved: ' : la vente est bien enregistrée.',
+      bytes: settings.saleBytes(printed, paperWidth: width, compact: compact, copies: duplicate ? 1 : null),
+    );
+  }
+
+  /// Réglages des tickets de cette boutique sur ce terminal ; accessibles sans imprimante (aperçu à l'écran sinon).
+  Future<void> _ticketSettings() async {
+    var settings = await ReceiptSettings.read(_engine);
+    final link = TextEditingController(text: settings.link);
+    String? error;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Tickets : logo, QR et exemplaires'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Pour ${_snapshot?.store.name ?? 'cette boutique'} sur ce terminal. Logo gardé en copie locale : rien n’est téléchargé à l’impression.',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              if (settings.logoPng != null) Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Image.memory(settings.logoPng!, height: 70))),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.image_outlined),
+                    label: Text(settings.logoPng == null ? 'Importer le logo (PNG ou JPG)' : 'Changer le logo'),
+                    onPressed: () async {
+                      final bytes = await widget.session.channel.pickImage();
+                      if (bytes == null) return;
+                      try {
+                        final png = normalizeReceiptLogo(bytes);
+                        setLocal(() => (settings = settings.copyWith(logoPng: png), error = null));
+                      } on FormatException catch (e) {
+                        setLocal(() => error = e.message);
+                      } catch (_) {
+                        setLocal(() => error = 'Logo illisible. Choisissez une image PNG ou JPG de 2 Mo au plus.');
+                      }
+                    },
+                  ),
+                  if (settings.logoPng != null)
+                    TextButton(onPressed: () => setLocal(() => settings = settings.copyWith(removeLogo: true)), child: const Text('Retirer le logo')),
+                ],
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: settings.qrEnabled,
+                onChanged: (v) => setLocal(() => settings = settings.copyWith(qrEnabled: v)),
+                title: const Text('QR résumé du ticket'),
+                subtitle: const Text('Numéro, date, caisse et totaux ; aucune donnée client ni référence de paiement.'),
+              ),
+              TextField(
+                controller: link,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(labelText: 'Lien facultatif (site, réseaux)', hintText: 'https://…', helperText: 'Second QR « Retrouvez-nous en ligne ».'),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<int>(
+                initialValue: settings.copies,
+                decoration: const InputDecoration(labelText: 'Exemplaires du ticket de vente'),
+                items: [for (var n = 1; n <= 3; n++) DropdownMenuItem(value: n, child: Text('$n'))],
+                onChanged: (v) => setLocal(() => settings = settings.copyWith(copies: v ?? 1)),
+              ),
+              if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: const TextStyle(color: Colors.red))),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            TextButton(
+              onPressed: () {
+                final trial = settings.copyWith(link: link.text.trim());
+                if (!validReceiptLink(trial.link)) return setLocal(() => error = 'Lien invalide : http ou https, sans espace, 350 caractères au plus.');
+                _printTestTicket(trial);
+              },
+              child: const Text('Ticket d’essai'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final next = settings.copyWith(link: link.text.trim());
+                if (!validReceiptLink(next.link)) return setLocal(() => error = 'Lien invalide : http ou https, sans espace, 350 caractères au plus.');
+                await next.write(_engine);
+                if (context.mounted) Navigator.pop(context);
+                _toast('Réglages des tickets enregistrés.');
+              },
+              child: const Text('Enregistrer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Ticket d'essai : aucune vente, avec le logo, les QR et les exemplaires du réglage en cours.
+  Future<void> _printTestTicket(ReceiptSettings settings) {
+    final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
+    const lines = ['SHOPIKAISS - TEST', 'AUCUNE VENTE', 'Impression et coupe du papier', '0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'Derniere ligne : doit rester lisible.'];
+    return _printText(lines, failure: 'Ticket d’essai non imprimé', bytes: settings.saleBytes(lines, paperWidth: width));
   }
 
   Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false, Uint8List? bytes}) async {
@@ -2565,9 +2766,12 @@ class _Blocked extends StatelessWidget {
 
 /// Choix du caissier : PIN de caisse vérifié sur le terminal (empreinte reçue avec le catalogue).
 class _OperatorLogin extends StatefulWidget {
-  const _OperatorLogin({required this.engine, required this.onLogged});
+  const _OperatorLogin({required this.engine, required this.onLogged, this.version = ''});
 
   final CaisseEngine engine;
+
+  /// Version de l'application, visible à la connexion (comme Windows) pour savoir quel APK tourne.
+  final String version;
   final ValueChanged<Operator> onLogged;
 
   @override
@@ -2581,7 +2785,16 @@ class _OperatorLoginState extends State<_OperatorLogin> {
   bool _checking = false;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => widget.version.isEmpty
+      ? _login(context)
+      : Stack(
+          children: [
+            _login(context),
+            Positioned(right: 8, bottom: 4, child: Text('Version ${widget.version}', style: const TextStyle(fontSize: 11, color: Colors.black45))),
+          ],
+        );
+
+  Widget _login(BuildContext context) {
     final snapshot = widget.engine.snapshot!;
     final operators = snapshot.operators.where((o) => !snapshot.rules.pinRequired || (o.pinHash ?? '').isNotEmpty).toList();
     if (!snapshot.rules.pinRequired) {

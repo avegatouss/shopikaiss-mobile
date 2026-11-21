@@ -1,13 +1,18 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
+import 'package:shopikaiss_terminal/src/offline/local_prices.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
+import 'package:shopikaiss_terminal/src/offline/receipt_settings.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/offline/ticket.dart';
 import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
+import 'package:shopikaiss_terminal/src/windows/platform/receipt_logo.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'support/fake_v2_server.dart';
@@ -319,5 +324,93 @@ void main() {
         throwsA(isA<OfflineRefusal>()));
     final sold = await e.recordSale([CartLine(product: savon, enteredPrice: 1500)], [cash(1500)], named(e, 'Awa'));
     expect(((sold.content['lignes'] as List).single as Map)['prix_unitaire'], 1500);
+  });
+  test('prix mémorisés, chemin Android (LocalPrices) : même mémoire que l’adaptateur, mêmes refus', () async {
+    serve();
+    final e = await engine();
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    await adapter.execute('setLocalPriceSettings', {'enabled': true}, null);
+    final savon = e.snapshot!.byCode('6190000000011')!.$1;
+    final view = await adapter.execute('addProduct', {'product_id': savon.id}, null);
+    await adapter.execute('setLinePrice', {'line_id': (view['lines'] as List).single['id'], 'amount': 1750}, null);
+    await adapter.close();
+
+    // La caisse Android lit la même mémoire (même clé par boutique).
+    final memory = await LocalPrices.read(e);
+    expect(memory.enabled, isTrue);
+    expect(memory.priceFor(e, named(e, 'Awa'), CartLine(product: savon)), 1750);
+    expect(memory.priceFor(e, named(e, 'Koffi'), CartLine(product: savon)), isNull, reason: 'caissier sans le droit');
+    expect(memory.priceFor(e, named(e, 'Awa'), CartLine(product: savon, packaging: savon.packagings.single)), isNull, reason: 'conditionnement');
+    await expectLater(LocalPrices.setEnabled(e, named(e, 'Koffi'), false), throwsA(isA<StateError>()));
+    expect(await LocalPrices.remember(e, savon.id, 1800), isTrue);
+    expect((await LocalPrices.read(e)).prices['${savon.id}'], 1800);
+    expect(await LocalPrices.remember(e, savon.id, null), isTrue);
+    expect((await LocalPrices.read(e)).prices, isEmpty);
+    await LocalPrices.remember(e, savon.id, 1900);
+    await LocalPrices.setEnabled(e, named(e, 'Awa'), false);
+    expect((await LocalPrices.read(e)).prices, isEmpty, reason: 'désactiver efface la mémoire');
+    expect(await LocalPrices.remember(e, savon.id, 2000), isFalse, reason: 'désactivée : rien n’est mémorisé');
+  });
+
+  int count(Uint8List bytes, List<int> pattern) {
+    var n = 0;
+    for (var i = 0; i + pattern.length <= bytes.length; i++) {
+      var ok = true;
+      for (var j = 0; j < pattern.length && ok; j++) {
+        ok = bytes[i + j] == pattern[j];
+      }
+      if (ok) n++;
+    }
+    return n;
+  }
+
+  test('réglages des tickets par boutique : logo, QR, lien, DONT TVA et exemplaires (parité Windows)', () async {
+    serve();
+    final e = await engine();
+    final defaults = await ReceiptSettings.read(e);
+    expect((defaults.copies, defaults.qrEnabled, defaults.link, defaults.logoPng), (1, true, '', null));
+    expect(ReceiptSettings.key(e.snapshot!), 'ticket-reglages-v1:$fakeShop', reason: 'rangé par boutique, pas pour tout le poste');
+    await expectLater(const ReceiptSettings(link: 'ftp://exemple').write(e), throwsA(isA<FormatException>()));
+
+    final logo = normalizeReceiptLogo(Uint8List.fromList(img.encodePng(img.Image(width: 40, height: 20)..clear(img.ColorRgb8(0, 0, 0)))));
+    await ReceiptSettings(copies: 3, qrEnabled: true, link: 'https://exemple.ci', logoPng: logo).write(e);
+    final settings = await ReceiptSettings.read(e);
+    expect((settings.copies, settings.link, settings.logoPng!.length), (3, 'https://exemple.ci', logo.length));
+
+    const lines = ['BOUTIQUE', 'Ticket HL2-1-0001', 'TOTAL           2 700 F', 'dont TVA 18 %     412 F'];
+    expect(ReceiptSettings.saleLines(lines).last, startsWith('DONT TVA 18 %'));
+    final cut = [0x1D, 0x56, 66, 0];
+    final raster = [0x1D, 0x76, 0x30, 0];
+    final sale = settings.saleBytes(lines, paperWidth: 58);
+    expect(count(sale, cut), 3, reason: 'trois exemplaires, un seul envoi');
+    final one = count(settings.saleBytes(lines, paperWidth: 58, copies: 1), raster);
+    expect(one, greaterThanOrEqualTo(3), reason: 'logo, QR résumé et QR du lien (une image peut tenir sur plusieurs bandes)');
+    expect(count(sale, raster), 3 * one);
+    expect(String.fromCharCodes(sale), contains('DONT TVA 18 %'));
+    final duplicate = settings.saleBytes(lines, paperWidth: 80, copies: 1);
+    expect(count(duplicate, cut), 1);
+    final bare = const ReceiptSettings(qrEnabled: false).saleBytes(lines, paperWidth: 80);
+    expect((count(bare, cut), count(bare, raster)), (1, 0), reason: 'sans logo ni QR : texte seul');
+    expect(bare.sublist(0, 5), [0x1B, 0x40, 0x1B, 0x64, 2], reason: 'deux lignes avant le texte (marges C 9e044dd)');
+    expect(bare.sublist(bare.length - 7), [0x1B, 0x64, 2, 0x1D, 0x56, 66, 0], reason: 'deux lignes avant la coupe');
+
+  });
+  test('panier identique au ticket précédent : avertissement seulement, effacé par une vente différente', () async {
+    serve();
+    final e = await engine();
+    final savon = e.snapshot!.byCode('6190000000011')!.$1;
+    final emballage = e.snapshot!.products.firstWhere((p) => p.name == 'Emballage');
+    final cash = e.snapshot!.methods.firstWhere((m) => m.isCash);
+    Future<void> sell(Product product, int price) =>
+        e.recordSale([CartLine(product: product)], [CartPayment(method: cash, amount: price, received: price)], named(e, 'Awa'));
+    expect(await e.sameAsPreviousSale([CartLine(product: savon)]), isFalse);
+    await sell(savon, 1000);
+    expect(await e.sameAsPreviousSale([CartLine(product: savon)]), isTrue);
+    expect(await e.sameAsPreviousSale([CartLine(product: savon, quantity: BigInt.from(2000000))]), isFalse);
+    await sell(savon, 1000);
+    await sell(emballage, 100);
+    expect(await e.sameAsPreviousSale([CartLine(product: savon)]), isFalse, reason: 'vente différente intercalée');
   });
 }
