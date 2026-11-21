@@ -56,5 +56,5 @@ Uint8List receiptLogoRaster(Uint8List png, int paperWidth) {
       }
     }
   }
-  return EscPos.raster(bits, width, logo.height, cut: false);
+  return EscPos.raster(bits, width, logo.height, cut: false, trailingLines: 0);
 }

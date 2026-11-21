@@ -34,7 +34,10 @@ buildReceiptPdf(
             : PdfPageFormat(
                 paperWidth * PdfPageFormat.mm,
                 double.infinity,
-                marginAll: 4 * PdfPageFormat.mm,
+                marginLeft: 4 * PdfPageFormat.mm,
+                marginRight: 4 * PdfPageFormat.mm,
+                marginTop: 27,
+                marginBottom: 18,
               ),
         theme: pw.ThemeData.withFont(base: font),
         build: (_) => pw.Column(
@@ -67,7 +70,7 @@ buildReceiptPdf(
                           style: const pw.TextStyle(fontSize: 9),
                         ),
                       pw.Padding(
-                        padding: const pw.EdgeInsets.all(8),
+                        padding: const pw.EdgeInsets.fromLTRB(8, 8, 8, 0),
                         child: pw.BarcodeWidget(
                           barcode: pw.Barcode.qrCode(),
                           data: code.data,

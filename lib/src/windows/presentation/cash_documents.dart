@@ -193,7 +193,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
                     ),
                     const DropdownMenuItem(
                       value: 'pre-z',
-                      child: Text('Pré-Z de la journée'),
+                      child: Text('Pré-Z · sessions clôturées'),
                     ),
                     DropdownMenuItem(
                       value: 'z-session',
@@ -236,7 +236,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 8),
             child: Text(
-              'Pré-X / pré-Z : documents provisoires. La journée regroupe les sessions reçues et les données locales ; les sessions non synchronisées peuvent manquer. Imprimer ne clôture pas la caisse.',
+              'Pré-X : ventes de la session en cours. Pré-Z : uniquement les sessions clôturées de la journée ; les ventes des sessions ouvertes sont exclues des montants. Choisissez Pré-X et Détaillé pour les produits, quantités et montants de votre session. Les sessions non synchronisées peuvent manquer. Imprimer ne clôture pas la caisse.',
               style: TextStyle(fontSize: 12),
             ),
           ),

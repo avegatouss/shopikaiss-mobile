@@ -31,7 +31,7 @@ void main() {
         receiptQrCodes(lines, link: 'https://example.com'),
         paperWidth: width,
       );
-      final cut = EscPos.feedAndCut(3);
+      final cut = EscPos.feedAndCut(2);
       expect(bytes.skip(bytes.length - cut.length), cut);
       var cuts = 0;
       for (var i = 0; i < bytes.length - 3; i++) {
