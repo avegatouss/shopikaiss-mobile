@@ -4,14 +4,14 @@
 
 Les sections suivantes conservent l'inventaire initial comme référence ; leurs mentions « à faire » décrivent l'état avant ce chantier. Le présent état les remplace pour C01 à C18.
 
-- Moteur B intégré : `1bd1cd1`, puis `722813a` (documents de clôture durables et repli du démarrage web).
+- Moteur B intégré : `1bd1cd1`, puis `722813a` (documents de clôture durables et repli du démarrage web), et `e672360` (interface Android : paiement, afficheur, raccourcis).
 - C01–C17 : parcours raccordés dans Windows. Activation annoncée par le terminal de recette, sous contrôle de l'activation serveur. Les 34 commandes restaurant du protocole ont un appelant ; ce comptage ne remplace pas une recette métier.
 - C18 : cache d'édition remplacé par les commandes durables `closureDocument` et `recordEdition` de B. Journal Windows par profil avant impression ; confirmation rejouée avec le même identifiant après perte de réponse. Une impression interrompue demande une vérification humaine et n'est jamais relancée automatiquement.
 - Les 18 observations de B sont traitées dans le code : résultats incertains et reprise durable, règlement des tables, annulations/offerts/remises, bons à vérifier et duplicatas, Z original, brouillon groupé, lignes envoyées protégées, commentaires/conditionnements, imprimantes, transferts/fusions/déplacements, couverts/serveur/client, largeur 58/80 mm, résumé serveur, taille de réponse et rafraîchissement.
 - Les résultats d'impression cuisine/bar sont conservés avant acquittement. Leur reprise confirme le résultat connu sans renvoyer le bon.
 - Paiements mixtes sur lignes compactes, montants rapides espèces, catalogue restaurant paginé sans modifier les filtres de la vente classique. Les calculs et autorisations restent dans le moteur de B.
 
-Validation du premier lot : 549 tests locaux réussis, 3 tests natifs réussis, analyse sans anomalie. La suite est relancée après intégration du complément durable de B ; résultat final et référence installée consignés dans le journal commun de livraison. Aucun essai de service de table contre un serveur réel, ni essai physique POS-80, ne sont revendiqués.
+Validation du premier lot : 549 tests locaux réussis, 3 tests natifs réussis, analyse sans anomalie. Après le complément durable de B : 567 tests réussis, analyse propre. Le lot Android ultérieur est vérifié par sa suite ciblée ; résultat et référence installée consignés dans le journal commun de livraison. Aucun essai de service de table contre un serveur réel, ni essai physique POS-80, ne sont revendiqués.
 
 Éléments encore nécessaires hors C : terminal de démonstration réservé pour la recette restaurant ; imprimante POS-80 connectée et retour papier ; matériel d'affichage pour la recette physique ; contrats A/B pour le prix manuel et l'autorisation de survente. Les écarts côté Android et les autres contrats serveur de l'inventaire initial restent à leurs responsables. Aucune activation restaurant de TBC n'a été modifiée.
 
