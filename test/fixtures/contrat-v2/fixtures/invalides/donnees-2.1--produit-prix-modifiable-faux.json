@@ -1,0 +1,21 @@
+{
+    "nom": "Gâteau du jour",
+    "reference": "GAT-JOUR",
+    "categorie": "Pâtisserie",
+    "prix": 1500,
+    "stock_illimite": true,
+    "actif": true,
+    "vente_locale": true,
+    "categorie_uuid": null,
+    "marque": null,
+    "fournisseur": null,
+    "unite": null,
+    "prix_gros": null,
+    "gros_quantite_min": null,
+    "seuil_alerte": null,
+    "cree_le": "2026-11-21T08:00:00Z",
+    "favori": false,
+    "promotions": [],
+    "image": null,
+    "prix_modifiable": false
+}

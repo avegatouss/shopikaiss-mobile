@@ -603,6 +603,17 @@
             "erreur_attendue": "flux : valeur hors liste"
         },
         {
+            "fichier": "valides/donnees-2.1--produit-prix-modifiable.json",
+            "schema": "donnees-2.1.json#/$defs/produit",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-2.1--produit-prix-modifiable-faux.json",
+            "schema": "donnees-2.1.json#/$defs/produit",
+            "valide": false,
+            "erreur_attendue": "valeur attendue true"
+        },
+        {
             "fichier": "valides/donnees-2.1--operateur-serveur-de-salle.json",
             "schema": "donnees-2.1.json#/$defs/operateur",
             "valide": true

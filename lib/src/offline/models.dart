@@ -481,6 +481,7 @@ class Product {
       stockMicros = parseMicros(((m['stock'] ?? '0') as String).replaceFirst('-', '')) ?? BigInt.zero,
       negativeStock = ((m['stock'] ?? '0') as String).startsWith('-'),
       managedByLots = m['gere_par_lots'] == true,
+      priceEditable = m['prix_modifiable'] == true,
       lotMode = (m['lots_mode'] ?? 'fifo') as String,
       lots = [for (final l in (m['lots'] as List? ?? const [])) ProductLot(Map<String, dynamic>.from(l as Map))],
       packagings = [for (final p in (m['conditionnements'] as List? ?? const [])) Packaging(Map<String, dynamic>.from(p as Map))],
@@ -500,6 +501,9 @@ class Product {
 
   /// Produit vendu par lots (capacité `lots.vente`) ; [lots] dans l'ordre d'allocation de [lotMode].
   final bool managedByLots;
+
+  /// Prix saisi à la vente (2.1 lot 9, `prix_modifiable`, capacité `prix.modifiable`).
+  final bool priceEditable;
   final String lotMode;
   final List<ProductLot> lots;
   final String? brand;
@@ -727,8 +731,12 @@ class PassCheck {
 
 /// Ligne du panier hors ligne. Le prix est celui du référentiel au moment de l'ajout : c'est lui qui est encaissé.
 class CartLine {
-  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry, this.lot, this.tier})
+  CartLine({required this.product, this.packaging, BigInt? quantity, this.discount = 0, this.fixedPrice, this.discountEntry, this.lot, this.tier, this.enteredPrice})
     : quantity = quantity ?? BigInt.from(1000000);
+
+  /// Prix unitaire saisi par le caissier (2.1 lot 9) ; null = prix habituel. Il remplace le prix habituel (catalogue,
+  /// gros, lot, panier repris), met la ligne au tarif `detail`, et la remise se calcule ensuite sur lui.
+  int? enteredPrice;
 
   /// Saisie de la remise (montant ou pourcentage), figée dans la vente 2.1 ; [discount] en est le montant.
   DiscountEntry? discountEntry;
@@ -761,7 +769,7 @@ class CartLine {
   /// Prix de gros de la ligne, règle `prix_lot` comprise.
   int? get _appliedWholesale {
     final price = _wholesalePrice;
-    if (fixedPrice != null || price == null || !_wholesaleDue) return null;
+    if (fixedPrice != null || enteredPrice != null || price == null || !_wholesaleDue) return null;
     if (!_lotPriced) return price;
     return tier!.rules!.lotPriced == 'lowest' && price < retailPrice ? price : null;
   }
@@ -772,9 +780,12 @@ class CartLine {
   bool get wholesale => _appliedWholesale != null && _appliedWholesale != retailPrice;
 
   /// Tarif gros dû sur un produit vendu au prix de ses lots, refusé par la boutique.
-  bool get wholesaleRefused => fixedPrice == null && _wholesalePrice != null && _wholesaleDue && _lotPriced && tier!.rules!.lotPriced == 'refuse';
+  bool get wholesaleRefused => fixedPrice == null && enteredPrice == null && _wholesalePrice != null && _wholesaleDue && _lotPriced && tier!.rules!.lotPriced == 'refuse';
 
-  int get unitPrice => fixedPrice ?? _appliedWholesale ?? retailPrice;
+  /// Prix habituel de la ligne, sans prix saisi : prix figé, gros, lot ou catalogue.
+  int get usualPrice => fixedPrice ?? _appliedWholesale ?? retailPrice;
+
+  int get unitPrice => enteredPrice ?? usualPrice;
   String get label => packaging == null ? product.name : '${product.name} (${packaging!.name})';
   int get base => lineBase(unitPrice, quantity);
   int get total => lineTotal(unitPrice, quantity, discount);

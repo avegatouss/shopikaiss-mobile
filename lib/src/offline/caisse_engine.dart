@@ -229,6 +229,23 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Tarif gros de la boutique ; null s'il n'y en a pas (ou contrat antérieur à 2.1).
   WholesaleRules? get wholesaleRules => null;
 
+  /// Prix modifiable à la vente (2.1 lot 9) : capacité `prix.modifiable` annoncée et accordée.
+  bool get editablePriceSupported => false;
+
+  /// Plafond d'un prix saisi, en francs (celui de la caisse web).
+  static const maxEnteredPrice = 1000000000;
+
+  /// Pourquoi [operator] ne peut pas saisir le prix de [line], ou null s'il le peut : produit coché, unité de base,
+  /// droit `prix_vente_modifier`. Contrôlé de nouveau à l'encaissement ; le serveur refait le contrôle au rejeu.
+  String? enteredPriceBlocker(Operator? operator, CartLine line) {
+    if (!editablePriceSupported) return 'Prix modifiable non disponible sur ce terminal.';
+    if (!line.product.priceEditable) return 'Le prix de « ${line.product.name} » ne se modifie pas à la vente.';
+    if (line.packaging != null) return 'Le prix se saisit à l’unité de base, pas sur un conditionnement.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'prix_vente_modifier')) return '${operator.name} n’a pas le droit de modifier le prix de vente.';
+    return null;
+  }
+
   /// Remise maximale (francs) que [operator] peut accorder sur une ligne de [base] francs : plafond du terminal
   /// (`remises.ligne_max_pourcent`) et, s'il est publié (contrat 2.1), celui de son rôle — le plus petit des deux.
   int maxLineDiscountFor(Operator operator, int base) => maxLineDiscount(base, snapshot?.rules.maxLineDiscountPercent ?? 0);

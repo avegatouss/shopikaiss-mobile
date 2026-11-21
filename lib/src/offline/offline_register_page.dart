@@ -851,6 +851,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           'remise': l.discount,
           if (l.discountEntry != null) 'remise_saisie': l.discountEntry!.toJson(),
           if (l.lot != null) 'lot_uuid': l.lot!.uuid,
+          if (l.fixedPrice != null) 'prix_fige': l.fixedPrice,
+          if (l.enteredPrice != null) 'prix_saisi': l.enteredPrice,
         },
     ],
     if (_tier.cart) 'tarif_gros': true,
@@ -865,7 +867,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   Future<void> _suspendCart() async {
     if (_cart.isEmpty) return;
-    if (_engine.sharedCartsSupported && _operator != null) {
+    // Prix saisi : le panier partagé ne le porte pas, la mise en attente reste sur ce terminal (sauf panier repris,
+    // refusé par le moteur).
+    final entered = _cart.any((l) => l.enteredPrice != null);
+    if (_engine.sharedCartsSupported && _operator != null && (!entered || _shared != null)) {
       try {
         final totals = _totals(_snapshot!);
         _shared = await _engine.suspendShared(
@@ -958,6 +963,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         fixedPrice: raw['prix_fige'] as int?,
         lot: product.lots.where((l) => l.uuid == raw['lot_uuid']).firstOrNull,
         tier: _tier,
+        enteredPrice: raw['prix_saisi'] as int?,
       ));
     }
     await _engine.deleteDraft(draft.uuid);
@@ -1864,6 +1870,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           children: [
             Text(line.label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
             if (line.discount > 0) Text('${formatFcfa(line.unitPrice)} − ${formatFcfa(line.discount)}', style: const TextStyle(fontSize: 11)),
+            if (line.enteredPrice != null)
+              Text('Prix saisi ${formatFcfa(line.enteredPrice!)} (habituel ${formatFcfa(line.usualPrice)})', style: const TextStyle(fontSize: 11, color: Colors.deepOrange)),
             if (shownLot != null)
               Text(
                 '${line.lot == null ? 'Automatique : ' : ''}${shownLot.label}${expired ? ' · périmé le ${shownLot.expiryLabel}' : ''}',
@@ -2009,6 +2017,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final today = DateTime.now().toIso8601String().substring(0, 10);
     final quantity = TextEditingController(text: formatMicros(line.quantity));
     final refusal = _discountRefusal;
+    // Prix saisi (2.1 lot 9) : produit coché, unité de base, droit `prix_vente_modifier` ; vide = prix habituel.
+    final priceEditable = _engine.enteredPriceBlocker(_operator, line) == null;
+    final price = TextEditingController(text: line.enteredPrice?.toString() ?? '');
     var lot = line.lot;
     String? error;
     await showDialog<void>(
@@ -2025,6 +2036,13 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
                 decoration: const InputDecoration(labelText: 'Quantité'),
               ),
+              if (priceEditable)
+                TextField(
+                  controller: price,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: InputDecoration(labelText: 'Prix unitaire F', helperText: 'Vide : prix habituel ${formatFcfa(line.usualPrice)}'),
+                ),
               if (line.product.managedByLots && line.fixedPrice == null)
                 DropdownButtonFormField<String?>(
                   initialValue: lot?.uuid,
@@ -2082,15 +2100,24 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               onPressed: () {
                 final q = parseMicros(quantity.text);
                 if (q == null || q <= BigInt.zero) return setLocal(() => error = 'Quantité invalide (six décimales au plus).');
-                final before = line.unitPrice;
+                final typed = price.text.trim();
+                final entered = typed.isEmpty ? null : int.tryParse(typed);
+                if (priceEditable && typed.isNotEmpty && (entered == null || entered > CaisseEngine.maxEnteredPrice)) {
+                  return setLocal(() => error = 'Prix invalide (0 à 1 000 000 000 F).');
+                }
+                final before = line.usualPrice;
                 final previous = line.lot;
+                final previousPrice = line.enteredPrice;
                 line.lot = lot;
-                // Le prix suit le lot : la remise saisie sur l'ancien prix ne vaut plus.
-                final repriced = line.unitPrice != before;
+                if (priceEditable) line.enteredPrice = entered;
+                // Le prix suit le lot : la remise saisie sur l'ancien prix ne vaut plus. Un prix saisi garde la remise,
+                // recalculée sur lui (pourcentage) ou refusée si elle dépasse la ligne (montant).
+                final repriced = line.enteredPrice == null && line.usualPrice != before;
                 final base = lineBase(line.unitPrice, q);
                 final entry = line.discountEntry;
                 if (!repriced && entry != null && !entry.isPercent && line.discount > base) {
                   line.lot = previous;
+                  line.enteredPrice = previousPrice;
                   return setLocal(() => error = 'La remise dépasse le montant de la ligne.');
                 }
                 setState(() {

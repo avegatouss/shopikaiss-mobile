@@ -203,6 +203,8 @@ class LocalRegisterAdapter {
         return view;
       case 'setLineDiscount':
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
+      case 'setLinePrice':
+        return _setLinePrice(_text(args, 'line_id', max: 64), args['amount']);
       case 'setLineLot':
         return _setLineLot(_text(args, 'line_id', max: 64), args['lot_uuid'] as String?);
       case 'setWholesale':
@@ -327,6 +329,14 @@ class LocalRegisterAdapter {
       'returns': cap(_operator == null ? 'Identifiez le caissier pour effectuer un retour.' : engine.returnBlocker(_operator!)),
       'image_schedule': cap(engine.imagesSupported ? null : 'Images non disponibles sur ce terminal.'),
       'shared_carts': cap(engine.sharedCartsSupported ? null : 'Paniers partagés non disponibles sur ce terminal.'),
+      // Prix saisi (2.1 lot 9) : fonction du terminal et droit du caissier ; le produit et l'unité se lisent par ligne.
+      'line_price': cap(!engine.editablePriceSupported
+          ? 'Prix modifiable non disponible sur ce terminal.'
+          : _operator == null
+          ? 'Identifiez le caissier.'
+          : engine.hasRight(_operator!, 'prix_vente_modifier')
+          ? null
+          : '${_operator!.name} n’a pas le droit de modifier le prix de vente.'),
       'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
       'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
@@ -535,6 +545,12 @@ class LocalRegisterAdapter {
             'quantity_label': formatMicros(line.quantity),
             'quantity': formatMicros(line.quantity),
             'unit_price_label': cart == null ? '' : formatFcfa(cart.unitPrice, currency),
+            // Prix saisi (2.1 lot 9) : champ proposé seulement si `price_editable` ; sinon `price_edit_reason` dit pourquoi.
+            'price_editable': cart != null && engine.enteredPriceBlocker(_operator, cart) == null,
+            'price_edit_reason': cart == null ? null : engine.enteredPriceBlocker(_operator, cart),
+            'entered_price': line.entered,
+            'usual_price': cart?.usualPrice,
+            'usual_price_label': cart == null ? '' : formatFcfa(cart.usualPrice, currency),
             'discount_label': cart == null || cart.discount == 0 ? '' : formatFcfa(cart.discount, currency),
             'discount': line.discount,
             'discount_entry': line.entry?.toJson(),
@@ -564,6 +580,11 @@ class LocalRegisterAdapter {
 
   /// Remise de ligne que l'encaissement refuserait (droit retiré, politique abaissée, quantité réduite), ou null.
   String? _discountIssue(Snapshot snapshot, List<(_DraftLine, CartLine?)> resolved) {
+    for (final (_, cart) in resolved) {
+      if (cart?.enteredPrice == null) continue;
+      final blocker = engine.enteredPriceBlocker(_operator, cart!);
+      if (blocker != null) return 'Prix saisi sur « ${cart.label} » : $blocker Retirez-le.';
+    }
     for (final (_, cart) in resolved) {
       if (cart == null || cart.discount == 0) continue;
       if (!engine.hasRight(_operator!, 'remise')) return '${_operator!.name} n’a pas le droit d’accorder une remise : retirez celle de « ${cart.label} ».';
@@ -793,6 +814,24 @@ class LocalRegisterAdapter {
     return _mutate(() => _draft.wholesale = active);
   }
 
+  /// Prix unitaire saisi sur la ligne (2.1 lot 9) : `amount` entier en francs de 0 à 1 000 000 000, ou null pour revenir
+  /// au prix habituel. Produit coché, unité de base, droit `prix_vente_modifier` ; la remise en pourcentage se recalcule
+  /// sur le nouveau prix. Contrôlé de nouveau par le moteur à l'encaissement.
+  Future<Map<String, dynamic>> _setLinePrice(String lineId, Object? amount) async {
+    final line = _draft.lines.where((l) => l.id == lineId).firstOrNull;
+    if (line == null) throw const AdapterFailure('ligne_inconnue', 'Ligne introuvable dans le panier.');
+    if (amount != null && amount is! int) throw const AdapterFailure('argument_invalide', 'Argument « amount » invalide (entier en francs, ou null).');
+    final price = amount as int?;
+    if (price != null) {
+      if (price < 0 || price > CaisseEngine.maxEnteredPrice) throw const AdapterFailure('prix_invalide', 'Prix invalide (0 à 1 000 000 000 F).');
+      final cart = line.materialize(_snapshot(), _tierOf(_draft));
+      if (cart == null) throw const AdapterFailure('panier_invalide', 'Article retiré du catalogue : retirez-le du panier.');
+      final blocker = engine.enteredPriceBlocker(_operator, cart);
+      if (blocker != null) throw AdapterFailure('prix_refuse', blocker);
+    }
+    return _mutate(() => line.entered = price);
+  }
+
   /// Lot de la ligne ; null = choix automatique selon la règle de la boutique.
   Future<Map<String, dynamic>> _setLineLot(String lineId, String? lot) async {
     final line = _draft.lines.where((l) => l.id == lineId).firstOrNull;
@@ -973,8 +1012,10 @@ class LocalRegisterAdapter {
     final before = _draft.copy();
     final snapshot = engine.snapshot;
     final lines = snapshot == null ? const <CartLine?>[] : [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))];
-    // Sans caissier ou avec un article disparu : conservé sur ce terminal seulement.
-    if (engine.sharedCartsSupported && _operator != null && lines.isNotEmpty && lines.every((l) => l != null)) {
+    // Sans caissier, avec un article disparu ou un prix saisi (que le panier partagé ne porte pas) : conservé sur ce
+    // terminal seulement. Un panier repris avec un prix saisi est refusé par le moteur.
+    final entered = _draft.lines.any((l) => l.entered != null);
+    if (engine.sharedCartsSupported && _operator != null && lines.isNotEmpty && lines.every((l) => l != null) && (!entered || _draft.sharedCart != null)) {
       try {
         _draft.sharedCart = await engine.suspendShared(
           _operator!,
@@ -1508,6 +1549,7 @@ class _Draft {
           discount: (m['remise'] as num?)?.toInt() ?? 0,
           entry: m['remise_saisie'] is Map ? DiscountEntry.fromJson(m['remise_saisie'] as Map) : null,
           price: (m['prix_fige'] as num?)?.toInt(),
+          entered: (m['prix_saisi'] as num?)?.toInt(),
         ),
       );
     }
@@ -1560,7 +1602,7 @@ class _Draft {
     ..revision = revision
     ..lines.addAll([
       for (final l in lines)
-        _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, lotUuid: l.lotUuid, quantity: l.quantity, discount: l.discount, entry: l.entry, price: l.price),
+        _DraftLine(id: l.id, productId: l.productId, packagingId: l.packagingId, lotUuid: l.lotUuid, quantity: l.quantity, discount: l.discount, entry: l.entry, price: l.price, entered: l.entered),
     ])
     ..payments.addAll(payments)
     ..passes.addAll(passes)
@@ -1585,6 +1627,7 @@ class _Draft {
           'remise': l.discount,
           if (l.entry != null) 'remise_saisie': l.entry!.toJson(),
           if (l.price != null) 'prix_fige': l.price,
+          if (l.entered != null) 'prix_saisi': l.entered,
         },
     ],
     if (globalDiscount != 0) 'remise_globale': globalDiscount,
@@ -1602,7 +1645,10 @@ class _Draft {
 }
 
 class _DraftLine {
-  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0, this.entry, this.price, this.lotUuid});
+  _DraftLine({required this.id, required this.productId, required this.packagingId, required this.quantity, this.discount = 0, this.entry, this.price, this.lotUuid, this.entered});
+
+  /// Prix unitaire saisi par le caissier (2.1 lot 9) ; null = prix habituel.
+  int? entered;
 
   /// Lot choisi ; null = choix automatique selon la règle de la boutique.
   String? lotUuid;
@@ -1628,7 +1674,7 @@ class _DraftLine {
     final packaging = packagingId == null ? null : product.packaging(packagingId);
     if (packagingId != null && packaging == null) return null;
     final lot = product.lots.where((l) => l.uuid == lotUuid).firstOrNull;
-    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry, fixedPrice: price, lot: lot, tier: tier);
+    return CartLine(product: product, packaging: packaging, quantity: quantity, discount: discount, discountEntry: entry, fixedPrice: price, lot: lot, tier: tier, enteredPrice: entered);
   }
 }
 

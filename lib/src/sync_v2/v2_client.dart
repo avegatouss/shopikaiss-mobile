@@ -125,6 +125,10 @@ class CaisseV2Client {
   /// `edition_pre_x` et `edition_pre_z`. Accordée seulement avec `contrat.2_1`.
   static const zLocalCapability = 'z.local';
 
+  /// Prix modifiable à la vente (2.1 lot 9) : `produit.prix_modifiable`, droit `prix_vente_modifier`, prix saisi rejoué
+  /// en `prix_vente_modifie`. Accordée seulement avec `contrat.2_1`.
+  static const editablePriceCapability = 'prix.modifiable';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;
