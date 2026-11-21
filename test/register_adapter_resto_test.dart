@@ -124,6 +124,8 @@ void main() {
     var view = await run('restaurantView');
     expect([view['available'], view['profile'], view['master'], [for (final t in view['tables'] as List) (t['name'], t['state'])]],
         [true, 'TABLE_SERVICE', true, [('T1', 'free'), ('T2', 'free')]]);
+    // Libellé et réglages publiés par `restaurant.interface` (défauts ici) : Windows n'a pas à lire le moteur.
+    expect([view['send_label'], view['interface']], ['Envoyer', {'demander_couverts': true, 'libelle_envoi': 'send', 'navigation_carte': 'chips'}]);
 
     // Ouvrir : rejouée avec le même identifiant (réponse perdue), la même commande, aucune seconde.
     final opening = op();
@@ -255,12 +257,16 @@ void main() {
     Future<Map<String, dynamic>> run(String command, [Map<String, dynamic> args = const {}, String? operation]) => adapter.execute(command, args, operation);
     await run('login', {'operator_id': 7, 'pin': '1234'});
     final order = ((await run('restoOpen', {'table_uuid': t1}, op()))['order'] as Map)['order_uuid'] as String;
-    await run('restoEditLines', {'order_uuid': order, 'added': [{'product_id': savonId(e)}, {'product_id': emballageId(e)}]}, op());
+    await run('restoEditLines', {'order_uuid': order, 'added': [{'product_id': savonId(e), 'comment': 'Très épicé, à part'}, {'product_id': emballageId(e)}]}, op());
     await run('restoSend', {'order_uuid': order}, op());
 
     var jobs = ((await run('restoPrintJobs'))['jobs'] as List).cast<Map>();
     expect([for (final j in jobs) (j['station_name'], j['target'], j['state'])], [('Cuisine', 'imprimante_caisse', 'en_attente'), ('Bar', 'imprimante_caisse', 'en_attente')]);
     expect((jobs.first['lines'] as List).first, 'BON - Cuisine');
+    // Accents retirés par le moteur comme pour l'imprimante réseau (l'encodeur ESC/POS ne sort que l'ASCII).
+    final printed = [for (final j in jobs) ...(j['lines'] as List).cast<String>()];
+    expect(printed.where((l) => l.codeUnits.any((c) => c > 127)), isEmpty);
+    expect(printed.join(' '), contains('Tres epice, a part'));
     var tickets = ((await run('restoTickets', {'order_uuid': order}))['tickets'] as List).cast<Map>();
     expect({for (final t in tickets) t['state']}, {'en_impression'}, reason: 'aucun résultat inventé avant l’impression');
 

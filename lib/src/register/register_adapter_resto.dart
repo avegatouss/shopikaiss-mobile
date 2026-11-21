@@ -182,7 +182,10 @@ extension _RestoCommands on LocalRegisterAdapter {
       'point_of_sale_name': ctx.pointOfSaleName,
       'production': ctx.production,
       'table_service': ctx.tableService,
-      'send_label': ctx.sendLabel,
+      // Libellé publié par `restaurant.interface` (libelle_envoi), comme le bouton d'Android.
+      'send_label': engine.restaurantInterface.sendButton(production: ctx.settings.sendToProduction),
+      // Réglages d'affichage publiés (`restaurant.interface`, défauts sinon) : la caisse Windows n'a pas à lire le moteur.
+      'interface': engine.restaurantInterface.toJson(),
       'session_open': engine.sessionOpen,
       'staff_pricing': ctx.staffPricing,
       'settings': {
