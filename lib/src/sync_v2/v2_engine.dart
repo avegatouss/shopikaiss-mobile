@@ -205,6 +205,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.passesCapability,
           if (announceRestaurant) CaisseV2Client.restaurantCapability,
           CaisseV2Client.zLocalCapability,
+          CaisseV2Client.editablePriceCapability,
         ],
       ],
     );
@@ -634,6 +635,18 @@ class V2Engine extends CaisseEngine {
   @override
   Future<RestoOrderView> restoClose(Operator operator, String orderUuid) => _restoCloseNow(operator, orderUuid);
 
+  /// Prix saisis (2.1 lot 9) : mêmes conditions que la caisse web (`EditablePrice`) ; jamais sur une commande restaurant.
+  void _checkEnteredPrices(Operator operator, List<CartLine> lines, SaleExtras extras) {
+    for (final l in lines) {
+      final price = l.enteredPrice;
+      if (price == null) continue;
+      if (extras.order != null) throw const OfflineRefusal('Prix saisi refusé sur une commande restaurant.');
+      final blocker = enteredPriceBlocker(operator, l);
+      if (blocker != null) throw OfflineRefusal(blocker);
+      if (price < 0 || price > CaisseEngine.maxEnteredPrice) throw OfflineRefusal('Prix saisi sur « ${l.label} » invalide (0 à 1 000 000 000 F).');
+    }
+  }
+
   /// Contrôles de la caisse web sur le tarif gros (`SaleService`, `HeldCartService`).
   void _checkWholesale(Operator operator, List<CartLine> lines, SaleExtras extras) {
     final rules = wholesaleRules;
@@ -832,6 +845,12 @@ class V2Engine extends CaisseEngine {
       throw OfflineRefusal('${operator.name} n’a pas le droit d’accorder une remise : retirez-la avant de partager ce panier.');
     }
     _checkWholesale(operator, lines, extras);
+    // Le panier partagé ne porte pas de prix saisi (`panier_suspendre`) : il ne se partage pas avec les autres caisses.
+    for (final l in lines) {
+      if (l.enteredPrice != null) {
+        throw OfflineRefusal('Prix saisi sur « ${l.label} » : ce panier ne se partage pas avec les autres caisses. Encaissez-le ici ou retirez le prix saisi.');
+      }
+    }
     final name = (label ?? '').trim().isEmpty ? 'Panier ${now.toIso8601String().substring(0, 16).replaceFirst('T', ' ')}' : label!.trim();
     if (name.length > 150) throw const OfflineRefusal('Nom du panier trop long (150 caractères au plus).');
     final content = {
@@ -1022,6 +1041,9 @@ class V2Engine extends CaisseEngine {
 
   /// Lot Z local accordé par le serveur et reçu dans la projection (`z.local` avec `contrat.2_1`).
   bool get zLocalSupported => v2.zLocal && _serverOffers(CaisseV2Client.zLocalCapability);
+
+  @override
+  bool get editablePriceSupported => v2.contract21 && _serverOffers(CaisseV2Client.editablePriceCapability);
 
   @override
   Future<Set<String>> publishedCashCodes() async => {
@@ -1509,6 +1531,7 @@ class V2Engine extends CaisseEngine {
         }
         checkSale(s, lines, payments, extras);
         _requireRight(operator, 'vente', 'vendre');
+        _checkEnteredPrices(operator, lines, extras);
         // Règlement d'une commande restaurant (R-4) : remises de confiance, déjà autorisées et auditées sur la commande.
         final trusted = extras.order?.trusts(lines, extras.globalDiscount) ?? false;
         if (!trusted && (lines.any((l) => l.discount > 0) || extras.globalDiscount > 0)) _requireRight(operator, 'remise', 'accorder une remise');
@@ -1870,6 +1893,7 @@ class V2Engine extends CaisseEngine {
               'gros_quantite_min': e.value['gros_quantite_min'],
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
+              if (e.value['prix_modifiable'] == true) 'prix_modifiable': true,
               if (e.value['gere_par_lots'] == true) ..._lotView(e.key, e.value, lotsOf[e.key] ?? const [], stock, estimated),
               'conditionnements': [
                 for (final k in packagingsOf[e.key] ?? const <MapEntry<String, Map<String, dynamic>>>[])
@@ -1908,7 +1932,7 @@ class V2Engine extends CaisseEngine {
           quantityMicros: l.quantity.toInt(),
           discount: l.discount,
           discountEntry: l.discountEntry,
-          fixedPrice: segments != null || l.wholesale ? l.unitPrice : l.fixedPrice,
+          fixedPrice: segments != null || l.wholesale || l.enteredPrice != null ? l.unitPrice : l.fixedPrice,
           lotUuid: segments?.single.lot.uuid,
           wholesale: l.wholesale,
           orderLineUuid: orderLineUuid,

@@ -65,6 +65,7 @@ class BEngineAdapter implements WindowsEngineAdapter {
 | `changeQuantity` | `line_id`, `quantity` (chaîne, 6 décimales au plus, > 0) | vue |
 | `removeLine` / `clear` | `line_id` / — | vue |
 | `setLineDiscount` | `line_id`, `amount` (francs, 0 = retirer) **ou** `percent` (« 12,5 », 2 décimales, ≤ 100) | vue ; `remise_refusee` (sans droit `remise`, au-delà du plafond du rôle ou du terminal, au-delà de la base), `remise_invalide` ; un pourcentage est recalculé à chaque changement du panier |
+| `setLinePrice` | `line_id`, `amount` (entier en francs, 0 à 1 000 000 000) **ou** `null` (retour au prix habituel) | vue ; `prix_refuse` (fonction absente, produit non coché, conditionnement, caissier sans `prix_vente_modifier`), `prix_invalide` (hors bornes), `argument_invalide` (pas un entier) ; 2.1 lot 9, voir « Prix modifiable » |
 | `setGlobalDiscount` | `amount` **ou** `percent` (0 = retirer) | vue ; sur le sous-total (après remises de ligne) ; droit `remise`, plafond = min(`remises.globale_max_pourcent`, rôle) — politique à 0 : « Remise globale non autorisée hors ligne dans cette boutique. » ; `fonction_indisponible` avant la 2.1 |
 | `setDelivery` | `amount` (francs, 0 = retirer) | vue ; hors TVA, ajoutée au montant à payer ; droit `boutique.regles.livraison_droit` s'il est défini |
 | `setNote` | `text` (≤ 2 000, vide = retirer) | vue ; note du ticket |
@@ -237,3 +238,32 @@ Fermés par défaut : capacité `retour.especes`, `retours.mode` = `especes`, fo
 - L'alerte est indicative : elle n'empêche pas l'encaissement. L'autorisation de survente n'est pas livrée. Le seuil global de la boutique n'est pas publié : seul le seuil de la fiche compte. Produits à lots non détectés.
 - Images : `imageSettings` donne {start, end, images_cached, images_total} ; `setImageSettings` {start, end} en `HH:MM` locales, plage pouvant passer minuit, sans argument = à toute heure (défaut). Erreur `reglage_refuse`. Capacité `image_schedule`. Une vente qui commence arrête le lot avant l'image suivante ; l'image en cours se termine.
 - Mesure sur 5 000 produits, moteur v2, poste de dev, mode test : `view` 2 ms, `search` 15 ms, `scan` panier de 15 lignes 20 ms. Le gel d'une synchronisation passe de 1 990 ms à 52 ms (reconstruction du catalogue indexée). Non mesuré sur le poste Windows réel ni en build Release.
+
+## Prix modifiable (2.1 lot 9, contrat `4176383b` de A)
+
+- **Fonction** : capacité `prix.modifiable`, annoncée avec `contrat.2_1`. La première obtention fait reprendre un
+  instantané (révision de projection `+prix1`) pour recevoir `produit.prix_modifiable` et le droit `prix_vente_modifier`.
+- **Statut** : `capabilities.line_price` vaut `{allowed, reason}`. Il dit si la fonction existe sur le terminal et si le
+  caissier connecté a le droit.
+- **Vue, par ligne** :
+  - `price_editable` (booléen) : afficher le champ « Prix unitaire F » seulement s'il est vrai ;
+  - `price_edit_reason` : motif sinon (produit non coché, conditionnement, droit, fonction absente) ;
+  - `entered_price` : entier ou `null` ;
+  - `usual_price` et `usual_price_label` : prix habituel, à montrer en aide (« vide : prix habituel ») ;
+  - `unit_price_label` : prix appliqué.
+- **Commande** : `setLinePrice {line_id, amount}`. Avec `amount: null`, la ligne revient au prix habituel.
+- **Calcul** : le prix saisi devient le `prix_unitaire` de la ligne de vente, au tarif `detail` (le gros ne s'applique
+  plus à cette ligne). La remise en pourcentage se recalcule sur lui. Une remise en montant qui dépasse la nouvelle
+  ligne bloque l'encaissement (`pay_reason`).
+- **Conservation** : le prix saisi est gardé dans le panier courant et dans les paniers en attente (`prix_saisi`), au
+  redémarrage comme à la reprise.
+- **Encaissement** : le moteur refait tous les contrôles. Un prix saisi par un caissier puis encaissé par un autre sans
+  le droit est refusé : `can_pay` faux, `pay_reason` « Prix saisi sur … ».
+- **Refus du moteur** : prix saisi sur une commande restaurant.
+- **Panier à prix saisi** :
+  - il n'est pas partagé avec les autres caisses (le contrat `panier_suspendre` ne porte pas de prix) ;
+  - `suspendDraft` le garde sur ce terminal seulement ;
+  - un panier repris puis modifié avec un prix saisi est refusé au partage (`panier_refuse`).
+- **Ticket et Z** : rien à changer, la ligne porte son prix réel.
+- **Windows** : C n'annonce rien de plus, la capacité est annoncée par le moteur. Il affiche le champ dans le détail de
+  ligne selon `price_editable` et appelle `setLinePrice`.

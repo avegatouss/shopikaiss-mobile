@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -480,6 +480,11 @@ const contractV2Schemas = <String, String>{
                 "gere_par_lots": {
                     "type": "boolean",
                     "description": "Capacité lots.vente seulement : produit vendu par lot, avec vente_locale selon actif. Sa quantité se lit sur les stock.projection produit:lot."
+                },
+                "prix_modifiable": {
+                    "type": "boolean",
+                    "const": true,
+                    "description": "Capacité prix.modifiable seulement (2.1 lot 9) : présent, et toujours true, quand le prix se saisit à la vente (case « Prix modifiable à la vente ») ; absent sinon. Le prix se saisit à l'unité de base, hors conditionnement et hors coffret, par un opérateur qui a le droit prix_vente_modifier ; il devient le prix_unitaire de la ligne."
                 }
             }
         },

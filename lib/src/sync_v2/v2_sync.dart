@@ -77,7 +77,10 @@ class V2Sync {
           // remises par client (R-5) ; `restaurant6` : interface simplifiée (lot Z local). Un nouvel instantané les reçoit.
           '${store.restaurant ? '+restaurant6' : ''}'
           // `zlocal1` : première annonce de `z.local`, instantané demandé pour recevoir l'état courant (§12.2).
-          '${store.zLocal ? '+zlocal1' : ''}';
+          '${store.zLocal ? '+zlocal1' : ''}'
+          // `prix1` : première annonce de `prix.modifiable` (2.1 lot 9), instantané pour recevoir `prix_modifiable` et
+          // le droit `prix_vente_modifier` des produits et opérateurs déjà publiés.
+          '${contract21 && shared(CaisseV2Client.editablePriceCapability) ? '+prix1' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {

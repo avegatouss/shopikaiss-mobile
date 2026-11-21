@@ -254,6 +254,11 @@
                 "gere_par_lots": {
                     "type": "boolean",
                     "description": "Capacité lots.vente seulement : produit vendu par lot, avec vente_locale selon actif. Sa quantité se lit sur les stock.projection produit:lot."
+                },
+                "prix_modifiable": {
+                    "type": "boolean",
+                    "const": true,
+                    "description": "Capacité prix.modifiable seulement (2.1 lot 9) : présent, et toujours true, quand le prix se saisit à la vente (case « Prix modifiable à la vente ») ; absent sinon. Le prix se saisit à l'unité de base, hors conditionnement et hors coffret, par un opérateur qui a le droit prix_vente_modifier ; il devient le prix_unitaire de la ligne."
                 }
             }
         },
