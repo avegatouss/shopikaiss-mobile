@@ -79,11 +79,13 @@ class SupervisedWindowsHost implements WindowsHost {
     }
   }
 
-  HostFailure _unavailable([HostCommand? command]) => HostFailure(
-    'host_unavailable',
-    'Moteur local indisponible. Vérifiez la connexion et les ventes en attente.',
-    outcomeUnknown: command == HostCommand.commitSale,
-  );
+  HostFailure _unavailable([HostCommand? command, String? operationId]) =>
+      HostFailure(
+        'host_unavailable',
+        'Moteur local indisponible. Vérifiez la connexion et les ventes en attente.',
+        outcomeUnknown:
+            operationId != null || command == HostCommand.commitSale,
+      );
 
   @override
   Future<Map<String, dynamic>> call(
@@ -92,7 +94,9 @@ class SupervisedWindowsHost implements WindowsHost {
     String? operationId,
   }) async {
     final current = _host;
-    if (!_ready || _closing || current == null) throw _unavailable(command);
+    if (!_ready || _closing || current == null) {
+      throw _unavailable(command, operationId);
+    }
     // Propagate once, never retry (even when another host reconnects meanwhile).
     try {
       return await current.call(

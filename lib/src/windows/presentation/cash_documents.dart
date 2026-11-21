@@ -6,8 +6,13 @@ import '../ipc/protocol.dart';
 import '../platform/receipt_printing.dart';
 
 class CashDocumentsDialog extends StatefulWidget {
-  const CashDocumentsDialog({super.key, required this.host});
+  const CashDocumentsDialog({
+    super.key,
+    required this.host,
+    this.originalZ = false,
+  });
   final WindowsHost host;
+  final bool originalZ;
   @override
   State<CashDocumentsDialog> createState() => _CashDocumentsState();
 }
@@ -18,8 +23,10 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
   String? message;
   String closureKind = 'pre-x';
   String closureVersion = 'detailed';
+  bool originalRequested = false;
 
   Future<void> printClosure() async {
+    String? editionId;
     setState(() {
       busy = true;
       message = null;
@@ -34,20 +41,40 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
           arguments: {
             'kind': closureKind,
             'version': closureVersion,
-            'paper_width': 80,
+            'paper_width': await ReceiptPrinting.paperWidth(),
+            'duplicate':
+                !(widget.originalZ &&
+                    !originalRequested &&
+                    closureKind == 'z-session'),
           },
         );
+        editionId = result['edition_id'] as String?;
+        if (closureKind == 'z-session') originalRequested = true;
         message = await ReceiptPrinting.printLines(
           (result['lines'] as List).cast<String>(),
           escposBytes: base64Decode(result['escpos_base64'] as String),
         );
-        await widget.host.call(HostCommand.cashClosureEdition,
-            arguments: {'edition_id': result['edition_id']});
+        await widget.host.call(
+          HostCommand.cashClosureEdition,
+          arguments: {'edition_id': result['edition_id']},
+        );
+        editionId = null;
       }
     } catch (e) {
       message = e is HostFailure
           ? e.message
           : 'Impression à vérifier. Aucune session clôturée par cette action.';
+    } finally {
+      if (editionId != null) {
+        try {
+          await widget.host.call(
+            HostCommand.cashClosureEdition,
+            arguments: {'edition_id': editionId, 'discard': true},
+          );
+        } catch (_) {
+          /* Host restart also releases the bounded cache. */
+        }
+      }
     }
     if (mounted) setState(() => busy = false);
   }
@@ -55,6 +82,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
   @override
   void initState() {
     super.initState();
+    if (widget.originalZ) closureKind = 'z-session';
     load();
   }
 
@@ -115,18 +143,22 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
                     labelText: 'Document local',
                   ),
                   isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(
+                  items: [
+                    const DropdownMenuItem(
                       value: 'pre-x',
                       child: Text('Pré-X de la session'),
                     ),
-                    DropdownMenuItem(
+                    const DropdownMenuItem(
                       value: 'pre-z',
                       child: Text('Pré-Z de la journée'),
                     ),
                     DropdownMenuItem(
                       value: 'z-session',
-                      child: Text('Dernier Z (duplicata)'),
+                      child: Text(
+                        widget.originalZ && !originalRequested
+                            ? 'Z original de la clôture'
+                            : 'Dernier Z (duplicata)',
+                      ),
                     ),
                   ],
                   onChanged: busy

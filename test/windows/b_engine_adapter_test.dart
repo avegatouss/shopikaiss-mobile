@@ -117,30 +117,86 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('restaurant consultation requires login and never creates an operation', () async {
-    final before = (await store.operations()).length;
-    final result = await host.call(HostCommand.restaurantView);
-    expect(result['available'], false);
-    expect((await store.operations()).length, before);
-    await host.call(HostCommand.logout);
-    await expectLater(host.call(HostCommand.restaurantView), throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'caissier_requis')));
-  });
+  test(
+    'restaurant catalog pagination does not alter classic filters or basket',
+    () async {
+      await host.call(HostCommand.search, arguments: {'query': 'zz-no-match'});
+      final before = await host.call(HostCommand.view);
+      final page = await host.call(
+        HostCommand.restaurantCatalog,
+        arguments: {'query': '', 'limit': 1},
+      );
+      expect(page['products'], hasLength(1));
+      final next = await host.call(
+        HostCommand.restaurantCatalog,
+        arguments: {'query': '', 'limit': 1, 'offset': 1},
+      );
+      if ((next['products'] as List).isNotEmpty) {
+        expect(
+          (next['products'] as List).first['id'],
+          isNot((page['products'] as List).first['id']),
+        );
+      }
+      final after = await host.call(HostCommand.view);
+      expect(after['products'], before['products']);
+      expect(after['lines'], before['lines']);
+    },
+  );
+
+  test(
+    'restaurant consultation requires login and never creates an operation',
+    () async {
+      final before = (await store.operations()).length;
+      final result = await host.call(HostCommand.restaurantView);
+      expect(result['available'], false);
+      expect((await store.operations()).length, before);
+      await host.call(HostCommand.logout);
+      await expectLater(
+        host.call(HostCommand.restaurantView),
+        throwsA(
+          isA<HostFailure>().having((e) => e.code, 'code', 'caissier_requis'),
+        ),
+      );
+    },
+  );
 
   test('restaurant print queue remains readable when locked and writes require login', () async {
     await host.call(HostCommand.logout);
     final jobs = await host.call(HostCommand.restoPrintJobs);
     expect(jobs['jobs'], isEmpty);
     await expectLater(
-      host.call(HostCommand.restoOpen, arguments: {'table_uuid': 'unknown'}, operationId: nextId()),
-      throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'caissier_requis').having((e) => e.outcomeUnknown, 'certain refusal', false)),
+      host.call(
+        HostCommand.restoOpen,
+        arguments: {'table_uuid': 'unknown'},
+        operationId: nextId(),
+      ),
+      throwsA(
+        isA<HostFailure>()
+            .having((e) => e.code, 'code', 'caissier_requis')
+            .having((e) => e.outcomeUnknown, 'certain refusal', false),
+      ),
     );
   });
 
   test('closure documents require a logged-in operator and never enqueue a closure', () async {
     final before = (await store.operations()).length;
-    await expectLater(host.call(HostCommand.cashClosureDocument, arguments: {'kind': 'pre-x', 'version': 'detailed'}), throwsA(isA<HostFailure>()));
+    await expectLater(
+      host.call(
+        HostCommand.cashClosureDocument,
+        arguments: {'kind': 'pre-x', 'version': 'detailed'},
+      ),
+      throwsA(isA<HostFailure>()),
+    );
     await host.call(HostCommand.logout);
-    await expectLater(host.call(HostCommand.cashClosureDocument, arguments: {'kind': 'pre-x', 'version': 'detailed'}), throwsA(isA<HostFailure>().having((e) => e.code, 'code', 'operator_required')));
+    await expectLater(
+      host.call(
+        HostCommand.cashClosureDocument,
+        arguments: {'kind': 'pre-x', 'version': 'detailed'},
+      ),
+      throwsA(
+        isA<HostFailure>().having((e) => e.code, 'code', 'operator_required'),
+      ),
+    );
     expect((await store.operations()).length, before);
   });
 
@@ -154,21 +210,48 @@ void main() {
     await host.call(HostCommand.setPayment, arguments: {'method': 'especes'});
   }
 
-  test('cash documents are read-only and Z cannot disclose an unconfirmed count', () async {
-    final operation = OfflineOperation(uuid: nextId(), sequence: 1, type: 'cloture_session', number: null, date: DateTime(2026, 11, 1), operatorId: 7, content: {'compte': 5000});
-    await store.append(operation);
-    var list = await host.call(HostCommand.cashDocuments);
-    expect((list['items'] as List).single['available'], false);
-    await expectLater(host.call(HostCommand.cashDocument, arguments: {'operation_id': operation.uuid}), throwsA(isA<HostFailure>()));
-    operation.content['z'] = {'compte': 5000, 'theorique': 4900, 'ecart': 100};
-    await store.update(operation);
-    list = await host.call(HostCommand.cashDocuments);
-    expect((list['items'] as List).single['available'], true);
-    final before = (await store.operations()).length;
-    final document = await host.call(HostCommand.cashDocument, arguments: {'operation_id': operation.uuid});
-    expect((document['lines'] as List).join('\n'), contains('RAPPORT Z'));
-    expect((await store.operations()).length, before);
-  });
+  test(
+    'cash documents are read-only and Z cannot disclose an unconfirmed count',
+    () async {
+      final operation = OfflineOperation(
+        uuid: nextId(),
+        sequence: 1,
+        type: 'cloture_session',
+        number: null,
+        date: DateTime(2026, 11, 1),
+        operatorId: 7,
+        content: {'compte': 5000},
+      );
+      await store.append(operation);
+      var list = await host.call(HostCommand.cashDocuments);
+      expect((list['items'] as List).single['available'], false);
+      await expectLater(
+        host.call(
+          HostCommand.cashDocument,
+          arguments: {'operation_id': operation.uuid},
+        ),
+        throwsA(isA<HostFailure>()),
+      );
+      operation.content['z'] = {
+        'compte': 5000,
+        'theorique': 4900,
+        'ecart': 100,
+      };
+      await store.update(operation);
+      list = await host.call(HostCommand.cashDocuments);
+      expect((list['items'] as List).single['available'], true);
+      final before = (await store.operations()).length;
+      final document = await host.call(
+        HostCommand.cashDocument,
+        arguments: {'operation_id': operation.uuid},
+      );
+      expect(
+        (document['lines'] as List).join('\n'),
+        contains('RESUME SERVEUR'),
+      );
+      expect((await store.operations()).length, before);
+    },
+  );
 
   test(
     'missing server PIN is configuration failure without consuming attempts',

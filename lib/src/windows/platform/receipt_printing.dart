@@ -14,19 +14,35 @@ import '../../offline/ticket.dart';
 
 /// App-specific printer; never changes the Windows system default.
 class ReceiptPrinting {
+  static Future<int> paperWidth() async {
+    if (!await _file.exists()) return 80;
+    final settings = jsonDecode(await _file.readAsString()) as Map;
+    return settings['paper_width'] == 58 ? 58 : 80;
+  }
+
   static Future<String> printProduction(List<String> lines) async {
     // Production never falls back to PDF after an uncertain spool result.
-    if (!await _file.exists()) return 'non_envoye';
-    final saved = jsonDecode(await _file.readAsString()) as Map;
-    final printers = await Printing.listPrinters();
-    final selected = printers.where((p) => p.url == saved['url'] && p.isAvailable).firstOrNull;
-    if (selected == null) return 'non_envoye';
-    return switch (await const ProductionPrinting().send(selected.name, lines)) {
+    String name;
+    try {
+      if (!await _file.exists()) return 'non_envoye';
+      final saved = jsonDecode(await _file.readAsString()) as Map;
+      if ((saved['mode'] ?? 'raw') != 'raw') return 'non_envoye';
+      final printers = await Printing.listPrinters();
+      final selected = printers
+          .where((p) => p.url == saved['url'] && p.isAvailable)
+          .firstOrNull;
+      if (selected == null) return 'non_envoye';
+      name = selected.name;
+    } catch (_) {
+      return 'non_envoye';
+    }
+    return switch (await const ProductionPrinting().send(name, lines)) {
       RestoOutcome.transmis => 'transmis',
       RestoOutcome.nonEnvoye => 'non_envoye',
       _ => 'a_verifier',
     };
   }
+
   static File get _file =>
       File('${Platform.environment['LOCALAPPDATA']}/ShopiKaiss/printer.json');
   static Future<void> choose(BuildContext context) async {
@@ -58,6 +74,7 @@ class ReceiptPrinting {
     final saved = jsonDecode(await _file.readAsString()) as Map;
     var mode = saved['mode'] as String? ?? 'raw';
     var fallback = saved['pdf_fallback'] != false;
+    var width = saved['paper_width'] == 58 ? 58 : 80;
     if (!context.mounted) return;
     final options = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -70,6 +87,17 @@ class ReceiptPrinting {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('${saved['name']}'),
+                DropdownButtonFormField<int>(
+                  initialValue: width,
+                  decoration: const InputDecoration(
+                    labelText: 'Papier (tickets de vente après redémarrage)',
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 58, child: Text('58 mm')),
+                    DropdownMenuItem(value: 80, child: Text('80 mm')),
+                  ],
+                  onChanged: (v) => update(() => width = v ?? 80),
+                ),
                 DropdownButtonFormField<String>(
                   isExpanded: true,
                   initialValue: mode,
@@ -110,6 +138,7 @@ class ReceiptPrinting {
               onPressed: () => Navigator.pop(context, {
                 'mode': mode,
                 'pdf_fallback': fallback,
+                'paper_width': width,
               }),
               child: const Text('Enregistrer'),
             ),
@@ -179,6 +208,7 @@ class ReceiptPrinting {
       lines,
       font: font,
       a4: mode == 'pdf_a4',
+      paperWidth: saved['paper_width'] == 58 ? 58 : 80,
     );
     final sent = await Printing.directPrintPdf(
       printer: matching.first,

@@ -10,6 +10,7 @@ buildReceiptPdf(
   List<String> lines, {
   required pw.Font font,
   bool a4 = false,
+  int paperWidth = 80,
 }) async {
   if (lines.isEmpty || lines.length > 10000) {
     throw const FormatException('Ticket invalide');
@@ -22,7 +23,7 @@ buildReceiptPdf(
       pageFormat: a4
           ? PdfPageFormat.a4
           : PdfPageFormat(
-              80 * PdfPageFormat.mm,
+              paperWidth * PdfPageFormat.mm,
               double.infinity,
               marginAll: 4 * PdfPageFormat.mm,
             ),

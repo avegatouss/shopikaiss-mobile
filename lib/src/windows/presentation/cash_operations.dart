@@ -262,8 +262,15 @@ class _CashOperationsState extends State<CashOperationsDialog> {
       done = true;
       message = widget.returns
           ? 'Retour enregistré : ${result['amount_label'] ?? preview ?? ''}. Ne remboursez qu’une fois.'
-          : 'Clôture enregistrée localement. Le rapport Z sera disponible après synchronisation.';
+          : 'Clôture enregistrée localement. Le Z original est disponible immédiatement dans les documents.';
       await c.refresh();
+      if (!widget.returns && mounted) {
+        setState(() => busy = false);
+        await showDialog<void>(
+          context: context,
+          builder: (_) => CashDocumentsDialog(host: c.host, originalZ: true),
+        );
+      }
     } on HostFailure catch (e) {
       message = e.message;
       if (!recovering &&
@@ -409,9 +416,18 @@ class _CashOperationsState extends State<CashOperationsDialog> {
       actions: [
         if (done)
           TextButton.icon(
-            onPressed: busy ? null : () => showDialog<void>(context: context, builder: (_) => CashDocumentsDialog(host: c.host)),
+            onPressed: busy
+                ? null
+                : () => showDialog<void>(
+                    context: context,
+                    builder: (_) => CashDocumentsDialog(host: c.host),
+                  ),
             icon: const Icon(Icons.print),
-            label: Text(widget.returns ? 'Imprimer le bon de retour' : 'Consulter / imprimer le Z'),
+            label: Text(
+              widget.returns
+                  ? 'Imprimer le bon de retour'
+                  : 'Consulter / imprimer le Z',
+            ),
           ),
         TextButton(
           onPressed: busy ? null : () => Navigator.pop(context),

@@ -2,7 +2,9 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
 import 'lot_wholesale.dart';
+
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -383,6 +385,7 @@ class _RegisterState extends State<_Register> {
     ),
   );
   WindowsRegisterController get c => widget.controller;
+
   /// Ticket après une vente : demandé au caissier, ou imprimé d'office selon le réglage du poste.
   Future<String> _saleTicket(String operation) async {
     if (_screen.ticketMode != 'auto') {
@@ -391,8 +394,15 @@ class _RegisterState extends State<_Register> {
         builder: (context) => AlertDialog(
           title: const Text('Imprimer le ticket ?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Non')),
-            FilledButton(autofocus: true, onPressed: () => Navigator.pop(context, true), child: const Text('Imprimer')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Non'),
+            ),
+            FilledButton(
+              autofocus: true,
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Imprimer'),
+            ),
           ],
         ),
       );
@@ -407,7 +417,25 @@ class _RegisterState extends State<_Register> {
     c.saleTicket = _saleTicket;
     _display = CustomerDisplayService(c);
     unawaited(_display.start());
-    c.refresh();
+    unawaited(_enterWorkspace());
+  }
+
+  Future<void> _enterWorkspace() async {
+    await c.refresh();
+    if (!mounted || !c.ready) return;
+    try {
+      final room = await c.host.call(HostCommand.restaurantView);
+      if (mounted &&
+          (room['table_service'] == true || room['production'] == true)) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) =>
+              RestaurantDialog(host: c.host, intent: c.restaurantIntent),
+        );
+      }
+    } catch (_) {
+      /* The explicit restaurant entry retains diagnostic access. */
+    }
   }
 
   @override
@@ -444,8 +472,15 @@ class _RegisterState extends State<_Register> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Paiement indisponible'),
-          content: Text(c.message ?? 'Le paiement ne peut pas être préparé. Réessayez après vérification du panier.'),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
+          content: Text(
+            c.message ?? 'Le paiement ne peut pas être préparé. Réessayez après vérification du panier.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Compris'),
+            ),
+          ],
         ),
       );
       return;
@@ -892,9 +927,21 @@ class _RegisterState extends State<_Register> {
                           label: const Text('Calculatrice'),
                         ),
                         TextButton.icon(
-                          onPressed: c.ready && !c.busy ? () => showDialog<void>(context: context, builder: (_) => RestaurantDialog(host: c.host)) : null,
+                          onPressed: c.ready && !c.busy
+                              ? () => showDialog<void>(
+                                  context: context,
+                                  builder: (_) => RestaurantDialog(
+                                    host: c.host,
+                                    intent: c.restaurantIntent,
+                                  ),
+                                )
+                              : null,
                           icon: const Icon(Icons.table_restaurant_outlined),
-                          label: const Text('Salle et tables'),
+                          label: Text(
+                            c.productionMessage == null
+                                ? 'Salle et tables'
+                                : 'Bons à vérifier · Salle et tables',
+                          ),
                         ),
                         TextButton.icon(
                           onPressed: _shortcuts,
@@ -935,7 +982,9 @@ class _RegisterState extends State<_Register> {
               if (c.receipt != null)
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text('Vente enregistrée · ${c.receipt}${c.ticketMessage == null ? '' : ' · ${c.ticketMessage}'}'),
+                  child: Text(
+                    'Vente enregistrée · ${c.receipt}${c.ticketMessage == null ? '' : ' · ${c.ticketMessage}'}',
+                  ),
                 ),
               Expanded(
                 child: LayoutBuilder(
@@ -1120,7 +1169,12 @@ class _RegisterState extends State<_Register> {
                         children: [
                           Text('Stock : ${p['stock_label'] ?? "à vérifier"}'),
                           if (p['wholesale_price_label'] != null)
-                            Text('Gros : ${p['wholesale_price_label']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                            Text(
+                              'Gros : ${p['wholesale_price_label']}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11),
+                            ),
                           ProductBadges(product: p),
                         ],
                       ),
@@ -1210,7 +1264,12 @@ class _RegisterState extends State<_Register> {
                               ),
                               const SizedBox(height: 4),
                               if (p['wholesale_price_label'] != null)
-                                Text('Gros : ${p['wholesale_price_label']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                                Text(
+                                  'Gros : ${p['wholesale_price_label']}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
                               ProductBadges(product: p),
                               Text(
                                 p['stock_label'] as String? ??
@@ -1487,7 +1546,9 @@ class _RegisterState extends State<_Register> {
                     padding: const EdgeInsets.all(12),
                   ),
                   icon: const Icon(Icons.payments_outlined),
-                  label: Text(_allowed('pass') ? 'Scanner le pass (F4)' : 'Payer (F4)'),
+                  label: Text(
+                    _allowed('pass') ? 'Scanner le pass (F4)' : 'Payer (F4)',
+                  ),
                 ),
               ),
             ],

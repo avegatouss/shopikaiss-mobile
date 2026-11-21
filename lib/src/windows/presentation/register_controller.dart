@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../ipc/protocol.dart';
 import '../platform/sale_intent.dart';
+import '../platform/restaurant_intent.dart';
 
 /// Presentation only. The engine owns totals, permissions and durable drafts.
 class WindowsRegisterController extends ChangeNotifier {
@@ -31,12 +33,24 @@ class WindowsRegisterController extends ChangeNotifier {
     );
   }
   final WindowsHost host;
+  String? productionMessage;
+  void productionStatus(String? message) {
+    if (_disposed || productionMessage == message) return;
+    productionMessage = message;
+    notifyListeners();
+  }
 
   /// Ticket d'une vente enregistrée, selon le réglage du poste ; rend le message à afficher.
   Future<String> Function(String operation)? saleTicket;
   String? ticketMessage;
   String? _ticketOperation;
   final SaleIntentJournal? journal;
+  late final restaurantIntent = RestaurantIntent(
+    host,
+    file: journal == null
+        ? null
+        : File('${journal!.file.parent.path}/pending-restaurant-v1.json'),
+  );
   Future<void>? _recovery;
   bool _journalBlocked = false;
 

@@ -4,6 +4,14 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:shopikaiss_terminal/src/windows/platform/receipt_pdf.dart';
 
 void main() {
+  test('58 mm paper uses the chosen roll width', () async {
+    final receipt = await buildReceiptPdf(
+      ['TOTAL : 1000 F'],
+      font: pw.Font.helvetica(),
+      paperWidth: 58,
+    );
+    expect(receipt.format.width, 58 * PdfPageFormat.mm);
+  });
   test('A4 mode keeps A4 paper instead of roll dimensions', () async {
     final receipt = await buildReceiptPdf(
       ['TEST A4'],

@@ -19,11 +19,39 @@ class _Adapter implements WindowsEngineAdapter {
   ) async {
     calls.add(command.name);
     if (arguments['fail'] == true) throw StateError('private secret');
+    if (arguments['large'] == true) {
+      return {'data': 'a' * (maxIpcFrameBytes + 1)};
+    }
     return {'state': 'committed', 'operation_id': operationId};
   }
 }
 
 void main() {
+  test(
+    'oversized reply after executed mutation never proves not committed',
+    () async {
+      final adapter = _Adapter();
+      final replies = <List<int>>[];
+      await WindowsHostServer(adapter).serve(
+        Stream.value(
+          encodeFrame({
+            'kind': 'request',
+            'id': '1',
+            'command': 'restoEditLines',
+            'operation_id': 'stable-id',
+            'arguments': {'large': true},
+          }),
+        ),
+        replies.add,
+      );
+      final response = (await decodeFrames(
+        Stream.fromIterable(replies),
+      ).toList()).single;
+      expect(adapter.calls, ['restoEditLines']);
+      expect(response['ok'], false);
+      expect(response['error']['not_committed'], false);
+    },
+  );
   test(
     'decodes fragmented UTF-8 frames and rejects unsupported versions',
     () async {
@@ -93,6 +121,25 @@ void main() {
   );
 
   final dart = Platform.environment['SHOPIKAISS_DART_EXECUTABLE'];
+  for (final command in [
+    HostCommand.restoEditLines,
+    HostCommand.restoSettle,
+    HostCommand.restoRefund,
+  ]) {
+    test('lost reply for ${command.name} remains uncertain', () async {
+      final host = await ProcessWindowsHost.start(
+        dart!,
+        arguments: ['test/windows/fixtures/host_process.dart', 'lose-reply'],
+      );
+      addTearDown(host.close);
+      await expectLater(
+        host.call(command, operationId: 'stable-id'),
+        throwsA(
+          isA<HostFailure>().having((e) => e.outcomeUnknown, 'uncertain', true),
+        ),
+      );
+    });
+  }
   test(
     'repeated close never reports success while child is still alive',
     () async {

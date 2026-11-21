@@ -33,7 +33,14 @@ class EngineHostBusy implements Exception {
 /// - Synchronisation planifiée périodiquement, jamais attendue par une commande ; la fermeture attend la
 ///   synchronisation et les commandes en cours, puis ferme la base et libère le verrou.
 class EngineHost {
-  EngineHost._(this.directory, this._lock, this.store, this.engine, this.adapter, this._ownedTransport);
+  EngineHost._(
+    this.directory,
+    this._lock,
+    this.store,
+    this.engine,
+    this.adapter,
+    this._ownedTransport,
+  );
 
   final String directory;
   final RandomAccessFile _lock;
@@ -50,7 +57,11 @@ class EngineHost {
   /// Dossier par défaut : `%LOCALAPPDATA%\ShopiKaiss\caisse`.
   static String defaultDirectory() {
     final local = Platform.environment['LOCALAPPDATA'];
-    if (local == null || local.isEmpty) throw StateError('LOCALAPPDATA introuvable : dossier de la caisse à préciser (--dossier).');
+    if (local == null || local.isEmpty) {
+      throw StateError(
+        'LOCALAPPDATA introuvable : dossier de la caisse à préciser (--dossier).',
+      );
+    }
     return p.join(local, 'ShopiKaiss', 'caisse');
   }
 
@@ -64,9 +75,12 @@ class EngineHost {
     int paperWidth = 80,
     Duration? syncEvery = const Duration(minutes: 1),
   }) async {
-    if (!p.isAbsolute(directory)) throw ArgumentError('Dossier de la caisse non absolu : $directory');
+    if (!p.isAbsolute(directory)) {
+      throw ArgumentError('Dossier de la caisse non absolu : $directory');
+    }
     await Directory(directory).create(recursive: true);
-    final lock = await File(p.join(directory, lockName)).open(mode: FileMode.append);
+    final lock = await File(p.join(directory, lockName))
+        .open(mode: FileMode.append);
     try {
       await lock.lock(FileLock.exclusive);
     } on FileSystemException {
@@ -76,7 +90,10 @@ class EngineHost {
     final ownedTransport = transport == null ? HttpV2Transport() : null;
     SqfliteOfflineStore? openedStore;
     try {
-      final store = openedStore = await SqfliteOfflineStore.open(name: p.join(directory, databaseName), factory: factory);
+      final store = openedStore = await SqfliteOfflineStore.open(
+        name: p.join(directory, databaseName),
+        factory: factory,
+      );
       final engine = V2Engine.onStore(
         store,
         transport: transport ?? ownedTransport!,
@@ -86,13 +103,22 @@ class EngineHost {
         pinVerifier: pinVerifier,
         declaredPayments: true,
         contract21: true,
+        announceRestaurant: true,
         imageDirectory: p.join(directory, 'images'),
       );
+      engine.restoTicketColumns = paperWidth == 58 ? 32 : 48;
       final origin = await engine.storedOrigin();
       if (origin != null) await engine.load(origin);
       final adapter = LocalRegisterAdapter(engine, paperWidth: paperWidth);
       await adapter.start();
-      final host = EngineHost._(directory, lock, store, engine, adapter, ownedTransport);
+      final host = EngineHost._(
+        directory,
+        lock,
+        store,
+        engine,
+        adapter,
+        ownedTransport,
+      );
       if (syncEvery != null) {
         host._timer = Timer.periodic(syncEvery, (_) {
           if (engine.paired) adapter.scheduleSynchronization();
@@ -110,7 +136,10 @@ class EngineHost {
   }
 
   /// Sert les commandes jusqu'à la fin de [input] (EOF : l'interface a fermé le canal), puis ferme proprement.
-  Future<void> serve(Stream<List<int>> input, void Function(List<int>) write) async {
+  Future<void> serve(
+    Stream<List<int>> input,
+    void Function(List<int>) write,
+  ) async {
     try {
       await WindowsHostServer(BEngineAdapter(adapter)).serve(input, write);
     } finally {

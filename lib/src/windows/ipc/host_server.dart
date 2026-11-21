@@ -35,6 +35,7 @@ class WindowsHostServer {
         if (request['kind'] != 'request' || id is! String || id.length > 128) {
           throw const FormatException('Invalid request');
         }
+        var completed = false;
         try {
           final command = HostCommand.values
               .where((c) => c.name == request['command'])
@@ -65,6 +66,7 @@ class WindowsHostServer {
             request['arguments'] as Map<String, dynamic>,
             operation as String?,
           );
+          completed = true;
           write(
             encodeFrame({
               'kind': 'response',
@@ -82,7 +84,7 @@ class WindowsHostServer {
               'error': {
                 'code': error.code,
                 'message': error.message,
-                'not_committed': !error.outcomeUnknown,
+                'not_committed': !completed && !error.outcomeUnknown,
               },
             }),
           );
