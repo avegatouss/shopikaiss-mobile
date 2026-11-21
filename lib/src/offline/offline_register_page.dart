@@ -17,10 +17,12 @@ import '../web/shop_browser_policy.dart';
 import '../windows/presentation/brand_logo.dart';
 import '../windows/presentation/calculator.dart';
 import '../windows/presentation/searchable_choice.dart';
+import 'customer_display.dart';
 import 'engine.dart';
 import 'models.dart';
 import 'money.dart';
 import 'pass_sheet.dart';
+import 'payment_dialog.dart';
 import 'pending_operations_page.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
@@ -35,7 +37,7 @@ const _offline = Color(0xFFB45309);
 ///
 /// [onBackOnline] est appelé quand la boutique répond de nouveau et que la file est vide (retour à la caisse web).
 class OfflineRegisterPage extends StatefulWidget {
-  const OfflineRegisterPage({super.key, required this.engine, required this.session, required this.onBackOnline, this.onOpenSettings});
+  const OfflineRegisterPage({super.key, required this.engine, required this.session, required this.onBackOnline, this.onOpenSettings, this.customerDisplay});
 
   final CaisseEngine engine;
   final TerminalSession session;
@@ -43,6 +45,9 @@ class OfflineRegisterPage extends StatefulWidget {
 
   /// Réglages de l'application (code administrateur compris).
   final Future<void> Function()? onOpenSettings;
+
+  /// Afficheur client imposé (tests) ; sinon le second écran du terminal s'il en a un, rien sans second écran.
+  final CustomerDisplayPush? customerDisplay;
 
   @override
   State<OfflineRegisterPage> createState() => _OfflineRegisterPageState();
@@ -52,8 +57,104 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   final _search = TextEditingController();
   final _scanInput = TextEditingController();
   final _searchFocus = FocusNode();
+
+  /// Champ « Rechercher un produit » (Ctrl+F) ; [_searchFocus] est celui du scanner (F2).
+  final _productSearchFocus = FocusNode();
   final List<CartLine> _cart = [];
   final CartTier _tier = CartTier();
+
+  /// Afficheur client hors ligne : panier, paiement en cours, merci, accueil (même état que la page web de l'afficheur).
+  late final _display = OfflineCustomerDisplay(_displayPush);
+  PaymentProgress? _displayPayment;
+  Map<String, dynamic>? _displayCompleted;
+  Timer? _completedTimer;
+
+  CustomerDisplayPush? _displayPush() {
+    if (widget.customerDisplay != null) return widget.customerDisplay;
+    final session = widget.session;
+    if (!session.info.hasSecondaryDisplay) return null;
+    final page = customerDisplayPage(_snapshot?.store.name ?? 'ShopiKaiss');
+    return (state) async {
+      await session.channel.pushCustomerDisplay(customerDisplayScript(state), page);
+    };
+  }
+
+  /// État du second écran d'après la caisse affichée ; rien sur les écrans restaurant (ils gardent leur panier).
+  void _publishDisplay() {
+    if (!mounted) return;
+    final snapshot = _snapshot;
+    if (snapshot == null || _floor) return;
+    if (_cart.isNotEmpty) {
+      _completedTimer?.cancel();
+      _displayCompleted = null;
+    }
+    final completed = _displayCompleted;
+    if (completed != null) return _display.publish(completed);
+    if (_cart.isEmpty || !_registerShown) return _display.publish(customerDisplayState(phase: 'idle'));
+    final payment = _displayPayment;
+    _display.publish(customerDisplayState(phase: payment == null ? 'cart' : 'payment', lines: _cart, totals: _totals(snapshot), payment: payment?.toDisplay()));
+  }
+
+  /// La caisse de vente est à l'écran (caissier identifié, session ouverte, hors plan de salle).
+  bool get _registerShown => _engine.blockReason == null && _snapshot != null && _operator != null && _engine.sessionOpen && !_floor;
+
+  /// Raccourcis clavier des terminaux à clavier physique, mêmes touches que la caisse Windows (`register_app.dart`).
+  /// Seulement quand la caisse est la page au premier plan (aucune fenêtre ouverte) ; la douchette (chiffres + Entrée)
+  /// et la saisie dans les champs ne sont pas touchées.
+  bool _onKey(KeyEvent event) {
+    if (event is! KeyDownEvent || !mounted || !(ModalRoute.of(context)?.isCurrent ?? false)) return false;
+    final key = event.logicalKey;
+    final control = HardwareKeyboard.instance.isControlPressed;
+    final snapshot = _snapshot;
+    if (key == LogicalKeyboardKey.f1) {
+      unawaited(_shortcutsHelp());
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f11) {
+      _toggleFullscreen();
+      return true;
+    }
+    if (!_registerShown || snapshot == null) return false;
+    if (key == LogicalKeyboardKey.f2) {
+      if (_compact && _compactTab != 0) setState(() => _compactTab = 0);
+      _searchFocus.requestFocus();
+      return true;
+    }
+    if (control && key == LogicalKeyboardKey.keyF) {
+      if (_compact && _compactTab != 0) setState(() => _compactTab = 0);
+      _productSearchFocus.requestFocus();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f4) {
+      if (_cart.isNotEmpty) unawaited(_checkout(snapshot, _totals(snapshot).payable));
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f8) {
+      if (_cart.isNotEmpty) unawaited(_suspendCart());
+      return true;
+    }
+    return false;
+  }
+
+  bool _fullscreen = true;
+
+  /// F11 : barres d'Android masquées (plein écran, comme la caisse web) ou affichées.
+  void _toggleFullscreen() {
+    _fullscreen = !_fullscreen;
+    unawaited(SystemChrome.setEnabledSystemUIMode(_fullscreen ? SystemUiMode.immersiveSticky : SystemUiMode.edgeToEdge));
+  }
+
+  Future<void> _shortcutsHelp() => showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Raccourcis de la caisse'),
+      content: const Text(
+        'F1 : cette aide\nF2 : scanner un article\nCtrl+F : rechercher un produit\nF4 : ouvrir le paiement\nF8 : mettre le panier en attente\n'
+        'F11 : afficher / masquer les barres d’Android\nEntrée : valider la saisie du montant\nÉchap : fermer une fenêtre lorsque permis',
+      ),
+      actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer'))],
+    ),
+  );
 
   /// Identifiant du panier en cours : consommé par la vente dans la même transaction, renouvelé après l'encaissement.
   /// Un second encaissement du même panier (double appui, écran rejoué) est refusé par la base.
@@ -156,6 +257,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     super.initState();
     _engine.addListener(_changed);
     FocusManager.instance.addListener(_syncKeyboard);
+    HardwareKeyboard.instance.addHandler(_onKey);
     final rules = _snapshot?.rules;
     _probe = Timer.periodic(Duration(seconds: rules?.probeSeconds ?? 20), (_) => _tryOnline(automatic: true));
     if (rules != null && !rules.pinRequired) _operator = _snapshot!.operatorById(_snapshot!.lastOperatorId);
@@ -170,9 +272,18 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _probe?.cancel();
     _engine.removeListener(_changed);
     FocusManager.instance.removeListener(_syncKeyboard);
+    HardwareKeyboard.instance.removeHandler(_onKey);
+    _completedTimer?.cancel();
+    // Retour à la caisse web : le second écran reprend la page d'afficheur de la boutique (dernier lien reçu).
+    final session = widget.session;
+    final url = session.displayUrlFor(session.lastDisplayUrl ?? '');
+    if (_display.used && widget.customerDisplay == null && url.isNotEmpty) {
+      unawaited(session.channel.showCustomerDisplay(url, session.settings.origin).then<void>((_) {}, onError: (Object _) {}));
+    }
     _search.dispose();
     _scanInput.dispose();
     _searchFocus.dispose();
+    _productSearchFocus.dispose();
     super.dispose();
   }
 
@@ -965,6 +1076,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Widget build(BuildContext context) {
     final snapshot = _snapshot;
     final reason = _engine.blockReason;
+    // Afficheur client : l'état affiché suit chaque reconstruction de la caisse (envoyé seulement s'il a changé).
+    WidgetsBinding.instance.addPostFrameCallback((_) => _publishDisplay());
     return PopScope(
       canPop: false,
       child: Theme(
@@ -1352,6 +1465,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               Expanded(
                 child: TextField(
                   controller: _search,
+                  focusNode: _productSearchFocus,
                   decoration: InputDecoration(
                     isDense: true,
                     filled: true,
@@ -2052,21 +2166,38 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       approval = await _askApproval(globalDiscount);
       if (approval == null || !mounted) return;
     }
-    final payments = passes != null
-        ? const <CartPayment>[]
-        : _compact
-        ? await Navigator.of(context).push<List<CartPayment>>(
-            MaterialPageRoute(
-              fullscreenDialog: true,
-              builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable, cashDue: _engine.cashDue, fullScreen: true),
-            ),
-          )
-        : await showDialog<List<CartPayment>>(
-            context: context,
-            barrierDismissible: false,
-            builder: (_) => _PaymentDialog(snapshot: snapshot, payable: payable, cashDue: _engine.cashDue),
-          );
-    if (payments == null || !mounted) return;
+    // Répartition validée par le moteur avant de fermer la fenêtre : un refus s'affiche sur les lignes saisies.
+    String? check(List<CartPayment> payments) {
+      try {
+        _engine.checkSale(snapshot, _cart, payments, SaleExtras(globalDiscount: globalDiscount, delivery: _delivery));
+        return null;
+      } on OfflineRefusal catch (e) {
+        return e.message;
+      }
+    }
+
+    OfflinePaymentDialog dialog({bool fullScreen = false}) => OfflinePaymentDialog(
+      methods: snapshot.methods,
+      payable: payable,
+      cashDue: _engine.cashDue,
+      fullScreen: fullScreen,
+      check: check,
+      onProgress: (progress) {
+        _displayPayment = progress;
+        _publishDisplay();
+      },
+    );
+    final List<CartPayment>? payments;
+    try {
+      payments = passes != null
+          ? const <CartPayment>[]
+          : _compact
+          ? await Navigator.of(context).push<List<CartPayment>>(MaterialPageRoute(fullscreenDialog: true, builder: (_) => dialog(fullScreen: true)))
+          : await showDialog<List<CartPayment>>(context: context, barrierDismissible: false, builder: (_) => dialog());
+    } finally {
+      _displayPayment = null;
+    }
+    if (payments == null || !mounted) return _publishDisplay();
     final OfflineOperation operation;
     try {
       final totals = _totals(snapshot);
@@ -2110,6 +2241,27 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final lines = List.of(_cart);
     // Vente par pass : les paiements sont ceux que le moteur a répartis entre les passes.
     final paid = passes == null ? payments : _engine.ticketParts(operation).$2;
+    // Afficheur client : « Merci », total réglé et rendu, jusqu'à l'article suivant (20 s au plus).
+    final rendered = paid.fold<int>(0, (sum, p) => sum + p.change);
+    _displayCompleted = customerDisplayState(
+      phase: 'completed',
+      total: payable,
+      saleNumber: operation.number,
+      payment: {
+        'amount_due': payable,
+        'paid': payable,
+        'received': paid.fold<int>(0, (sum, p) => sum + (p.method.isCash ? (p.received ?? p.cashDue) : p.amount)),
+        'change': rendered,
+        'remaining': 0,
+        'methods': [for (final p in paid) {'name': p.method.name, 'amount': p.amount}],
+        'qr': const <Map<String, dynamic>>[],
+      },
+    );
+    _completedTimer?.cancel();
+    _completedTimer = Timer(const Duration(seconds: 20), () {
+      _displayCompleted = null;
+      _publishDisplay();
+    });
     setState(() {
       _clearCart();
       _draftUuid = const Uuid().v4();
@@ -2120,7 +2272,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (session.hasPrinter && paid.any((p) => p.method.isCash)) unawaited(session.channel.openDrawer());
     var printed = _look.ticketMode == 'auto';
     if (printed) await _print(snapshot, operation, lines, paid);
-    final change = paid.fold<int>(0, (sum, p) => sum + p.change);
+    final change = rendered;
     if (!mounted) return;
     await showDialog<void>(
       context: context,
@@ -2568,200 +2720,5 @@ class _SessionOpeningState extends State<_SessionOpening> {
     } on OfflineRefusal catch (e) {
       setState(() => _error = e.message);
     }
-  }
-}
-
-/// Encaissement : un ou plusieurs moyens autorisés hors ligne ; les espèces calculent la monnaie.
-class _PaymentDialog extends StatefulWidget {
-  const _PaymentDialog({required this.snapshot, required this.payable, required this.cashDue, this.fullScreen = false});
-
-  final Snapshot snapshot;
-  final int payable;
-
-  /// Montant dû au tiroir pour une ligne d'espèces (arrondi de caisse de la boutique).
-  final int Function(int amount) cashDue;
-
-  /// Petit téléphone : page plein écran qui défile, boutons en bas (au lieu d'une boîte de dialogue).
-  final bool fullScreen;
-
-  @override
-  State<_PaymentDialog> createState() => _PaymentDialogState();
-}
-
-class _PaymentDialogState extends State<_PaymentDialog> {
-  final List<CartPayment> _payments = [];
-  late PaymentMethodInfo _method = widget.snapshot.methods.first;
-  final _amount = TextEditingController();
-  final _received = TextEditingController();
-  final _reference = TextEditingController();
-  String? _error;
-
-  int get _remaining => widget.payable - _payments.fold<int>(0, (sum, p) => sum + p.amount);
-
-  @override
-  void initState() {
-    super.initState();
-    _reset();
-  }
-
-  void _reset() {
-    _amount.text = '$_remaining';
-    _received.text = '';
-    _reference.text = '';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final cash = _method.isCash;
-    final received = int.tryParse(_received.text);
-    final amount = int.tryParse(_amount.text) ?? 0;
-    final title = Text('Encaisser ${formatFcfa(widget.payable)}');
-    final content = Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (final p in _payments)
-          ListTile(
-            dense: true,
-            title: Text(p.method.name),
-            subtitle: p.change > 0
-                ? Text('reçu ${formatFcfa(p.received!)} · monnaie ${formatFcfa(p.change)}')
-                : (p.reference != null ? Text('réf. ${p.reference}') : null),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(formatFcfa(p.amount)),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => setState(() {
-                    _payments.remove(p);
-                    _reset();
-                  }),
-                ),
-              ],
-            ),
-          ),
-        if (_remaining > 0) ...[
-          Wrap(
-            spacing: 6,
-            children: [
-              for (final m in widget.snapshot.methods)
-                ChoiceChip(label: Text(m.name), selected: m.code == _method.code, onSelected: (_) => setState(() => _method = m)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _amount,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: InputDecoration(labelText: 'Montant réglé (reste ${formatFcfa(_remaining)})'),
-            onChanged: (_) => setState(() {}),
-          ),
-          if (cash)
-            TextField(
-              controller: _received,
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: InputDecoration(
-                labelText: 'Espèces reçues',
-                helperText: [
-                  if (widget.cashDue(amount) != amount) 'À encaisser : ${formatFcfa(widget.cashDue(amount))}',
-                  if (received != null && received > widget.cashDue(amount)) 'Monnaie : ${formatFcfa(received - widget.cashDue(amount))}',
-                ].join(' · '),
-              ),
-              onChanged: (_) => setState(() {}),
-              onSubmitted: (_) => _addPayment(),
-            ),
-          if (!cash)
-            TextField(
-              controller: _reference,
-              maxLength: 100,
-              decoration: const InputDecoration(labelText: 'Référence de la transaction (facultative)', counterText: ''),
-              onSubmitted: (_) => _addPayment(),
-            ),
-          if (cash)
-            Wrap(
-              spacing: 6,
-              children: [
-                for (final note in _quickNotes(amount))
-                  ActionChip(label: Text(formatFcfa(note)), onPressed: () => setState(() => _received.text = '$note')),
-              ],
-            ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(onPressed: _addPayment, icon: const Icon(Icons.add), label: const Text('Ajouter ce paiement')),
-        ],
-        if (_error != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(_error!, style: const TextStyle(color: Colors.red)),
-          ),
-      ],
-    );
-    final cancel = TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler'));
-    final validate = FilledButton(
-      onPressed: () {
-        if (_remaining > 0 && !_addPayment()) return;
-        if (_remaining == 0) Navigator.pop(context, _payments);
-      },
-      child: const Text('Valider la vente'),
-    );
-    if (widget.fullScreen) {
-      return Scaffold(
-        appBar: AppBar(title: title, automaticallyImplyLeading: false),
-        body: SingleChildScrollView(padding: const EdgeInsets.all(16), child: content),
-        bottomNavigationBar: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Row(
-              children: [
-                Expanded(child: cancel),
-                const SizedBox(width: 8),
-                Expanded(flex: 2, child: SizedBox(height: 52, child: validate)),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
-    return AlertDialog(
-      title: title,
-      content: SizedBox(width: 420, child: content),
-      actions: [cancel, validate],
-    );
-  }
-
-  List<int> _quickNotes(int amount) {
-    final notes = <int>{amount};
-    for (final step in [500, 1000, 2000, 5000, 10000]) {
-      final rounded = ((amount + step - 1) ~/ step) * step;
-      if (rounded > amount) notes.add(rounded);
-    }
-    return notes.take(5).toList();
-  }
-
-  bool _addPayment() {
-    final amount = int.tryParse(_amount.text) ?? 0;
-    if (amount <= 0 || amount > _remaining) {
-      setState(() => _error = 'Montant entre 1 et ${formatFcfa(_remaining)}.');
-      return false;
-    }
-    if (_method.isCash && _payments.any((p) => p.method.isCash)) {
-      setState(() => _error = 'Une seule ligne d’espèces par vente : retirez la précédente pour la modifier.');
-      return false;
-    }
-    final due = widget.cashDue(amount);
-    final received = _method.isCash ? (int.tryParse(_received.text) ?? due) : null;
-    if (received != null && received < due) {
-      setState(() => _error = 'Espèces reçues inférieures au montant.');
-      return false;
-    }
-    setState(() {
-      final reference = _reference.text.trim();
-      _payments.add(CartPayment(method: _method, amount: amount, received: received, cashDue: due, reference: _method.isCash || reference.isEmpty ? null : reference));
-      _error = null;
-      _reset();
-    });
-    return true;
   }
 }

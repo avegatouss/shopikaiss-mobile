@@ -100,6 +100,33 @@ class CustomerDisplayController(
     }
 
     /**
+     * Caisse hors ligne : remet un état du panier à la page affichée (`ShopiKaissDisplay.push`, page web de l'afficheur
+     * chargée avant la coupure), sans réseau. Si l'écran ne montre aucune page d'afficheur (démarrage sans réseau, page
+     * en erreur), la page locale [html] est ouverte et reçoit l'état dès qu'elle est prête. Renvoie le code d'erreur, ou null.
+     */
+    fun push(script: String, html: String): String? {
+        val display = secondaryDisplay() ?: return "no_secondary_display"
+        val current = presentation
+        if (current != null && current.isShowing && current.display.displayId == display.displayId) {
+            current.push(script, html)
+            return null
+        }
+        dismiss()
+        return try {
+            CustomerPresentation(activity, display, allowedOrigin.orEmpty(), onPageError).also {
+                it.show()
+                it.loadLocal(html, script)
+                presentation = it
+            }
+            LocalLog.i("Afficheur client hors ligne ouvert sur l'écran ${display.displayId}")
+            null
+        } catch (e: WindowManager.InvalidDisplayException) {
+            LocalLog.e("Écran ${display.displayId} invalide", e)
+            "display_invalid"
+        }
+    }
+
+    /**
      * Rafraîchit l'afficheur (bouton « Afficheur » de la caisse) : recharge la page affichée à son URL courante (jeton
      * renouvelé par la page), sinon rouvre la dernière URL demandée. Renvoie le code d'erreur, ou null.
      */
@@ -147,6 +174,9 @@ class CustomerDisplayController(
     ) : Presentation(context, display) {
         private var webView: WebView? = null
 
+        /** Page locale en cours de chargement : dernier état à lui remettre quand elle sera prête. */
+        private var pendingScript: String? = null
+
         @SuppressLint("SetJavaScriptEnabled")
         override fun onCreate(savedInstanceState: Bundle?) {
             super.onCreate(savedInstanceState)
@@ -166,13 +196,44 @@ class CustomerDisplayController(
                 override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, response: WebResourceResponse) {
                     if (request.isForMainFrame && response.statusCode >= 400) onPageError(response.statusCode)
                 }
+
+                // Page locale chargée (about:blank / data:) : elle reçoit l'état en attente. La fin d'une page web en
+                // erreur, remplacée entre-temps, ne le consomme pas.
+                override fun onPageFinished(view: WebView, url: String?) {
+                    if (url != null && (url.startsWith("http:") || url.startsWith("https:"))) return
+                    val script = pendingScript ?: return
+                    pendingScript = null
+                    view.evaluateJavascript(script, null)
+                }
             }
             setContentView(wv)
             webView = wv
         }
 
         fun load(url: String) {
+            pendingScript = null
             if (webView?.url != url) webView?.loadUrl(url) else webView?.reload()
+        }
+
+        /** Page locale de l'afficheur (sans réseau), puis l'état [script] une fois chargée. */
+        fun loadLocal(html: String, script: String) {
+            pendingScript = script
+            webView?.loadDataWithBaseURL(null, html, "text/html", "utf-8", null)
+        }
+
+        /**
+         * État remis à la page affichée ; une page qui n'est pas un afficheur (erreur réseau, page vide) répond
+         * `"absent"` et laisse place à la page locale. Pendant le chargement de celle-ci, seul le dernier état est gardé.
+         */
+        fun push(script: String, html: String) {
+            val wv = webView ?: return
+            if (pendingScript != null) {
+                pendingScript = script
+                return
+            }
+            wv.evaluateJavascript(script) { outcome ->
+                if (outcome != "\"ok\"" && pendingScript == null && webView === wv) loadLocal(html, script)
+            }
         }
 
         fun reload() {
