@@ -382,7 +382,7 @@ void main() {
       expect(model.bottom, ['pied', 'paiements', 'operations', 'fne']);
       final text = render(model).join(' | ');
       expect(text, contains('TICKET HORS LIGNE'));
-      expect(text, contains('Numero definitif attribue'), reason: 'la mention provisoire ne se perd jamais');
+      expect(text, isNot(contains('Numero definitif attribue')), reason: 'mention technique retirée à la demande utilisateur ; numéro local conservé');
       expect(text.indexOf('Merci, a bientot'), lessThan(text.indexOf('Monnaie rendue')));
       expect(render(model).length, lessThan(origin.length), reason: 'compact : une ligne par article');
 

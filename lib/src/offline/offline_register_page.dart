@@ -19,6 +19,7 @@ import '../windows/presentation/calculator.dart';
 import '../windows/presentation/searchable_choice.dart';
 import 'customer_display.dart';
 import 'engine.dart';
+import 'local_prices.dart';
 import 'models.dart';
 import 'money.dart';
 import 'pass_sheet.dart';
@@ -252,10 +253,50 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   bool get _compact => widget.session.isCompact(context);
   Snapshot? get _snapshot => _engine.snapshot;
 
+  /// Prix mémorisés de ce terminal (même règle et même clé que Windows, voir [LocalPrices]).
+  LocalPrices _localPrices = LocalPrices.empty;
+
+  Future<void> _reloadLocalPrices() async {
+    final value = await LocalPrices.read(_engine);
+    if (mounted) setState(() => _localPrices = value);
+  }
+
+  /// Prix affiché au catalogue : le prix mémorisé s'il s'applique à ce caissier, sinon le prix habituel.
+  int _shownPrice(Product product) => _localPrices.priceFor(_engine, _operator, CartLine(product: product)) ?? product.price;
+
+  bool get _canRememberPrices => _operator != null && _engine.editablePriceSupported && _engine.hasRight(_operator!, 'prix_vente_modifier');
+
+  Future<void> _toggleLocalPrices() async {
+    final enabling = !_localPrices.enabled;
+    if (!enabling && _localPrices.prices.isNotEmpty) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Ne plus mémoriser les prix ?'),
+          content: Text('Les ${_localPrices.prices.length} prix mémorisés sur ce terminal seront oubliés. Les paniers en cours gardent leurs prix.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Oublier les prix')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    try {
+      final value = await LocalPrices.setEnabled(_engine, _operator, enabling);
+      if (!mounted) return;
+      setState(() => _localPrices = value);
+      _toast(enabling ? 'Les prix saisis seront repris au prochain ajout du produit sur ce terminal.' : 'Prix mémorisés oubliés.');
+    } on StateError catch (e) {
+      _toast(e.message);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _engine.addListener(_changed);
+    unawaited(_reloadLocalPrices());
     FocusManager.instance.addListener(_syncKeyboard);
     HardwareKeyboard.instance.addHandler(_onKey);
     final rules = _snapshot?.rules;
@@ -1294,6 +1335,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _openShopWeb(admin: false);
       } else if (choice == 'reglages') {
         _openSettings();
+      } else if (choice == 'prix_locaux') {
+        _toggleLocalPrices();
       }
     },
     itemBuilder: (context) => [
@@ -1302,6 +1345,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       const PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
       if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
+      if (_canRememberPrices) CheckedPopupMenuItem(value: 'prix_locaux', checked: _localPrices.enabled, child: const Text('Mémoriser les prix saisis')),
       if (_operator != null && _engine.canCloseSession(_operator!))
         PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
       if (_operator != null && (_engine.sessionOpen || _engine.canCloseSession(_operator!)))
@@ -1646,7 +1690,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           ?_wholesaleHint(product),
         ],
       ),
-      trailing: Text(formatFcfa(product.price), style: const TextStyle(fontWeight: FontWeight.bold)),
+      trailing: Text(formatFcfa(_shownPrice(product)), style: const TextStyle(fontWeight: FontWeight.bold)),
       onTap: () => _add(product, null),
     );
   }
@@ -1691,7 +1735,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     child: FittedBox(
                       fit: BoxFit.scaleDown,
                       alignment: Alignment.centerLeft,
-                      child: Text(formatFcfa(product.price), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                      child: Text(formatFcfa(_shownPrice(product)), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                     ),
                   ),
                   CircleAvatar(radius: 12, backgroundColor: _palette.primary, child: const Icon(Icons.add, size: 16, color: Colors.white)),
@@ -1735,19 +1779,25 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         builder: (context) => SimpleDialog(
           title: Text(product.name),
           children: [
-            SimpleDialogOption(onPressed: () => Navigator.pop(context, null), child: Text('À l’unité — ${formatFcfa(product.price)}')),
+            SimpleDialogOption(onPressed: () => Navigator.pop(context, null), child: Text('À l’unité — ${formatFcfa(_shownPrice(product))}')),
             for (final p in product.packagings)
               SimpleDialogOption(onPressed: () => Navigator.pop(context, p), child: Text('${p.name} — ${formatFcfa(p.price)}')),
           ],
         ),
       );
     }
+    // Prix mémorisé : repris seulement si le moteur accepte un prix saisi sur cette ligne pour ce caissier.
+    final remembered = await LocalPrices.read(_engine);
+    if (!mounted) return;
     setState(() {
+      _localPrices = remembered;
       final existing = _cart.where((l) => l.product.id == product.id && l.packaging?.id == chosen?.id && l.lot == null).firstOrNull;
       if (existing != null) {
         existing.quantity += BigInt.from(1000000);
       } else {
-        _cart.add(CartLine(product: product, packaging: chosen, tier: _tier));
+        final line = CartLine(product: product, packaging: chosen, tier: _tier);
+        line.enteredPrice = remembered.priceFor(_engine, _operator, line);
+        _cart.add(line);
       }
     });
     _searchFocus.requestFocus();
@@ -2127,6 +2177,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     line.discountEntry = null;
                   }
                 });
+                if (priceEditable) {
+                  unawaited(LocalPrices.remember(_engine, line.product.id, line.enteredPrice).then((changed) => changed ? _reloadLocalPrices() : null));
+                }
                 Navigator.pop(context);
               },
               child: const Text('Valider'),

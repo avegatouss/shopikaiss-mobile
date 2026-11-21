@@ -1851,7 +1851,17 @@ class V2Engine extends CaisseEngine {
     final changesSeconds = ((_state?['delais'] as Map?)?['changements_secondes'] as int?) ?? 60;
     final raw = <String, dynamic>{
       'disponible': true,
-      'boutique': {'nom': shop?['nom'] ?? _device['boutique_nom'] ?? '', 'devise': shop?['devise'] ?? 'FCFA', 'tva_taux': _vat?.rate ?? '0', 'tva_incluse': _vat?.included ?? true},
+      'boutique': {
+        'uuid': _device['boutique_uuid'],
+        'nom': shop?['nom'] ?? _device['boutique_nom'] ?? '',
+        'raison_sociale': (shop?['ticket'] as Map?)?['raison_sociale'] ?? shop?['nom'] ?? _device['boutique_nom'] ?? '',
+        'adresse': (shop?['ticket'] as Map?)?['adresse'],
+        'telephone': (shop?['ticket'] as Map?)?['telephone'],
+        'identifiant_fiscal': (shop?['ticket'] as Map?)?['ncc'],
+        'entete': (shop?['ticket'] as Map?)?['entete'],
+        'pied': (shop?['ticket'] as Map?)?['pied'],
+        'devise': shop?['devise'] ?? 'FCFA', 'tva_taux': _vat?.rate ?? '0', 'tva_incluse': _vat?.included ?? true,
+      },
       'terminal': {'id': 0, 'nom': _device['terminal_nom'] ?? '', 'prefixe_tickets': 'HL2-${_device['epoque']}'},
       'reglages': {
         'duree_max_heures': policies['autonomie.duree_max_heures'] ?? 72,

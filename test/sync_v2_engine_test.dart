@@ -2236,7 +2236,8 @@ void main() {
     final printed = (ticket['lines'] as List).cast<String>();
     expect(printed, containsAll([contains('Remise globale'), contains('Livraison'), contains('Note : Livrer a Cocody')]));
     expect(printed.firstWhere((l) => l.startsWith('TOTAL')), endsWith('2 487 F'));
-    expect(printed, containsAll([contains('RECU DE VENTE HORS LIGNE'), contains('Merci, a bientot !'), contains('Numero definitif')]));
+    expect(printed, containsAll([contains('RECU DE VENTE HORS LIGNE'), contains('Merci, a bientot !')]));
+    expect(printed.join('\n'), isNot(contains('Numero definitif')));
     expect(printed.any((l) => l.startsWith('Caissier')), isFalse, reason: 'bloc vendeur masqué');
     expect(ticket['compact'], isTrue);
 

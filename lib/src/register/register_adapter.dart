@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 import '../offline/engine.dart';
+import '../offline/local_prices.dart';
 import '../offline/models.dart';
 import '../offline/money.dart';
 import '../offline/ticket.dart';
@@ -205,6 +206,17 @@ class LocalRegisterAdapter {
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
       case 'setLinePrice':
         return _setLinePrice(_text(args, 'line_id', max: 64), args['amount']);
+      case 'localPriceSettings':
+        return _localPrices();
+      case 'setLocalPriceSettings':
+        if (args['enabled'] is! bool) throw const AdapterFailure('argument_invalide', 'Choix activé/désactivé requis.');
+        try {
+          await LocalPrices.setEnabled(engine, _operator, args['enabled'] == true);
+        } on StateError {
+          throw const AdapterFailure('prix_refuse', 'Le droit de modifier les prix est requis.');
+        }
+        _emit('prix_locaux');
+        return _localPrices();
       case 'setLineLot':
         return _setLineLot(_text(args, 'line_id', max: 64), args['lot_uuid'] as String?);
       case 'setWholesale':
@@ -401,6 +413,8 @@ class LocalRegisterAdapter {
 
   Future<Map<String, dynamic>> _view() async {
     final snapshot = engine.snapshot;
+    final remembered = await LocalPrices.read(engine);
+    int displayedPrice(Product product) => remembered.priceFor(engine, _operator, CartLine(product: product)) ?? product.price;
     final reason = engine.blockReason;
     final sold = snapshot == null ? const <int, BigInt>{} : await engine.soldSinceSnapshot();
     final resolved = snapshot == null ? const <(_DraftLine, CartLine?)>[] : [for (final l in _draft.lines) (l, l.materialize(snapshot, _tierOf(_draft)))];
@@ -530,7 +544,7 @@ class LocalRegisterAdapter {
               'image': p.image == null
                   ? null
                   : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height, 'path': engine.imagePath(p.image!)},
-              'price_label': formatFcfa(p.price, currency),
+              'price_label': formatFcfa(displayedPrice(p), currency),
               'wholesale_price_label': p.wholesalePrice == null || engine.wholesaleRules == null ? null : formatFcfa(p.wholesalePrice!, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'stock_after_label': p.unlimitedStock ? '' : _stockLabel(p, (sold[p.id] ?? BigInt.zero) + (demand[p.id] ?? BigInt.zero)),
@@ -786,12 +800,16 @@ class LocalRegisterAdapter {
     if (packagingId != null && product.packaging(packagingId) == null) {
       throw const AdapterFailure('conditionnement_inconnu', 'Conditionnement inconnu pour ce produit.');
     }
+    final remembered = await LocalPrices.read(engine);
+    final candidate = _DraftLine(id: _newUuid(), productId: productId, packagingId: packagingId, quantity: BigInt.from(1000000));
+    final cart = candidate.materialize(_snapshot(), _tierOf(_draft));
+    if (cart != null) candidate.entered = remembered.priceFor(engine, _operator, cart);
     return _mutate(() {
       final existing = _draft.lines.where((l) => l.productId == productId && l.packagingId == packagingId).firstOrNull;
       if (existing != null) {
         existing.quantity += BigInt.from(1000000);
       } else {
-        _draft.lines.add(_DraftLine(id: _newUuid(), productId: productId, packagingId: packagingId, quantity: BigInt.from(1000000)));
+        _draft.lines.add(candidate);
       }
     });
   }
@@ -829,8 +847,15 @@ class LocalRegisterAdapter {
       final blocker = engine.enteredPriceBlocker(_operator, cart);
       if (blocker != null) throw AdapterFailure('prix_refuse', blocker);
     }
-    return _mutate(() => line.entered = price);
+    final result = await _mutate(() => line.entered = price);
+    if (await LocalPrices.remember(engine, line.productId, price)) {
+      _emit('prix_locaux');
+      return _view();
+    }
+    return result;
   }
+
+  Future<Map<String, dynamic>> _localPrices() async => (await LocalPrices.read(engine)).toJson();
 
   /// Lot de la ligne ; null = choix automatique selon la règle de la boutique.
   Future<Map<String, dynamic>> _setLineLot(String lineId, String? lot) async {

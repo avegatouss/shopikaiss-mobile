@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:shopikaiss_terminal/src/offline/engine.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
+import 'package:shopikaiss_terminal/src/offline/ticket.dart';
 import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -68,6 +69,65 @@ void main() {
   }
 
   Operator named(V2Engine e, String name) => e.snapshot!.operators.firstWhere((o) => o.name == name);
+
+  test('coordonnées du ticket reçues en v2 puis imprimées hors connexion sans mention technique', () async {
+    serve();
+    server.put('boutique', fakeShop, {
+      ...(server.entities['boutique|$fakeShop']!['donnees'] as Map).cast<String, dynamic>(),
+      'ticket': {'raison_sociale': 'TBC Essai', 'adresse': 'Abidjan, rue du test', 'telephone': '+225 0102030405', 'ncc': 'NCC-TEST', 'entete': null, 'pied': null, 'largeur_papier': 80},
+    }, critical: true);
+    final e = await engine();
+    expect(e.snapshot!.store.address, 'Abidjan, rue du test');
+    expect(e.snapshot!.store.phone, '+225 0102030405');
+    final lines = [CartLine(product: e.snapshot!.byCode('6190000000011')!.$1)];
+    final payments = [CartPayment(method: e.snapshot!.methods.single, amount: 1000, received: 1000)];
+    final sale = await e.recordSale(lines, payments, named(e, 'Awa'));
+    final printed = offlineTicketLines(snapshot: e.snapshot!, operation: sale, lines: lines, payments: payments, operatorName: 'Awa', paperWidth: 80).join('\n');
+    expect(printed, contains('Abidjan, rue du test'));
+    expect(printed, contains('+225 0102030405'));
+    expect(printed, isNot(contains('Numero definitif')));
+  });
+
+  test('prix mémorisé local : reprise, scan, droits, conditionnement, retour au prix habituel et désactivation', () async {
+    serve();
+    final e = await engine();
+    var adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    expect((await adapter.execute('localPriceSettings', {}, null))['enabled'], false);
+    await adapter.execute('setLocalPriceSettings', {'enabled': true}, null);
+    final product = e.snapshot!.byCode('6190000000011')!.$1;
+    var view = await adapter.execute('addProduct', {'product_id': product.id}, null);
+    await adapter.execute('setLinePrice', {'line_id': (view['lines'] as List).single['id'], 'amount': 1750}, null);
+    await adapter.execute('clear', {}, null);
+    await adapter.close();
+    adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    view = await adapter.execute('scan', {'code': '6190000000011'}, null);
+    expect((view['lines'] as List).single['entered_price'], 1750);
+    expect((view['products'] as List).firstWhere((p) => p['id'] == product.id)['price_label'], '1 750 F');
+    await adapter.execute('clear', {}, null);
+    view = await adapter.execute('addProduct', {'product_id': product.id, 'packaging_id': product.packagings.single.id}, null);
+    expect((view['lines'] as List).single['entered_price'], null);
+    await adapter.execute('clear', {}, null);
+    await adapter.execute('login', {'operator_id': 9, 'pin': '1234'}, null);
+    view = await adapter.execute('addProduct', {'product_id': product.id}, null);
+    expect((view['lines'] as List).single['entered_price'], null);
+    await expectLater(adapter.execute('setLocalPriceSettings', {'enabled': true}, null), throwsA(isA<AdapterFailure>()));
+    await adapter.execute('clear', {}, null);
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    view = await adapter.execute('addProduct', {'product_id': product.id}, null);
+    await adapter.execute('setLinePrice', {'line_id': (view['lines'] as List).single['id'], 'amount': null}, null);
+    expect((await adapter.execute('localPriceSettings', {}, null))['prices'], isEmpty);
+    await adapter.execute('setLinePrice', {'line_id': (view['lines'] as List).single['id'], 'amount': 1800}, null);
+    await adapter.execute('setLocalPriceSettings', {'enabled': false}, null);
+    await adapter.execute('clear', {}, null);
+    view = await adapter.execute('addProduct', {'product_id': product.id}, null);
+    expect((view['lines'] as List).single['entered_price'], null);
+    expect((await adapter.execute('localPriceSettings', {}, null))['prices'], isEmpty);
+    await adapter.close();
+  });
 
   test('capacité et catalogue : prix_modifiable reçu, droit publié, motifs de refus par ligne', () async {
     serve();

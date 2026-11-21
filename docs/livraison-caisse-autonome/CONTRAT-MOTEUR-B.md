@@ -66,6 +66,8 @@ class BEngineAdapter implements WindowsEngineAdapter {
 | `removeLine` / `clear` | `line_id` / — | vue |
 | `setLineDiscount` | `line_id`, `amount` (francs, 0 = retirer) **ou** `percent` (« 12,5 », 2 décimales, ≤ 100) | vue ; `remise_refusee` (sans droit `remise`, au-delà du plafond du rôle ou du terminal, au-delà de la base), `remise_invalide` ; un pourcentage est recalculé à chaque changement du panier |
 | `setLinePrice` | `line_id`, `amount` (entier en francs, 0 à 1 000 000 000) **ou** `null` (retour au prix habituel) | vue ; `prix_refuse` (fonction absente, produit non coché, conditionnement, caissier sans `prix_vente_modifier`), `prix_invalide` (hors bornes), `argument_invalide` (pas un entier) ; 2.1 lot 9, voir « Prix modifiable » |
+| `localPriceSettings` | — | `{enabled, prices}` : mémoire des prix saisis de ce terminal (identifiant produit → francs) ; voir « Prix mémorisés » |
+| `setLocalPriceSettings` | `enabled` (booléen) | même retour ; `prix_refuse` (fonction absente ou caissier sans `prix_vente_modifier`), `argument_invalide` ; désactiver efface la mémoire ; événement `prix_locaux` |
 | `setGlobalDiscount` | `amount` **ou** `percent` (0 = retirer) | vue ; sur le sous-total (après remises de ligne) ; droit `remise`, plafond = min(`remises.globale_max_pourcent`, rôle) — politique à 0 : « Remise globale non autorisée hors ligne dans cette boutique. » ; `fonction_indisponible` avant la 2.1 |
 | `setDelivery` | `amount` (francs, 0 = retirer) | vue ; hors TVA, ajoutée au montant à payer ; droit `boutique.regles.livraison_droit` s'il est défini |
 | `setNote` | `text` (≤ 2 000, vide = retirer) | vue ; note du ticket |
@@ -267,3 +269,17 @@ Fermés par défaut : capacité `retour.especes`, `retours.mode` = `especes`, fo
 - **Ticket et Z** : rien à changer, la ligne porte son prix réel.
 - **Windows** : C n'annonce rien de plus, la capacité est annoncée par le moteur. Il affiche le champ dans le détail de
   ligne selon `price_editable` et appelle `setLinePrice`.
+
+### Prix mémorisés (demande utilisateur du 21/11, C `e8354be`, repris par B)
+
+- **Principe** : option locale du terminal, désactivée par défaut. Activée, chaque `setLinePrice` mémorise le prix du
+  produit (`null` l'oublie) ; le prochain `addProduct` ou `scan` du produit reprend ce prix comme prix saisi.
+- **Contrôles** : la reprise n'a lieu que si le moteur accepterait un prix saisi sur la ligne (fonction présente,
+  produit coché, unité de base, caissier avec `prix_vente_modifier`). Sinon la ligne part au prix habituel. Le moteur
+  refait tous les contrôles à l'encaissement, comme pour un prix tapé.
+- **Catalogue** : `products[].price_label` montre le prix mémorisé au caissier autorisé.
+- **Stockage** : clé `local-prices-v1:<uuid boutique>` dans la base du moteur, partagée par Windows (adaptateur) et
+  Android (`LocalPrices`, `lib/src/offline/local_prices.dart`). Rien n'est envoyé au serveur ni ne modifie le
+  catalogue : au rejeu, chaque vente est une vente à prix saisi (journal `prix_vente_modifie`).
+- **Android** : menu de la caisse locale, « Mémoriser les prix saisis » (case à cocher), visible pour un caissier avec
+  le droit ; la désactivation demande confirmation si des prix sont mémorisés.
