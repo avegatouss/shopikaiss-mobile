@@ -159,6 +159,15 @@ class _CashOperationsState extends State<CashOperationsDialog> {
 
   Future<void> submit() async {
     if (busy || broken || (!allowed && pending == null)) return;
+    if (!widget.returns) {
+      try {
+        await c.restaurantIntent.requireResolved();
+      } catch (e) {
+        if (mounted) setState(() => message = '$e');
+        return;
+      }
+      if (!mounted) return;
+    }
     final recovering = pending != null;
     if (pending == null) {
       Map<String, dynamic> args;
@@ -271,6 +280,7 @@ class _CashOperationsState extends State<CashOperationsDialog> {
           builder: (_) => CashDocumentsDialog(
             host: c.host,
             originalZ: true,
+            restaurantIntent: c.restaurantIntent,
             editionFile: c.closureEditionFile,
           ),
         );
@@ -426,6 +436,7 @@ class _CashOperationsState extends State<CashOperationsDialog> {
                     context: context,
                     builder: (_) => CashDocumentsDialog(
                       host: c.host,
+                      restaurantIntent: c.restaurantIntent,
                       editionFile: c.closureEditionFile,
                     ),
                   ),

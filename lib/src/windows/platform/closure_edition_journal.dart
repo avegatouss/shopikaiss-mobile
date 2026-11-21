@@ -38,6 +38,16 @@ class ClosureEditionJournal {
       arguments: {'edition_id': pending!['edition_id']},
     );
     if (response['recorded'] != true) {
+      if (const [
+        'edition_inconnue',
+        'caissier_inconnu',
+      ].contains(response['reason'])) {
+        await discard();
+        throw const HostFailure(
+          'edition_expired',
+          'Le moteur ne peut plus confirmer cette édition. Le journal d’attente a été libéré ; aucune réimpression ni confirmation d’audit n’a été effectuée.',
+        );
+      }
       throw const HostFailure(
         'edition_unrecorded',
         'Édition non enregistrée par le moteur. Conservez ce journal pour vérification.',

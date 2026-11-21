@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 
 import 'receipt_pdf.dart';
 import 'receipt_qr.dart';
+import 'receipt_logo.dart';
 import 'raw_receipt_printer.dart';
 import 'production_printing.dart';
 import '../../restaurant/resto_engine.dart';
@@ -83,6 +84,9 @@ class ReceiptPrinting {
     var copies = copyCount(saved['copies']);
     var qrEnabled = saved['qr_enabled'] != false;
     var link = saved['qr_link'] as String? ?? '';
+    var logo = saved['logo_png'] as String?;
+    var logoPath = '';
+    String? logoError;
     if (!context.mounted) return;
     final options = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -96,6 +100,59 @@ class ReceiptPrinting {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('${saved['name']}'),
+                if (logo != null) Image.memory(base64Decode(logo!), height: 70),
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Chemin du logo (PNG/JPG)',
+                    helperText: 'Ex. C:\\Images\\logo-tbc.png — copie conservée hors connexion.',
+                  ),
+                  onChanged: (value) => logoPath = value,
+                ),
+                Wrap(
+                  children: [
+                    TextButton.icon(
+                      icon: const Icon(Icons.image_outlined),
+                      label: const Text('Importer le logo'),
+                      onPressed: () async {
+                        try {
+                          final file = File(
+                            logoPath.trim().replaceAll('"', ''),
+                          );
+                          if (await file.length() > 2 * 1024 * 1024) {
+                            throw const FormatException('Logo limité à 2 Mo.');
+                          }
+                          final data = normalizeReceiptLogo(
+                            await file.readAsBytes(),
+                          );
+                          if (context.mounted) {
+                            update(() {
+                              logo = base64Encode(data);
+                              logoError = null;
+                            });
+                          }
+                        } catch (_) {
+                          if (context.mounted) {
+                            update(
+                              () => logoError = 'Logo non importé. Vérifiez le chemin et une image de 2 Mo maximum (4096 pixels).',
+                            );
+                          }
+                        }
+                      },
+                    ),
+                    if (logo != null)
+                      TextButton(
+                        onPressed: () => update(() => logo = null),
+                        child: const Text('Retirer le logo'),
+                      ),
+                  ],
+                ),
+                if (logoError != null)
+                  Text(
+                    logoError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
                 SwitchListTile(
                   title: const Text('QR code des informations du ticket'),
                   subtitle: const Text(
@@ -187,6 +244,7 @@ class ReceiptPrinting {
                       'copies': copies,
                       'qr_enabled': qrEnabled,
                       'qr_link': link.trim(),
+                      'logo_png': logo,
                     }),
               child: const Text('Enregistrer'),
             ),
@@ -225,6 +283,10 @@ class ReceiptPrinting {
     }
     final saved = jsonDecode(await _file.readAsString()) as Map;
     final copies = useConfiguredCopies ? copyCount(saved['copies']) : 1;
+    if (useConfiguredCopies) lines = receiptSaleLines(lines);
+    final logo = useConfiguredCopies && saved['logo_png'] is String
+        ? base64Decode(saved['logo_png'] as String)
+        : null;
     final qrCodes = useConfiguredCopies
         ? receiptQrCodes(
             lines,
@@ -252,6 +314,11 @@ class ReceiptPrinting {
           );
       final batch = BytesBuilder(copy: false);
       for (var i = 0; i < copies; i++) {
+        if (logo != null && escposBytes == null) {
+          batch.add(
+            receiptLogoRaster(logo, saved['paper_width'] == 58 ? 58 : 80),
+          );
+        }
         batch.add(ticket);
       }
       final outcome = await const RawReceiptPrinter().send(
@@ -282,6 +349,7 @@ class ReceiptPrinting {
       paperWidth: saved['paper_width'] == 58 ? 58 : 80,
       copies: copies,
       qrCodes: qrCodes,
+      logoPng: logo,
     );
     final sent = await Printing.directPrintPdf(
       printer: matching.first,

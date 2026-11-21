@@ -7,6 +7,7 @@ import 'package:shopikaiss_terminal/src/windows/platform/closure_edition_journal
 class _Host implements WindowsHost {
   final ids = <String>[];
   bool fail = false;
+  String? refusal;
   @override
   Stream<Map<String, dynamic>> get events => const Stream.empty();
   @override
@@ -20,6 +21,7 @@ class _Host implements WindowsHost {
     expect(command, HostCommand.cashClosureEdition);
     ids.add(arguments['edition_id'] as String);
     if (fail) throw const HostFailure('lost', 'Lost', outcomeUnknown: true);
+    if (refusal != null) return {'recorded': false, 'reason': refusal};
     return {'recorded': true};
   }
 }
@@ -32,6 +34,25 @@ void main() {
     file = File('${dir.path}/pending.json');
   });
   tearDown(() async => dir.delete(recursive: true));
+  test(
+    'expired transmitted edition frees journal and reports missing audit',
+    () async {
+      for (final reason in ['edition_inconnue', 'caissier_inconnu']) {
+        final host = _Host()..refusal = reason;
+        final journal = ClosureEditionJournal(host, file: file);
+        await journal.begin('expired');
+        await expectLater(
+          journal.confirm(),
+          throwsA(
+            isA<HostFailure>().having((e) => e.code, 'code', 'edition_expired'),
+          ),
+        );
+        expect(journal.pending, isNull);
+        expect(await file.exists(), isFalse);
+        await journal.load();
+      }
+    },
+  );
   test(
     'lost confirmation resumes same edition after restart without printing',
     () async {

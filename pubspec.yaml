@@ -42,6 +42,7 @@ dependencies:
   permission_handler: ^13.0.2
   pdf: ^3.13.1
   qr: ^3.0.2
+  image: ^4.12.0
   sqflite: ^2.4.4+2
   path: ^1.9.1
   http: ^1.6.0

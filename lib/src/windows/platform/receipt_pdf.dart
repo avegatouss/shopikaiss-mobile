@@ -15,6 +15,7 @@ buildReceiptPdf(
   int paperWidth = 80,
   int copies = 1,
   List<ReceiptQr> qrCodes = const [],
+  Uint8List? logoPng,
 }) async {
   if (copies < 1 || copies > 3) {
     throw const FormatException('Nombre d’exemplaires invalide');
@@ -40,6 +41,18 @@ buildReceiptPdf(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           mainAxisSize: pw.MainAxisSize.min,
           children: [
+            if (start == 0 && logoPng != null)
+              pw.Center(
+                child: pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 8),
+                  child: pw.Image(
+                    pw.MemoryImage(logoPng),
+                    width: 100,
+                    height: 50,
+                    fit: pw.BoxFit.contain,
+                  ),
+                ),
+              ),
             for (final line in lines.sublist(start, end))
               pw.Text(line, style: const pw.TextStyle(fontSize: 9)),
             if (end == lines.length)

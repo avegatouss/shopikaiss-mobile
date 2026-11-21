@@ -15,6 +15,16 @@ class RestaurantIntent {
   bool busy = false;
   bool loaded = false;
 
+  Future<void> requireResolved() async {
+    await load();
+    if (busy || pending != null) {
+      throw const HostFailure(
+        'restaurant_pending',
+        'Vérifiez l’action restaurant en attente avant le Z ou la clôture.',
+      );
+    }
+  }
+
   Future<void> load() async {
     if (loaded) return;
     if (file != null && await file!.exists()) {
@@ -119,8 +129,22 @@ class RestaurantIntent {
       await resolve();
       return result;
     } on HostFailure catch (e) {
-      // A rejection of a replay (e.g. logged out) says nothing about the first call.
-      if (initial && !e.outcomeUnknown) await resolve();
+      // B recovers financial IDs before business validation. A definitive
+      // business refusal proves no sale/refund exists, except authentication
+      // and approval gates that can run before recovery.
+      final financial =
+          command == HostCommand.restoSettle ||
+          command == HostCommand.restoRefund;
+      final gate = const [
+        'caissier_requis',
+        'operator_required',
+        'autorisation_requise',
+        'host_unavailable',
+        'timeout',
+      ].contains(e.code);
+      if (!e.outcomeUnknown && (initial || (financial && !gate))) {
+        await resolve();
+      }
       rethrow;
     } finally {
       busy = false;

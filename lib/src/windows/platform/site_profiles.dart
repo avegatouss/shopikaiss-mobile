@@ -103,6 +103,15 @@ String? siteSwitchRefusal(
 }
 
 Future<bool> hasUnresolvedSiteIntent(String directory) async {
+  final production = File(p.join(directory, 'production-results-v1.json'));
+  if (await production.exists()) {
+    try {
+      final entries = jsonDecode(await production.readAsString());
+      if (entries is! Map || entries.isNotEmpty) return true;
+    } catch (_) {
+      return true;
+    }
+  }
   for (final name in [
     'pending-sale.json',
     'pending-sale-v2.json',

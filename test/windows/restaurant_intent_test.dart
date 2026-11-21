@@ -129,4 +129,35 @@ void main() {
     expect(host.calls, isEmpty);
     expect(await file.exists(), isTrue);
   });
+  test(
+    'financial replay business refusal releases pending but auth does not',
+    () async {
+      for (final command in [
+        HostCommand.restoSettle,
+        HostCommand.restoRefund,
+      ]) {
+        final host = _Host()
+          ..failure = const HostFailure('lost', 'Lost', outcomeUnknown: true);
+        final intent = RestaurantIntent(host, file: file);
+        await expectLater(
+          intent.execute(command, {}),
+          throwsA(isA<HostFailure>()),
+        );
+        await expectLater(
+          intent.requireResolved(),
+          throwsA(isA<HostFailure>()),
+        );
+        for (final gate in ['caissier_requis', 'autorisation_requise']) {
+          host.failure = HostFailure(gate, gate);
+          await expectLater(intent.retry(), throwsA(isA<HostFailure>()));
+          expect(intent.pending, isNotNull);
+        }
+        host.failure = const HostFailure('session_requise', 'Session fermée');
+        await expectLater(intent.retry(), throwsA(isA<HostFailure>()));
+        expect(intent.pending, isNull);
+        expect(await file.exists(), isFalse);
+        await intent.requireResolved();
+      }
+    },
+  );
 }

@@ -62,15 +62,15 @@ Future<bool> restaurantRecovery(
           actions: [
             TextButton(
               onPressed: busy ? null : () => Navigator.pop(context, false),
-              child: const Text('Fermer sans effacer'),
+              child: Text(record == null ? 'Fermer' : 'Fermer sans effacer'),
             ),
             TextButton(
-              onPressed: busy
+              onPressed: busy || record == null
                   ? null
                   : () async {
                       update(() => busy = true);
                       try {
-                        final args = record!['arguments'] as Map;
+                        final args = record['arguments'] as Map;
                         final view = args['order_uuid'] != null
                             ? await intent.host.call(
                                 HostCommand.restoOrder,
@@ -101,7 +101,7 @@ Future<bool> restaurantRecovery(
               child: const Text('Relire la commande et les bons'),
             ),
             FilledButton(
-              onPressed: busy
+              onPressed: busy || record == null
                   ? null
                   : () async {
                       update(() => busy = true);
@@ -117,14 +117,16 @@ Future<bool> restaurantRecovery(
                           Navigator.pop(context, true);
                         }
                       } catch (e) {
-                        message =
-                            '$e\nLe même identifiant reste conservé. Si une autorisation est requise, relisez avant de reprendre le geste.';
+                        message = intent.pending == null
+                            ? '$e\nLe moteur confirme que cette action n’a pas été enregistrée. Fermez puis relisez la commande avant de corriger.'
+                            : '$e\nLe même identifiant reste conservé. Si une autorisation est requise, relisez avant de reprendre le geste.';
                       }
                       if (context.mounted) update(() => busy = false);
                     },
               child: const Text('Réessayer avec le même identifiant'),
             ),
-            if (!['restoSettle', 'restoRefund'].contains(record?['command']))
+            if (record != null &&
+                !['restoSettle', 'restoRefund'].contains(record['command']))
               TextButton(
                 onPressed: busy || !reviewed
                     ? null

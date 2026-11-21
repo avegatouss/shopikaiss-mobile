@@ -153,6 +153,7 @@ class _RestaurantPaymentState extends State<RestaurantPayment> {
             if ((plan!['shares'] as List).isNotEmpty) 'share': r.share,
           },
       ];
+      final recovering = widget.intent.pending != null;
       final result = await restaurantRun(
         context,
         widget.intent,
@@ -163,6 +164,14 @@ class _RestaurantPaymentState extends State<RestaurantPayment> {
       if (result != null && mounted) {
         Navigator.pop(context, result);
       } else {
+        if (recovering && widget.intent.pending == null) {
+          plan = null;
+          setState(() {
+            busy = false;
+            message = 'Reprise terminée. Fermez cette fenêtre et relisez la commande avant tout nouveau règlement.';
+          });
+          return;
+        }
         message = widget.intent.pending != null
             ? 'Résultat à vérifier : le règlement reste conservé avec son identifiant.'
             : 'Règlement non confirmé. Corrigez les champs si nécessaire.';

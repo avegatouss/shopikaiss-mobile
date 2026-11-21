@@ -11,7 +11,6 @@ class TouchKeyboard extends StatefulWidget {
 class _TouchKeyboardState extends State<TouchKeyboard> {
   EditableTextState? editor;
   bool upper = false;
-  bool? numericOverride;
   @override
   void initState() {
     super.initState();
@@ -29,7 +28,6 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
     if (mounted) {
       setState(() {
         final next = eligible ? state : null;
-        if (editor != next) numericOverride = null;
         editor = next;
       });
     }
@@ -44,10 +42,6 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
   void key(String key) {
     final target = editor;
     if (target == null || !target.mounted) return;
-    if (key == '123' || key == 'ABC') {
-      setState(() => numericOverride = key == '123');
-      return;
-    }
     if (key == 'Fermer') {
       setState(() => editor = null);
       return;
@@ -92,143 +86,201 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final type = editor?.widget.keyboardType;
-    final numeric =
-        numericOverride ??
-        (type == TextInputType.number ||
-            type == TextInputType.phone ||
-            type?.index == TextInputType.number.index);
-    return Column(
-      children: [
-        Expanded(
-          child: Listener(
-            onPointerUp: (_) =>
-                WidgetsBinding.instance.addPostFrameCallback((_) {
-                  if (mounted) changed();
-                }),
-            child: widget.child,
+  Widget _button(BuildContext context, String value, {double height = 48}) =>
+      Padding(
+        padding: const EdgeInsets.all(2),
+        child: SizedBox(
+          height: height,
+          child: OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              padding: EdgeInsets.zero,
+              backgroundColor: value == 'Entrée'
+                  ? Theme.of(context).colorScheme.primary
+                  : Colors.white,
+              foregroundColor: value == 'Entrée' ? Colors.white : null,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            onPressed: () => key(value),
+            child: Text(
+              upper && value.length == 1 ? value.toUpperCase() : value,
+              style: TextStyle(fontSize: value.length == 1 ? 20 : 14),
+            ),
           ),
         ),
-        if (editor != null)
-          TextFieldTapRegion(
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: SizedBox(
-                width: numeric ? 360 : double.infinity,
-                child: Material(
-                  elevation: 8,
-                  color: const Color(0xffedf2ef),
-                  child: SafeArea(
-                    top: false,
-                    child: Focus(
-                      canRequestFocus: false,
-                      descendantsAreFocusable: false,
-                      child: Padding(
+      );
+
+  Widget _row(
+    BuildContext context,
+    List<String> values, {
+    double height = 48,
+  }) => Row(
+    children: [
+      for (final value in values)
+        Expanded(child: _button(context, value, height: height)),
+    ],
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    const keyboardHeight = 268.0;
+    final visible = editor != null;
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              viewInsets: MediaQuery.of(context).viewInsets
+                  .copyWith(bottom: visible ? keyboardHeight : 0),
+            ),
+            child: Listener(
+              onPointerUp: (_) =>
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) changed();
+                  }),
+              child: widget.child,
+            ),
+          ),
+        ),
+        if (visible)
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            height: keyboardHeight,
+            child: TextFieldTapRegion(
+              child: Material(
+                elevation: 8,
+                color: const Color(0xffedf2ef),
+                child: Focus(
+                  canRequestFocus: false,
+                  descendantsAreFocusable: false,
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final padWidth = (constraints.maxWidth * .32).clamp(
+                        240.0,
+                        340.0,
+                      );
+                      return Padding(
                         padding: const EdgeInsets.all(4),
                         child: Column(
-                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            if (numeric)
-                              Row(
+                            SizedBox(
+                              height: 32,
+                              child: Row(
                                 children: [
                                   const Expanded(
                                     child: Padding(
                                       padding: EdgeInsets.only(left: 8),
                                       child: Text(
-                                        'Pavé numérique',
+                                        'Clavier',
                                         style: TextStyle(
                                           fontWeight: FontWeight.w600,
                                         ),
                                       ),
                                     ),
                                   ),
-                                  TextButton(
-                                    onPressed: () => key('ABC'),
-                                    child: const Text('ABC'),
-                                  ),
+                                  const Text('Pavé numérique'),
                                   TextButton(
                                     onPressed: () => key('Fermer'),
                                     child: const Text('Fermer'),
                                   ),
                                 ],
                               ),
-                            for (final row
-                                in numeric
-                                    ? [
-                                        ['7', '8', '9', '⌫'],
-                                        ['4', '5', '6', 'Effacer'],
-                                        ['1', '2', '3', 'Entrée'],
-                                        ['0', '00', ',', '.'],
-                                      ]
-                                    : [
-                                        '1234567890'.split(''),
+                            ),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      _row(
+                                        context,
                                         'azertyuiop'.split(''),
+                                        height: 40,
+                                      ),
+                                      _row(
+                                        context,
                                         'qsdfghjklm'.split(''),
-                                        ['Maj', ...'wxcvbn'.split(''), '⌫'],
-                                        [
-                                          'é',
-                                          'è',
-                                          "'",
-                                          '@',
-                                          '.',
-                                          ',',
-                                          '-',
-                                          'Espace',
-                                          '123',
-                                          'Entrée',
-                                          'Fermer',
-                                        ],
-                                      ])
-                              Row(
-                                children: [
-                                  for (final value in row)
-                                    Expanded(
-                                      child: Padding(
-                                        padding: const EdgeInsets.all(2),
-                                        child: SizedBox(
-                                          height: numeric ? 48 : 42,
-                                          child: OutlinedButton(
-                                            style: OutlinedButton.styleFrom(
-                                              padding: EdgeInsets.zero,
-                                              backgroundColor:
-                                                  numeric && value == 'Entrée'
-                                                  ? Theme.of(context)
-                                                        .colorScheme
-                                                        .primary
-                                                  : Colors.white,
-                                              foregroundColor:
-                                                  numeric && value == 'Entrée'
-                                                  ? Colors.white
-                                                  : null,
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                            ),
-                                            onPressed: () => key(value),
-                                            child: Text(
-                                              upper && value.length == 1
-                                                  ? value.toUpperCase()
-                                                  : value,
-                                              style: TextStyle(
-                                                fontSize:
-                                                    numeric && value.length <= 2
-                                                    ? 22
-                                                    : 14,
-                                              ),
+                                        height: 40,
+                                      ),
+                                      _row(context, [
+                                        'Maj',
+                                        ...'wxcvbn'.split(''),
+                                        'é',
+                                        'è',
+                                        "'",
+                                      ], height: 40),
+                                      _row(context, [
+                                        '@',
+                                        '.',
+                                        '-',
+                                        '/',
+                                        '(',
+                                        ')',
+                                        '?',
+                                        '!',
+                                        ':',
+                                      ], height: 40),
+                                      _row(context, ['Espace'], height: 40),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                SizedBox(
+                                  width: padWidth,
+                                  child: Column(
+                                    children: [
+                                      _row(context, [
+                                        '7',
+                                        '8',
+                                        '9',
+                                        '⌫',
+                                      ], height: 51),
+                                      _row(context, [
+                                        '4',
+                                        '5',
+                                        '6',
+                                        'Effacer',
+                                      ], height: 51),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            flex: 3,
+                                            child: Column(
+                                              children: [
+                                                _row(context, [
+                                                  '1',
+                                                  '2',
+                                                  '3',
+                                                ], height: 51),
+                                                _row(context, [
+                                                  '0',
+                                                  '00',
+                                                  ',',
+                                                ], height: 51),
+                                              ],
                                             ),
                                           ),
-                                        ),
+                                          Expanded(
+                                            child: _button(
+                                              context,
+                                              'Entrée',
+                                              height: 106,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ),
-                                ],
-                              ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
                           ],
                         ),
-                      ),
-                    ),
+                      );
+                    },
                   ),
                 ),
               ),

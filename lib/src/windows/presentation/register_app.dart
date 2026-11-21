@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'lot_wholesale.dart';
+import 'line_price.dart';
 
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -167,16 +168,36 @@ class _Register extends StatefulWidget {
 
 class _RegisterState extends State<_Register> {
   final _search = TextEditingController();
+  Timer? _searchDelay;
+  void _queueSearch() {
+    _searchDelay?.cancel();
+    _searchDelay = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted || !c.ready || c.uncertainOperation != null) return;
+      if (c.busy) {
+        _queueSearch();
+        return;
+      }
+      _searchCatalogue();
+    });
+  }
+
   Future<void> _searchCatalogue({
     String? category,
     String? brand,
     String? supplier,
-  }) => c.command(HostCommand.search, {
-    'query': _search.text,
-    'category': category ?? c.view['category'] ?? '',
-    'brand': brand ?? c.view['brand'] ?? '',
-    'supplier': supplier ?? c.view['supplier'] ?? '',
-  });
+  }) async {
+    _searchDelay?.cancel();
+    if (c.busy) {
+      _queueSearch();
+      return;
+    }
+    await c.command(HostCommand.search, {
+      'query': _search.text,
+      'category': category ?? c.view['category'] ?? '',
+      'brand': brand ?? c.view['brand'] ?? '',
+      'supplier': supplier ?? c.view['supplier'] ?? '',
+    });
+  }
 
   Widget _catalogueFilter(String field, String label, String all) {
     final values = (c.view['${field}s'] as List? ?? const []).cast<String>();
@@ -449,6 +470,7 @@ class _RegisterState extends State<_Register> {
     _display.dispose();
     _saveSettings?.cancel();
     _search.dispose();
+    _searchDelay?.cancel();
     _scan.dispose();
     _scanFocus.dispose();
     _searchFocus.dispose();
@@ -701,6 +723,7 @@ class _RegisterState extends State<_Register> {
           },
         },
         child: Scaffold(
+          resizeToAvoidBottomInset: false,
           endDrawer: ScreenSettingsPanel(
             display: _display,
             host: c.host,
@@ -814,7 +837,11 @@ class _RegisterState extends State<_Register> {
                 onPressed: c.ready && !c.busy
                     ? () => showDialog<void>(
                         context: context,
-                        builder: (_) => SalesHistoryDialog(host: c.host),
+                        builder: (_) => SalesHistoryDialog(
+                          host: c.host,
+                          restaurantIntent: c.restaurantIntent,
+                          editionFile: c.closureEditionFile,
+                        ),
                       )
                     : null,
                 icon: const Icon(Icons.receipt_long_outlined),
@@ -886,8 +913,11 @@ class _RegisterState extends State<_Register> {
                           onPressed: c.ready && !c.busy
                               ? () => showDialog<void>(
                                   context: context,
-                                  builder: (_) =>
-                                      SalesHistoryDialog(host: c.host),
+                                  builder: (_) => SalesHistoryDialog(
+                                    host: c.host,
+                                    restaurantIntent: c.restaurantIntent,
+                                    editionFile: c.closureEditionFile,
+                                  ),
                                 )
                               : null,
                           icon: const Icon(Icons.history),
@@ -897,8 +927,11 @@ class _RegisterState extends State<_Register> {
                           onPressed: c.ready && !c.busy
                               ? () => showDialog<void>(
                                   context: context,
-                                  builder: (_) =>
-                                      SalesHistoryDialog(host: c.host),
+                                  builder: (_) => SalesHistoryDialog(
+                                    host: c.host,
+                                    restaurantIntent: c.restaurantIntent,
+                                    editionFile: c.closureEditionFile,
+                                  ),
                                 )
                               : null,
                           icon: const Icon(Icons.receipt_long_outlined),
@@ -1066,16 +1099,35 @@ class _RegisterState extends State<_Register> {
               child: TextField(
                 controller: _search,
                 focusNode: _searchFocus,
-                enabled: _canEdit,
+                enabled: c.ready && c.uncertainOperation == null,
                 decoration: InputDecoration(
                   isDense: true,
                   labelText: 'Rechercher un produit',
-                  suffixIcon: IconButton(
-                    tooltip: 'Rechercher',
-                    onPressed: _canEdit ? () => _searchCatalogue() : null,
-                    icon: const Icon(Icons.search),
+                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _search,
+                    builder: (_, value, _) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (value.text.isNotEmpty)
+                          IconButton(
+                            tooltip: 'Effacer la recherche',
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _search.clear();
+                              _searchCatalogue();
+                              _searchFocus.requestFocus();
+                            },
+                          ),
+                        IconButton(
+                          tooltip: 'Rechercher',
+                          icon: const Icon(Icons.search),
+                          onPressed: () => _searchCatalogue(),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+                onChanged: (_) => _queueSearch(),
                 onSubmitted: (_) => _searchCatalogue(),
               ),
             ),
@@ -1376,7 +1428,10 @@ class _RegisterState extends State<_Register> {
                               ),
                             ),
                             LineLotChoice(controller: c, line: line),
-                            if (line['stock_after_label'] != null)
+                            LinePriceButton(controller: c, line: line),
+                            if ((line['stock_after_label'] as String? ?? '')
+                                .trim()
+                                .isNotEmpty)
                               Text(
                                 'Après vente : ${line['stock_after_label']}',
                                 style: const TextStyle(fontSize: 11),

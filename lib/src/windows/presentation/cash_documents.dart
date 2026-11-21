@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../platform/closure_edition_journal.dart';
+import '../platform/restaurant_intent.dart';
 
 import 'package:flutter/material.dart';
 
@@ -14,10 +15,12 @@ class CashDocumentsDialog extends StatefulWidget {
     required this.host,
     this.originalZ = false,
     this.editionFile,
+    this.restaurantIntent,
   });
   final WindowsHost host;
   final bool originalZ;
   final File? editionFile;
+  final RestaurantIntent? restaurantIntent;
   @override
   State<CashDocumentsDialog> createState() => _CashDocumentsState();
 }
@@ -40,6 +43,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
       message = null;
     });
     try {
+      await widget.restaurantIntent?.requireResolved();
       await editions.load();
       if (editions.pending != null) {
         throw StateError(
@@ -57,6 +61,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
             'version': closureVersion,
             'paper_width': await ReceiptPrinting.paperWidth(),
             'duplicate':
+                closureKind == 'z-session' &&
                 !(widget.originalZ &&
                     !originalRequested &&
                     closureKind == 'z-session'),
@@ -112,8 +117,10 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
       await editions.load();
       final result = await widget.host.call(HostCommand.cashDocuments);
       documents = (result['items'] as List).cast<Map>();
-    } catch (_) {
-      message = 'Documents indisponibles. Aucune opération renvoyée.';
+    } catch (e) {
+      message = e is HostFailure
+          ? e.message
+          : 'Documents indisponibles. Aucune opération renvoyée.';
     }
     if (mounted) setState(() => busy = false);
   }

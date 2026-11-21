@@ -44,7 +44,9 @@ void main() {
     expect(controller.text, '123');
     await mouse.removePointer();
   });
-  testWidgets('numeric keypad can be selected on a text field', (tester) async {
+  testWidgets('letters stay left of numeric pad with double height Enter', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       MaterialApp(
         builder: (_, child) => TouchKeyboard(child: child!),
@@ -53,14 +55,22 @@ void main() {
     );
     await tester.tap(find.byType(TextField));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(OutlinedButton, '123'));
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextButton, 'ABC'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, 'Espace'), findsOneWidget);
     final seven = tester.getCenter(find.widgetWithText(OutlinedButton, '7'));
     final eight = tester.getCenter(find.widgetWithText(OutlinedButton, '8'));
     final four = tester.getCenter(find.widgetWithText(OutlinedButton, '4'));
     expect(seven.dy, eight.dy);
     expect(seven.dx, four.dx);
+    expect(
+      tester.getCenter(find.widgetWithText(OutlinedButton, 'p')).dx,
+      lessThan(seven.dx),
+    );
+    expect(
+      tester.getSize(find.widgetWithText(OutlinedButton, 'Entrée')).height,
+      greaterThan(
+        tester.getSize(find.widgetWithText(OutlinedButton, '7')).height * 1.8,
+      ),
+    );
     expect(
       tester.getSize(find.widgetWithText(OutlinedButton, '7')).width,
       lessThan(100),
@@ -73,8 +83,6 @@ void main() {
       tester.widget<EditableText>(find.byType(EditableText)).controller.text,
       '123',
     );
-    await tester.tap(find.widgetWithText(TextButton, 'ABC'));
-    await tester.pumpAndSettle();
     expect(find.widgetWithText(OutlinedButton, 'Espace'), findsOneWidget);
   });
   testWidgets('automatic keyboard edits selection and respects formatters', (
