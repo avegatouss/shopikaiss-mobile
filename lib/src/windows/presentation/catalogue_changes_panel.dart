@@ -7,6 +7,7 @@ enum CatalogueChangeStatus {
   sent,
   conflict,
   refused,
+  linked,
   integrated,
 }
 
@@ -53,6 +54,7 @@ class CatalogueChangesPanel extends StatelessWidget {
           CatalogueChangeStatus.sent => 'Confirmation attendue',
           CatalogueChangeStatus.conflict => 'Arbitrage nécessaire',
           CatalogueChangeStatus.refused => 'Refusé',
+          CatalogueChangeStatus.linked => 'Rattaché à un produit existant',
           CatalogueChangeStatus.integrated => 'Intégré',
         };
         return Card(

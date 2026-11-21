@@ -6,6 +6,10 @@ class ProductBadges extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final labels = <String>[
+      if (product['local_state'] == 'cree_local') 'Créé sur ce poste',
+      if (product['local_state'] == 'modifie_local') 'Modification à synchroniser',
+      if (product['local_state'] == 'conflit') 'À arbitrer',
+      if (product['local_state'] == 'refuse') 'Modification refusée',
       if (product['low_stock'] == true) 'Stock faible',
       if (product['promotion'] is String &&
           (product['promotion'] as String).isNotEmpty)

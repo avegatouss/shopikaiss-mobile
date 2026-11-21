@@ -1227,7 +1227,7 @@ class V2Engine extends CaisseEngine {
   static const _editableFields = {'nom', 'reference', 'categorie_uuid', 'prix', 'prix_gros', 'gros_quantite_min'};
 
   @override
-  Future<Product> updateProduct(Operator operator, int productId, Map<String, Object?> changes, {String? operationUuid}) => serialized(() async {
+  Future<Product> updateProduct(Operator operator, int productId, Map<String, Object?> changes, {String? operationUuid, Map<String, Object?>? expected}) => serialized(() async {
     if (operationUuid != null) {
       if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
       final existing = await v2.operation(operationUuid);
@@ -1243,6 +1243,9 @@ class V2Engine extends CaisseEngine {
     final current = uuid == null ? null : _products[uuid];
     if (uuid == null || current == null) throw const OfflineRefusal('Produit inconnu sur ce terminal.', code: CatalogueValidation.unknownProduct);
     final unknown = changes.keys.where((k) => !_editableFields.contains(k));
+    if (expected != null && changes.keys.any((key) => !expected.containsKey(key) || current[key] != expected[key])) {
+      throw const OfflineRefusal('La fiche a changé depuis son ouverture. Fermez puis rouvrez-la avant de modifier.', code: 'produit_modifie_depuis_lecture');
+    }
     if (unknown.isNotEmpty) throw OfflineRefusal('Champ non modifiable : ${unknown.join(', ')}.');
     final next = <String, Object?>{};
     for (final e in changes.entries) {

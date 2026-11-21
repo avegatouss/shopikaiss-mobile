@@ -972,6 +972,11 @@ class LocalRegisterAdapter {
     final fields = args['fields'];
     if (fields is! Map || fields.isEmpty) throw const AdapterFailure('aucun_changement', 'Aucun changement à enregistrer.');
     final changes = <String, Object?>{};
+    final expectedInput = args['expected_fields'];
+    if (expectedInput != null && expectedInput is! Map) {
+      throw const AdapterFailure('argument_invalide', 'Valeurs de lecture invalides.');
+    }
+    final expected = expectedInput is Map ? <String, Object?>{} : null;
     for (final e in fields.entries) {
       final name = _fieldNames[e.key];
       if (name == null) throw AdapterFailure('argument_invalide', 'Champ non modifiable : ${e.key}.');
@@ -981,9 +986,13 @@ class LocalRegisterAdapter {
         throw AdapterFailure('argument_invalide', 'Valeur invalide pour ${e.key}.');
       }
       changes[name] = value;
+      if (expected != null) {
+        if (!expectedInput.containsKey(e.key)) throw const AdapterFailure('argument_invalide', 'Valeur initiale manquante.');
+        expected[name] = expectedInput[e.key];
+      }
     }
     try {
-      final product = await engine.updateProduct(operator, productId, changes, operationUuid: _optionalString(args, 'operation_id'));
+      final product = await engine.updateProduct(operator, productId, changes, operationUuid: _optionalString(args, 'operation_id'), expected: expected);
       _emit('catalogue');
       return {'product_id': product.id, 'local_state': 'a_synchroniser'};
     } on OfflineRefusal catch (e) {

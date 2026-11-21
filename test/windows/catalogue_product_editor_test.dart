@@ -1,10 +1,69 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/catalogue_product_editor.dart';
 
 void main() {
+  testWidgets('catalogue editor fits a compact cash register window', (
+    tester,
+  ) async {
+    if (Platform.isWindows) {
+      await tester.runAsync(() async {
+        final loader = FontLoader('Segoe UI');
+        loader.addFont(
+          Future.value(
+            ByteData.sublistView(
+              await File('C:/Windows/Fonts/segoeui.ttf').readAsBytes(),
+            ),
+          ),
+        );
+        await loader.load();
+      });
+    }
+    await tester.binding.setSurfaceSize(const Size(800, 600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final boundary = GlobalKey();
+    await tester.pumpWidget(
+      RepaintBoundary(
+        key: boundary,
+        child: MaterialApp(
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(fontFamily: 'Segoe UI'),
+          home: Scaffold(
+            body: CatalogueProductEditor(
+              maxPrice: 999999999999,
+              initial: const CatalogueProductDraft(
+                name: 'Poulet braisé',
+                price: 3500,
+              ),
+              onSave: (_) async => null,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Enregistrer localement'), findsOneWidget);
+    final box = tester.getRect(find.text('Enregistrer localement'));
+    expect(box.bottom, lessThanOrEqualTo(600));
+    await tester.runAsync(() async {
+      final image =
+          await (boundary.currentContext!.findRenderObject()
+                  as RenderRepaintBoundary)
+              .toImage();
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+      await Directory('build/visual-checks').create(recursive: true);
+      await File('build/visual-checks/catalogue-800x600.png')
+          .writeAsBytes(bytes!.buffer.asUint8List());
+      image.dispose();
+    });
+  });
   Future<void> open(
     WidgetTester tester,
     Future<String?> Function(CatalogueProductDraft) save, {

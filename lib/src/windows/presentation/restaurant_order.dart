@@ -10,6 +10,8 @@ import 'restaurant_recovery.dart';
 import 'restaurant_payment.dart';
 import 'restaurant_management.dart';
 import 'sales_history.dart';
+import 'screen_settings.dart';
+import 'sale_ticket_policy.dart';
 
 class RestaurantOrderDialog extends StatefulWidget {
   const RestaurantOrderDialog({
@@ -437,34 +439,32 @@ class _RestaurantOrderState extends State<RestaurantOrderDialog> {
     );
     if (value != null && mounted) {
       if (value['order'] is Map) setState(() => order = value['order'] as Map);
-      final print = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text('Vente ${value['number']} enregistrée'),
-          content: Text(
-            'Monnaie : ${value['change_label'] ?? 'consulter le reçu'}',
+      try {
+        message = await dispatchSaleTicket(
+          mode: ScreenSettings.load().ticketMode,
+          print: () => printOriginalTicket(widget.host, '${value['sale_id']}'),
+          confirm: () => showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text('Vente ${value['number']} enregistrée'),
+              content: Text(
+                'Monnaie : ${value['change_label'] ?? 'consulter le reçu'}',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Sans ticket'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Imprimer le ticket'),
+                ),
+              ],
+            ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Sans ticket'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Imprimer le ticket'),
-            ),
-          ],
-        ),
-      );
-      if (print == true) {
-        try {
-          message = await printOriginalTicket(
-            widget.host,
-            '${value['sale_id']}',
-          );
-        } catch (e) {
-          message = 'Vente enregistrée. Impression à vérifier : $e';
-        }
+        );
+      } catch (e) {
+        message = 'Vente enregistrée. Impression à vérifier : $e';
       }
       if (mounted) setState(() {});
     }

@@ -288,7 +288,7 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Modifie une fiche : [changes] porte seulement les champs changés (`nom`, `reference`, `categorie_uuid`, `prix`,
   /// `prix_gros`, `gros_quantite_min`), aux formats du contrat.
-  Future<Product> updateProduct(Operator operator, int productId, Map<String, Object?> changes, {String? operationUuid}) =>
+  Future<Product> updateProduct(Operator operator, int productId, Map<String, Object?> changes, {String? operationUuid, Map<String, Object?>? expected}) =>
       throw const OfflineRefusal('Modification de produit non disponible sur ce terminal.');
 
   /// Créations et modifications de ce terminal, les plus récentes d'abord.

@@ -32,6 +32,8 @@ import 'cash_operations.dart';
 import 'product_badges.dart';
 import 'pass_payment.dart';
 import 'restaurant_dialog.dart';
+import 'catalogue_dialog.dart';
+import 'sale_ticket_policy.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -167,6 +169,25 @@ class _Register extends StatefulWidget {
 }
 
 class _RegisterState extends State<_Register> {
+  bool get _canCreateProduct =>
+      _canEdit &&
+      (c.capabilities['product_create'] as Map?)?['allowed'] == true;
+  bool get _canModifyProduct =>
+      _canEdit && (c.capabilities['product_edit'] as Map?)?['allowed'] == true;
+
+  Future<void> _catalogueEditor({int? productId, bool history = false}) async {
+    _searchDelay?.cancel();
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => CatalogueDialog(
+        controller: c,
+        productId: productId,
+        history: history,
+      ),
+    );
+  }
+
   final _search = TextEditingController();
   Timer? _searchDelay;
   void _queueSearch() {
@@ -415,8 +436,10 @@ class _RegisterState extends State<_Register> {
 
   /// Ticket après une vente : demandé au caissier, ou imprimé d'office selon le réglage du poste.
   Future<String> _saleTicket(String operation) async {
-    if (_screen.ticketMode != 'auto') {
-      final print = await showDialog<bool>(
+    return dispatchSaleTicket(
+      mode: _screen.ticketMode,
+      print: () => printOriginalTicket(c.host, operation),
+      confirm: () => showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Imprimer le ticket ?'),
@@ -432,10 +455,8 @@ class _RegisterState extends State<_Register> {
             ),
           ],
         ),
-      );
-      if (print != true) return 'Ticket disponible dans Ventes récentes.';
-    }
-    return printOriginalTicket(c.host, operation);
+      ),
+    );
   }
 
   @override
@@ -753,6 +774,10 @@ class _RegisterState extends State<_Register> {
                   if (value == 'web') _backOffice(cashRegister: true);
                   if (value == 'help') _shortcuts();
                   if (value == 'session') _session();
+                  if (value == 'create_product') _catalogueEditor();
+                  if (value == 'catalogue_changes') {
+                    _catalogueEditor(history: true);
+                  }
                   if (value == 'close' || value == 'return') {
                     showDialog<void>(
                       context: context,
@@ -768,6 +793,16 @@ class _RegisterState extends State<_Register> {
                   }
                 },
                 itemBuilder: (_) => [
+                  if (_canCreateProduct)
+                    const PopupMenuItem(
+                      value: 'create_product',
+                      child: Text('Nouveau produit hors connexion'),
+                    ),
+                  PopupMenuItem(
+                    value: 'catalogue_changes',
+                    enabled: _canEdit,
+                    child: const Text('Produits créés ou modifiés ici'),
+                  ),
                   PopupMenuItem(
                     value: 'close',
                     enabled: _canEdit,
@@ -1198,6 +1233,12 @@ class _RegisterState extends State<_Register> {
                 '${c.products.length} / ${c.view['products_total'] ?? c.products.length} produits',
               ),
             ),
+            if (_canCreateProduct)
+              IconButton(
+                tooltip: 'Nouveau produit hors connexion',
+                icon: const Icon(Icons.add_box_outlined),
+                onPressed: () => _catalogueEditor(),
+              ),
             if (c.view['has_more'] == true)
               TextButton.icon(
                 onPressed: _canEdit
@@ -1237,8 +1278,23 @@ class _RegisterState extends State<_Register> {
                           ProductBadges(product: p),
                         ],
                       ),
-                      trailing: Text(p['price_label'] as String? ?? '—'),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(p['price_label'] as String? ?? '—'),
+                          if (_canModifyProduct)
+                            IconButton(
+                              tooltip: 'Modifier la fiche produit',
+                              icon: const Icon(Icons.edit_outlined, size: 18),
+                              onPressed: () =>
+                                  _catalogueEditor(productId: p['id'] as int),
+                            ),
+                        ],
+                      ),
                       onTap: _canEdit ? () => _addProduct(p) : null,
+                      onLongPress: _canModifyProduct
+                          ? () => _catalogueEditor(productId: p['id'] as int)
+                          : null,
                     );
                   },
                 )
@@ -1258,6 +1314,9 @@ class _RegisterState extends State<_Register> {
                     return Card(
                       color: _palette.primaryContainer.withValues(alpha: .45),
                       child: InkWell(
+                        onLongPress: _canModifyProduct
+                            ? () => _catalogueEditor(productId: p['id'] as int)
+                            : null,
                         onTap:
                             c.ready && !c.busy && c.uncertainOperation == null
                             ? () => _addProduct(p)
@@ -1810,6 +1869,9 @@ class _PaymentState extends State<_Payment> {
                       );
                       if (mounted && context.mounted && committed == true) {
                         Navigator.pop(context);
+                      }
+                      if (committed == true) {
+                        unawaited(c.printPendingTicket());
                       }
                     }
                   : null,

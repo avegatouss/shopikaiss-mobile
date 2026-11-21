@@ -167,6 +167,63 @@ class _Host implements WindowsHost {
 
 void main() {
   testWidgets(
+    'mixed payment closes both sheets before dispatching its ticket',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      var printed = 0;
+      c.saleTicket = (_) async {
+        printed++;
+        final context = tester.element(find.byType(Scaffold).first);
+        await showDialog<void>(
+          context: context,
+          builder: (_) =>
+              const AlertDialog(title: Text('Ticket confirmation test')),
+        );
+        return 'Printed';
+      };
+      await tester.tap(find.text('Payer (F4)'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Plusieurs paiements / référence'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Montant (F CFA)'),
+        '1999',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Montant (F CFA)'),
+        '2000',
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pumpAndSettle();
+      expect(printed, 0);
+      await tester.tap(find.text('Confirmer ces paiements'));
+      await tester.pumpAndSettle();
+      expect(c.uncertainOperation, isNull, reason: c.message);
+      expect(c.receipt, 'TEST-1', reason: '${host.calls} / ${c.message}');
+      expect(printed, 1);
+      expect(find.text('Ticket confirmation test'), findsOneWidget);
+      expect(find.text('Répartir le paiement'), findsNothing);
+      expect(find.text('Paiement'), findsNothing);
+      expect(
+        host.calls.where((command) => command == HostCommand.commitSale),
+        hasLength(1),
+      );
+      await c.printPendingTicket();
+      expect(printed, 1);
+    },
+  );
+  testWidgets(
     'search debounces typing and clear restores catalogue without scanning',
     (tester) async {
       tester.view.physicalSize = const Size(1366, 768);
