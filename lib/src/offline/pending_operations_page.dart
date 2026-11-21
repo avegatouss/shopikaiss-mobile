@@ -7,7 +7,7 @@ import 'money.dart';
 /// Journal des opérations hors ligne du terminal : en attente d'envoi, transmises (intégrées ou à arbitrer par la
 /// boutique), refusées. Les opérations transmises restent visibles 30 jours.
 class PendingOperationsPage extends StatefulWidget {
-  const PendingOperationsPage({super.key, required this.engine, this.onReprint, this.onReturn, this.onPrintZ});
+  const PendingOperationsPage({super.key, required this.engine, this.onReprint, this.onReturn, this.onPrintZ, this.onEdit});
 
   final CaisseEngine engine;
 
@@ -16,6 +16,9 @@ class PendingOperationsPage extends StatefulWidget {
 
   /// Retour en espèces d'une vente ; absent si les retours hors ligne sont fermés.
   final Future<void> Function(OfflineOperation operation)? onReturn;
+
+  /// « Modifier le ticket » (2.1 lot 11) : la page se ferme et la caisse reprend les articles du ticket.
+  final Future<void> Function(OfflineOperation operation)? onEdit;
 
   /// Impression du Z d'une clôture intégrée.
   final Future<void> Function(OfflineOperation operation)? onPrintZ;
@@ -103,6 +106,15 @@ class _PendingOperationsPageState extends State<PendingOperationsPage> {
                           Text(formatFcfa(o.total), style: const TextStyle(fontWeight: FontWeight.w600)),
                           if (widget.onReprint != null)
                             IconButton(tooltip: 'Réimprimer le ticket', icon: const Icon(Icons.print), onPressed: () => widget.onReprint!(o)),
+                          if (widget.onEdit != null)
+                            IconButton(
+                              tooltip: 'Modifier le ticket',
+                              icon: const Icon(Icons.edit_note),
+                              onPressed: () {
+                                Navigator.of(context).pop();
+                                widget.onEdit!(o);
+                              },
+                            ),
                           if (widget.onReturn != null)
                             IconButton(
                               tooltip: 'Retour',

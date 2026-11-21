@@ -20,6 +20,7 @@ import '../windows/presentation/brand_logo.dart';
 import '../windows/presentation/calculator.dart';
 import '../windows/presentation/searchable_choice.dart';
 import 'customer_display.dart';
+import 'catalogue_edit.dart';
 import 'engine.dart';
 import 'local_prices.dart';
 import 'models.dart';
@@ -944,6 +945,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   Future<void> _suspendCart() async {
     if (_cart.isEmpty) return;
+    if (_editing != null) return _toast('Modification du ticket en cours : validez-la ou abandonnez-la.');
     // Prix saisi : le panier partagé ne le porte pas, la mise en attente reste sur ce terminal (sauf panier repris,
     // refusé par le moteur).
     final entered = _cart.any((l) => l.enteredPrice != null);
@@ -2279,6 +2281,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   /// [passes] : vente payée par pass (vérifiés dans la feuille de scan), sans fenêtre de paiement.
   Future<void> _checkout(Snapshot snapshot, int payable, {List<PassCheck>? passes}) async {
+    if (_editing != null) return _validateSaleEdit(snapshot);
     try {
       allocateLots(snapshot, _cart);
     } on OfflineRefusal catch (e) {
@@ -2584,9 +2587,172 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           onReprint: _reprint,
           onReturn: _operator != null ? _startReturn : null,
           onPrintZ: _printZ,
+          onEdit: _operator != null && _engine.saleEditSupported ? _startSaleEdit : null,
         ),
       ),
     );
+  }
+
+  // ------------------------------------------------------------------ Modifier un ticket (2.1 lot 11)
+
+  /// Ticket en cours de modification : ses articles sont dans le panier ; encaissement et mise en attente remplacés.
+  OfflineOperation? _editing;
+
+  Future<void> _startSaleEdit(OfflineOperation sale) async {
+    final snapshot = _snapshot;
+    if (snapshot == null) return;
+    if (_editing != null) return _toast('Une modification de ticket est déjà en cours.');
+    if (_cart.isNotEmpty) return _toast('Videz ou mettez en attente le panier avant de modifier un ticket.');
+    final refusal = await _engine.saleEditCheck(_operator, sale);
+    if (!mounted) return;
+    if (refusal != null) return _refuse(refusal, title: 'Modification impossible');
+    setState(() {
+      for (final raw in (sale.content['lignes'] as List).cast<Map>()) {
+        final product = raw['produit_id'] is int ? snapshot.byId(raw['produit_id'] as int) : null;
+        if (product == null) continue;
+        final packaging = raw['conditionnement_id'] is int ? product.packaging(raw['conditionnement_id'] as int) : null;
+        final unit = (raw['prix_unitaire'] as num).toInt();
+        final usual = packaging?.price ?? product.price;
+        _cart.add(CartLine(
+          product: product,
+          packaging: packaging,
+          quantity: parseMicros('${raw['quantite']}') ?? BigInt.from(1000000),
+          discount: (raw['remise'] as num?)?.toInt() ?? 0,
+          tier: _tier,
+          enteredPrice: packaging == null && product.priceEditable && unit != usual ? unit : null,
+        ));
+      }
+      _editing = sale;
+    });
+    _showEditBanner();
+  }
+
+  void _showEditBanner() {
+    final sale = _editing;
+    if (sale == null) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentMaterialBanner()
+      ..showMaterialBanner(
+        MaterialBanner(
+          backgroundColor: Colors.amber.shade100,
+          leading: const Icon(Icons.edit_note),
+          content: Text('Modification du ticket N° ${sale.number ?? ''} · ancien total ${formatFcfa(sale.total)}. « Encaisser » valide la modification.'),
+          actions: [TextButton(onPressed: _abandonSaleEdit, child: const Text('Abandonner'))],
+        ),
+      );
+  }
+
+  Future<void> _abandonSaleEdit() async {
+    ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+    await _engine.deleteDraft(_draftUuid);
+    if (!mounted) return;
+    setState(() {
+      _clearCart();
+      _editing = null;
+      _draftUuid = const Uuid().v4();
+    });
+  }
+
+  /// « Valider la modification » : ancien et nouveau total, différence, moyen (seulement s'il y a le choix), code
+  /// responsable (masqué), motif facultatif. Le moteur décide de tout ; le même identifiant d'opération sert aux essais.
+  Future<void> _validateSaleEdit(Snapshot snapshot) async {
+    final sale = _editing!;
+    final operator = _operator;
+    if (operator == null) return _toast('Identifiez le caissier.');
+    final SaleEditPreview preview;
+    try {
+      preview = _engine.previewSaleEdit(sale, _cart);
+    } on OfflineRefusal catch (e) {
+      return _refuse(e.message, title: 'Modification impossible');
+    }
+    final names = {for (final m in snapshot.methods) m.code: m.name};
+    final code = TextEditingController();
+    final reason = TextEditingController();
+    final operationUuid = const Uuid().v4();
+    String? method = preview.methodChoice ? null : (preview.methods.isEmpty ? null : preview.methods.first.code);
+    String? error;
+    var busy = false;
+    final done = await showDialog<OfflineOperation>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: Text('Valider la modification du ticket N° ${sale.number ?? ''}'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Ancien total : ${formatFcfa(preview.originalTotal)}'),
+              Text('Nouveau total : ${formatFcfa(preview.newTotal)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(
+                switch (preview.direction) {
+                  'encaissement' => 'Complément à encaisser : ${formatFcfa(preview.difference)}',
+                  'remboursement' => 'À rembourser au client : ${formatFcfa(-preview.difference)}',
+                  _ => 'Aucune différence à régler',
+                },
+                style: TextStyle(fontWeight: FontWeight.bold, color: preview.difference < 0 ? Colors.deepOrange : Colors.green.shade800),
+              ),
+              if (preview.methodChoice)
+                DropdownButtonFormField<String>(
+                  initialValue: method,
+                  decoration: const InputDecoration(labelText: 'Moyen de la vente d’origine'),
+                  items: [for (final m in preview.methods) DropdownMenuItem(value: m.code, child: Text('${names[m.code] ?? m.code} (${formatFcfa(m.amount)})'))],
+                  onChanged: (v) => setLocal(() => method = v),
+                )
+              else if (preview.difference != 0 && method != null)
+                Text('Sur : ${names[method] ?? method}'),
+              TextField(
+                controller: code,
+                obscureText: true,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                maxLength: 8,
+                decoration: const InputDecoration(labelText: 'Code responsable'),
+              ),
+              TextField(controller: reason, maxLength: 500, decoration: const InputDecoration(labelText: 'Motif (facultatif)')),
+              if (error != null) Text(error!, style: const TextStyle(color: Colors.red)),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Retour au panier')),
+            FilledButton(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      if (code.text.length != 8) return setLocal(() => error = 'Le code responsable a 8 chiffres.');
+                      if (preview.methodChoice && method == null) return setLocal(() => error = 'Choisissez le moyen de la différence.');
+                      setLocal(() => (busy = true, error = null));
+                      try {
+                        final approver = await _engine.identifyEditApprover(code.text);
+                        final edited = await _engine.recordSaleEdit(operator, sale, List.of(_cart),
+                            approver: approver, method: method, reason: reason.text, operationUuid: operationUuid);
+                        if (context.mounted) Navigator.pop(context, edited);
+                      } on OfflineRefusal catch (e) {
+                        setLocal(() => (busy = false, error = e.message));
+                      }
+                    },
+              child: const Text('Valider la modification'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (done == null || !mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+    await _engine.deleteDraft(_draftUuid);
+    if (!mounted) return;
+    setState(() {
+      _clearCart();
+      _editing = null;
+      _draftUuid = const Uuid().v4();
+    });
+    final settlement = (done.content['modification'] as Map?)?['reglement'] as Map?;
+    final cash = snapshot.methods.where((m) => m.code == settlement?['moyen']).firstOrNull?.isCash ?? false;
+    if (widget.session.hasPrinter && cash && settlement?['sens'] != 'aucun') unawaited(widget.session.channel.openDrawer());
+    _toast('Ticket modifié : nouveau ticket N° ${done.number ?? ''}.');
+    final (lines, payments) = _engine.ticketParts(done);
+    await _print(snapshot, done, lines, payments);
   }
 
   /// Duplicata d'un ticket hors ligne depuis le journal : prix et quantités tels qu'encaissés.
