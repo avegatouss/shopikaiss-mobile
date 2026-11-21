@@ -11,34 +11,40 @@ buildReceiptPdf(
   required pw.Font font,
   bool a4 = false,
   int paperWidth = 80,
+  int copies = 1,
 }) async {
+  if (copies < 1 || copies > 3) {
+    throw const FormatException('Nombre d’exemplaires invalide');
+  }
   if (lines.isEmpty || lines.length > 10000) {
     throw const FormatException('Ticket invalide');
   }
   final doc = pw.Document();
   final pages = <pw.Page>[];
-  for (var start = 0; start < lines.length; start += 40) {
-    final end = start + 40 < lines.length ? start + 40 : lines.length;
-    final page = pw.Page(
-      pageFormat: a4
-          ? PdfPageFormat.a4
-          : PdfPageFormat(
-              paperWidth * PdfPageFormat.mm,
-              double.infinity,
-              marginAll: 4 * PdfPageFormat.mm,
-            ),
-      theme: pw.ThemeData.withFont(base: font),
-      build: (_) => pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        mainAxisSize: pw.MainAxisSize.min,
-        children: [
-          for (final line in lines.sublist(start, end))
-            pw.Text(line, style: const pw.TextStyle(fontSize: 9)),
-        ],
-      ),
-    );
-    pages.add(page);
-    doc.addPage(page);
+  for (var copy = 0; copy < copies; copy++) {
+    for (var start = 0; start < lines.length; start += 40) {
+      final end = start + 40 < lines.length ? start + 40 : lines.length;
+      final page = pw.Page(
+        pageFormat: a4
+            ? PdfPageFormat.a4
+            : PdfPageFormat(
+                paperWidth * PdfPageFormat.mm,
+                double.infinity,
+                marginAll: 4 * PdfPageFormat.mm,
+              ),
+        theme: pw.ThemeData.withFont(base: font),
+        build: (_) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          mainAxisSize: pw.MainAxisSize.min,
+          children: [
+            for (final line in lines.sublist(start, end))
+              pw.Text(line, style: const pw.TextStyle(fontSize: 9)),
+          ],
+        ),
+      );
+      pages.add(page);
+      doc.addPage(page);
+    }
   }
   final bytes = await doc.save();
   return (

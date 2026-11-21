@@ -14,6 +14,11 @@ import '../../offline/ticket.dart';
 
 /// App-specific printer; never changes the Windows system default.
 class ReceiptPrinting {
+  static int copyCount(Object? value) =>
+      value is int && value >= 1 && value <= 3 ? value : 1;
+
+  static Future<String> printSale(List<String> lines, {bool compact = false}) =>
+      printLines(lines, compact: compact, useConfiguredCopies: true);
   static Future<int> paperWidth() async {
     if (!await _file.exists()) return 80;
     final settings = jsonDecode(await _file.readAsString()) as Map;
@@ -75,18 +80,37 @@ class ReceiptPrinting {
     var mode = saved['mode'] as String? ?? 'raw';
     var fallback = saved['pdf_fallback'] != false;
     var width = saved['paper_width'] == 58 ? 58 : 80;
+    var copies = copyCount(saved['copies']);
     if (!context.mounted) return;
     final options = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
           title: const Text('Mode d’impression du poste'),
+          scrollable: true,
           content: SizedBox(
             width: 460,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('${saved['name']}'),
+                DropdownButtonFormField<int>(
+                  initialValue: copies,
+                  decoration: const InputDecoration(
+                    labelText: 'Exemplaires du ticket de vente',
+                  ),
+                  items: [
+                    for (final count in [1, 2, 3])
+                      DropdownMenuItem(
+                        value: count,
+                        child: Text('$count exemplaire${count > 1 ? 's' : ''}'),
+                      ),
+                  ],
+                  onChanged: (value) => update(() => copies = value ?? 1),
+                ),
+                const Text(
+                  'Appliqué aux ventes, réimpressions et tickets d’essai. Les bons cuisine et documents Z restent en un exemplaire.',
+                ),
                 DropdownButtonFormField<int>(
                   initialValue: width,
                   decoration: const InputDecoration(
@@ -139,6 +163,7 @@ class ReceiptPrinting {
                 'mode': mode,
                 'pdf_fallback': fallback,
                 'paper_width': width,
+                'copies': copies,
               }),
               child: const Text('Enregistrer'),
             ),
@@ -160,13 +185,14 @@ class ReceiptPrinting {
     'Impression et coupe du papier',
     '0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ',
     'Derniere ligne : doit rester lisible.',
-  ]);
+  ], useConfiguredCopies: true);
 
   static Future<String> printLines(
     List<String> lines, {
     bool compact = false,
     Uint8List? escposBytes,
     Future<void> Function()? onTransmitted,
+    bool useConfiguredCopies = false,
   }) async {
     if (lines.isEmpty || lines.length > 10000) {
       throw const FormatException('Ticket invalide');
@@ -175,6 +201,7 @@ class ReceiptPrinting {
       return 'Choisissez une imprimante de caisse dans les réglages.';
     }
     final saved = jsonDecode(await _file.readAsString()) as Map;
+    final copies = useConfiguredCopies ? copyCount(saved['copies']) : 1;
     final printers = await Printing.listPrinters();
     final matching = printers.where(
       (p) => p.url == saved['url'] && p.isAvailable,
@@ -185,13 +212,18 @@ class ReceiptPrinting {
     final mode = saved['mode'] as String? ?? 'raw';
     var fallbackUsed = false;
     if (mode == 'raw') {
+      final ticket = escposBytes ?? offlineTicketBytes(lines, compact: compact);
+      final batch = BytesBuilder(copy: false);
+      for (var i = 0; i < copies; i++) {
+        batch.add(ticket);
+      }
       final outcome = await const RawReceiptPrinter().send(
         matching.first.name,
-        escposBytes ?? offlineTicketBytes(lines, compact: compact),
+        batch.takeBytes(),
       );
       if (outcome == RawPrintOutcome.transmitted) {
         await onTransmitted?.call();
-        return 'Ticket ESC/POS transmis au spouleur. Vérifiez le papier et la coupe.';
+        return '$copies exemplaire(s) transmis au spouleur. Vérifiez le papier et la coupe.';
       }
       if (!usePdfFallback(outcome, saved['pdf_fallback'] != false)) {
         return outcome == RawPrintOutcome.unknown
@@ -211,6 +243,7 @@ class ReceiptPrinting {
       font: font,
       a4: mode == 'pdf_a4',
       paperWidth: saved['paper_width'] == 58 ? 58 : 80,
+      copies: copies,
     );
     final sent = await Printing.directPrintPdf(
       printer: matching.first,
@@ -221,7 +254,7 @@ class ReceiptPrinting {
     );
     if (sent) await onTransmitted?.call();
     return sent
-        ? '${fallbackUsed ? 'Secours PDF : ' : ''}Ticket transmis au pilote. Vérifiez la sortie papier.'
+        ? '${fallbackUsed ? 'Secours PDF : ' : ''}$copies exemplaire(s) transmis au pilote. Vérifiez la sortie papier.'
         : 'Impression annulée ou non confirmée. Vente conservée.';
   }
 

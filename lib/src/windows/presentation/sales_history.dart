@@ -21,7 +21,7 @@ Future<String> printOriginalTicket(WindowsHost host, String operation) async {
       lines.any((v) => v is! String)) {
     throw const FormatException();
   }
-  return ReceiptPrinting.printLines(
+  return ReceiptPrinting.printSale(
     lines.cast<String>(),
     compact: result['compact'] == true,
   );
@@ -32,7 +32,7 @@ class SalesHistoryDialog extends StatefulWidget {
   const SalesHistoryDialog({
     super.key,
     required this.host,
-    this.printReceipt = ReceiptPrinting.printLines,
+    this.printReceipt = ReceiptPrinting.printSale,
   });
   final WindowsHost host;
   final Future<String> Function(List<String> lines, {bool compact})
