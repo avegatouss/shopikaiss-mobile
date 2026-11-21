@@ -5,10 +5,45 @@ import 'package:shopikaiss_terminal/src/app_settings.dart';
 import 'package:shopikaiss_terminal/src/printer/escpos.dart';
 
 void main() {
+  group('migrateShopUrl', () {
+    test('l’ancien défaut /caisse devient /caisse/demarrer', () {
+      expect(migrateShopUrl('https://boutique.exemple.ci/caisse'), 'https://boutique.exemple.ci/caisse/demarrer');
+      expect(migrateShopUrl('https://boutique.exemple.ci/caisse/'), 'https://boutique.exemple.ci/caisse/demarrer');
+      expect(migrateShopUrl('http://192.168.1.10:8000/caisse'), 'http://192.168.1.10:8000/caisse/demarrer');
+    });
+
+    test('une adresse personnalisée est laissée telle quelle', () {
+      for (final url in [
+        '',
+        'https://boutique.exemple.ci/caisse/demarrer',
+        'https://boutique.exemple.ci/restaurant/caisse',
+        'https://boutique.exemple.ci/sous/caisse',
+        'https://boutique.exemple.ci/caisse?terminal=2',
+        'https://boutique.exemple.ci/caisse#x',
+        'https://boutique.exemple.ci/caisse/passes',
+        'https://boutique.exemple.ci/',
+        'ftp://boutique.exemple.ci/caisse',
+        'pas une adresse',
+      ]) {
+        expect(migrateShopUrl(url), url, reason: url);
+      }
+    });
+
+    test('migration idempotente', () {
+      final once = migrateShopUrl('https://boutique.exemple.ci/caisse');
+      expect(migrateShopUrl(once), once);
+    });
+  });
+
   group('normalizeShopUrl', () {
-    test('ajoute https et /caisse', () {
-      expect(normalizeShopUrl('boutique.exemple.ci'), 'https://boutique.exemple.ci/caisse');
-      expect(normalizeShopUrl(' https://boutique.exemple.ci/ '), 'https://boutique.exemple.ci/caisse');
+    test('ajoute https et /caisse/demarrer', () {
+      expect(normalizeShopUrl('boutique.exemple.ci'), 'https://boutique.exemple.ci/caisse/demarrer');
+      expect(normalizeShopUrl(' https://boutique.exemple.ci/ '), 'https://boutique.exemple.ci/caisse/demarrer');
+      expect(normalizeShopUrl('http://10.0.0.5:8080'), 'http://10.0.0.5:8080/caisse/demarrer');
+    });
+
+    test('garde un /caisse saisi explicitement', () {
+      expect(normalizeShopUrl('https://boutique.exemple.ci/caisse'), 'https://boutique.exemple.ci/caisse');
     });
 
     test('garde un chemin et un port explicites', () {

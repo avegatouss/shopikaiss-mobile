@@ -52,7 +52,7 @@ class AppSettings {
   /// `cover` (recadrée) ou `contain` (image entière).
   String imageFit;
 
-  /// Adresse de la caisse, ex. `https://boutique.exemple.ci/caisse`. Vide = pas encore configurée.
+  /// Adresse de la caisse, ex. `https://boutique.exemple.ci/caisse/demarrer`. Vide = pas encore configurée.
   String shopUrl;
 
   /// `auto`, `sunmi`, `usb`, `bluetooth`, `serial`, `none`.
@@ -111,7 +111,7 @@ class AppSettings {
   static Future<AppSettings> load() async {
     final p = await SharedPreferences.getInstance();
     return AppSettings(
-      shopUrl: p.getString('shopUrl') ?? '',
+      shopUrl: await _migratedShopUrl(p),
       driver: p.getString('driver') ?? 'auto',
       paperWidth: p.getInt('paperWidth') ?? 0,
       serialPath: p.getString('serialPath') ?? '/dev/ttyS1',
@@ -169,7 +169,12 @@ String? originOf(String? url) {
   return '${uri.scheme}://${uri.host.toLowerCase()}$port';
 }
 
-/// Normalise l'adresse saisie : `https://` par défaut, `/caisse` si aucun chemin n'est donné
+/// Chemin de démarrage de la caisse (2026-11-19) : `/caisse/demarrer` établit le terminal (appareil fixé, terminal attribué)
+/// puis redirige vers la bonne caisse de la même origine (`/caisse`, `/restaurant/caisse`, `/restaurant/caisse-service-table`,
+/// ou la page d'accueil). Même adresse que ShopiKaiss Bridge et la caisse Windows.
+const shopStartPath = '/caisse/demarrer';
+
+/// Normalise l'adresse saisie : `https://` par défaut, `/caisse/demarrer` si aucun chemin n'est donné
 /// (même point d'entrée que l'application ShopiKaiss Bridge). Renvoie null si elle est invalide.
 String? normalizeShopUrl(String input) {
   var text = input.trim();
@@ -177,6 +182,25 @@ String? normalizeShopUrl(String input) {
   if (!text.contains('://')) text = 'https://$text';
   final uri = Uri.tryParse(text);
   if (uri == null || originOf(text) == null) return null;
-  final path = (uri.path.isEmpty || uri.path == '/') ? '/caisse' : uri.path;
+  final path = (uri.path.isEmpty || uri.path == '/') ? shopStartPath : uri.path;
   return uri.replace(path: path).toString();
+}
+
+/// Migration prudente d'une adresse enregistrée : l'ancien défaut exact `<origine>/caisse` (ou `/caisse/`, sans requête ni
+/// ancre) devient `<origine>/caisse/demarrer`. Toute autre adresse (chemin personnalisé, sous-répertoire, paramètres) est
+/// rendue telle quelle, de même qu'une adresse vide ou illisible.
+String migrateShopUrl(String saved) {
+  if (saved.isEmpty || originOf(saved) == null) return saved;
+  final uri = Uri.tryParse(saved);
+  if (uri == null || uri.hasQuery || uri.hasFragment || uri.userInfo.isNotEmpty) return saved;
+  if (uri.path != '/caisse' && uri.path != '/caisse/') return saved;
+  return uri.replace(path: shopStartPath).toString();
+}
+
+/// Adresse enregistrée, migrée une fois pour toutes (la nouvelle valeur est réenregistrée).
+Future<String> _migratedShopUrl(SharedPreferences p) async {
+  final saved = p.getString('shopUrl') ?? '';
+  final migrated = migrateShopUrl(saved);
+  if (migrated != saved) await p.setString('shopUrl', migrated);
+  return migrated;
 }

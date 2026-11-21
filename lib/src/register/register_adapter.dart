@@ -8,10 +8,13 @@ import '../offline/models.dart';
 import '../offline/money.dart';
 import '../offline/ticket.dart';
 import '../offline/web_rules.dart';
+import '../offline/x_z_report.dart';
+import '../printer/escpos.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
 import '../sync_v2/decimal6.dart';
 
+part 'register_adapter_closure.dart';
 part 'register_adapter_resto.dart';
 
 /// Version de l'interface de commandes du moteur (C-REQ-001). Toute rupture incrémente ce numéro.
@@ -67,6 +70,10 @@ class AdapterFailure implements Exception {
 /// restoClose, restoRegisterOpen, restoRegisterClose, restoRefund, restoVerifyTicket, restoDuplicateTicket,
 /// restoSetPrinterAddress en écriture (caissier identifié, identifiant d'opération, rejeu sans double) ; restoPrintJobs,
 /// restoPrintStart, restoPrintResult pour les bons imprimés par l'interface (hôte Windows).
+///
+/// Documents de clôture (register_adapter_closure.dart) : closureDocument {kind, version, duplicate?, columns? | paper_width?}
+/// rend pré-X, pré-Z ou duplicata du Z de session et, pour une édition provisoire, un `edition_id` conservé en attente ;
+/// recordEdition {edition_id} confirme l'impression (audit émis une seule fois, rejeu = même réponse).
 class LocalRegisterAdapter {
   LocalRegisterAdapter(this.engine, {this.paperWidth = 80, String Function()? newUuid}) : _newUuid = newUuid ?? (() => const Uuid().v4());
 
@@ -262,6 +269,10 @@ class LocalRegisterAdapter {
       case 'synchronize':
         scheduleSynchronization();
         return {'scheduled': true};
+      case 'closureDocument':
+        return _closureDocument(args);
+      case 'recordEdition':
+        return _recordEdition(args);
       default:
         final restaurant = _restoCommand(command, args, operationId);
         if (restaurant != null) return restaurant;

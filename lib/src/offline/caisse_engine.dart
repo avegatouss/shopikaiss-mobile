@@ -524,8 +524,9 @@ abstract class CaisseEngine extends EngineNotifier {
   }
 
   /// Audit d'une édition provisoire imprimée (pré-X, pré-Z ; lot Z local) : une opération par impression, avec son
-  /// propre UUID. Sans effet ici ; ne lève jamais (l'audit ne bloque ni l'impression ni la clôture).
-  Future<void> recordEdition(Operator operator, ClosureDocument document) async {}
+  /// propre UUID. Sans effet ici ; ne lève jamais (l'audit ne bloque ni l'impression ni la clôture). [operationUuid] :
+  /// UUID imposé (édition confirmée par l'adaptateur), l'opération n'est alors jamais émise deux fois.
+  Future<void> recordEdition(Operator operator, ClosureDocument document, {String? operationUuid}) async {}
 
   /// Clients de la boutique sur ce terminal (contrat 2.1, capacité `client.lecture`).
   bool get customersSupported => false;

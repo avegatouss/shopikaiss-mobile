@@ -1041,12 +1041,16 @@ class V2Engine extends CaisseEngine {
 
   /// Audit d'une édition provisoire (`edition_pre_x`, `edition_pre_z`) : seulement avec `z.local`, jamais bloquant.
   @override
-  Future<void> recordEdition(Operator operator, ClosureDocument document) async {
+  Future<void> recordEdition(Operator operator, ClosureDocument document, {String? operationUuid}) async {
     final type = document.editionType;
     final content = document.edition;
     if (type == null || content == null || !paired || !zLocalSupported) return;
     try {
-      await serialized(() => _record(_newUuid(), type, operator, (_) => content));
+      await serialized(() async {
+        // UUID imposé déjà présent dans la file : édition déjà journalisée (rejeu après redémarrage), rien de plus.
+        if (operationUuid != null && await v2.operation(operationUuid) != null) return;
+        await _record(operationUuid ?? _newUuid(), type, operator, (_) => content);
+      });
       await _afterWrite();
     } on OfflineRefusal {
       // Audit seulement : une édition non conforme n'empêche ni l'impression ni la clôture.
