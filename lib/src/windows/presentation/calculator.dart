@@ -139,6 +139,7 @@ class _DeskCalculatorState extends State<DeskCalculator> {
             controller: input,
             focusNode: focus,
             autofocus: true,
+            selectAllOnFocus: false,
             textAlign: TextAlign.right,
             style: const TextStyle(fontSize: 28),
             decoration: InputDecoration(
@@ -148,7 +149,7 @@ class _DeskCalculatorState extends State<DeskCalculator> {
                   ? 'Mémoire : $memory'
                   : 'Priorités × ÷ · Entrée = résultat',
             ),
-            keyboardType: TextInputType.text,
+            keyboardType: TextInputType.none,
             maxLength: 256,
             inputFormatters: [
               FilteringTextInputFormatter.allow(RegExp(r'[0-9.,+\-*/()×÷−% ]')),
@@ -190,35 +191,37 @@ class _DeskCalculatorState extends State<DeskCalculator> {
             ['±', '0', ',', '+'],
             ['%', '='],
           ])
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: [
-                  for (final value in row)
-                    Expanded(
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 3),
-                        child: SizedBox(
-                          height: 48,
-                          child: value == '='
-                              ? FilledButton(
-                                  onPressed: () => key(value),
-                                  child: const Text(
-                                    '=',
-                                    style: TextStyle(fontSize: 24),
+            ExcludeFocus(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Row(
+                  children: [
+                    for (final value in row)
+                      Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 3),
+                          child: SizedBox(
+                            height: 48,
+                            child: value == '='
+                                ? FilledButton(
+                                    onPressed: () => key(value),
+                                    child: const Text(
+                                      '=',
+                                      style: TextStyle(fontSize: 24),
+                                    ),
+                                  )
+                                : OutlinedButton(
+                                    onPressed: () => key(value),
+                                    child: Text(
+                                      value,
+                                      style: const TextStyle(fontSize: 20),
+                                    ),
                                   ),
-                                )
-                              : OutlinedButton(
-                                  onPressed: () => key(value),
-                                  child: Text(
-                                    value,
-                                    style: const TextStyle(fontSize: 20),
-                                  ),
-                                ),
+                          ),
                         ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
             ),
         ],

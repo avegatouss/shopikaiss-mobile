@@ -1045,6 +1045,7 @@ class _RegisterState extends State<_Register> {
               child: TextField(
                 controller: _scan,
                 focusNode: _scanFocus,
+                keyboardType: TextInputType.none,
                 autofocus: _screen.scannerAutoFocus,
                 enabled: c.ready && !c.busy && c.uncertainOperation == null,
                 decoration: InputDecoration(

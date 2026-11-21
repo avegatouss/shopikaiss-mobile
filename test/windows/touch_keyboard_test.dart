@@ -4,6 +4,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/touch_keyboard.dart';
 
 void main() {
+  testWidgets('numeric keypad can be selected on a text field', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (_, child) => TouchKeyboard(child: child!),
+        home: const Scaffold(body: TextField()),
+      ),
+    );
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(OutlinedButton, '123'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(OutlinedButton, 'ABC'), findsOneWidget);
+    final seven = tester.getCenter(find.widgetWithText(OutlinedButton, '7'));
+    final eight = tester.getCenter(find.widgetWithText(OutlinedButton, '8'));
+    final four = tester.getCenter(find.widgetWithText(OutlinedButton, '4'));
+    expect(seven.dy, eight.dy);
+    expect(seven.dx, four.dx);
+    for (final key in ['1', '2', '3']) {
+      await tester.tap(find.widgetWithText(OutlinedButton, key));
+      await tester.pump();
+    }
+    expect(
+      tester.widget<EditableText>(find.byType(EditableText)).controller.text,
+      '123',
+    );
+    await tester.tap(find.widgetWithText(OutlinedButton, 'ABC'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(OutlinedButton, 'Espace'), findsOneWidget);
+  });
   testWidgets('automatic keyboard edits selection and respects formatters', (
     tester,
   ) async {

@@ -2,8 +2,38 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/calculator.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/calculator_engine.dart';
+import 'package:shopikaiss_terminal/src/windows/presentation/touch_keyboard.dart';
 
 void main() {
+  testWidgets('Windows keypad keeps multi-digit input without extra keyboard', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.windows),
+        builder: (_, child) => TouchKeyboard(child: child!),
+        home: const Scaffold(body: DeskCalculator()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    for (final digit in ['1', '2', '3']) {
+      await tester.tap(find.widgetWithText(OutlinedButton, digit));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(OutlinedButton, 'Espace'), findsNothing);
+      expect(find.widgetWithText(OutlinedButton, 'ABC'), findsNothing);
+    }
+    final field = tester.widget<TextField>(find.byType(TextField));
+    expect(field.controller!.text, '123');
+    expect(field.controller!.selection.isCollapsed, isTrue);
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(OutlinedButton, 'Espace'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
   test(
     'chains, precedence, parentheses, decimal precision and percentages',
     () {

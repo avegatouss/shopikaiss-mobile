@@ -11,6 +11,7 @@ class TouchKeyboard extends StatefulWidget {
 class _TouchKeyboardState extends State<TouchKeyboard> {
   EditableTextState? editor;
   bool upper = false;
+  bool? numericOverride;
   @override
   void initState() {
     super.initState();
@@ -23,8 +24,15 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
     final eligible =
         state != null &&
         !state.widget.readOnly &&
+        state.widget.keyboardType != TextInputType.none &&
         !['barcode', 'calculator'].contains(focus?.debugLabel);
-    if (mounted) setState(() => editor = eligible ? state : null);
+    if (mounted) {
+      setState(() {
+        final next = eligible ? state : null;
+        if (editor != next) numericOverride = null;
+        editor = next;
+      });
+    }
   }
 
   @override
@@ -36,6 +44,10 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
   void key(String key) {
     final target = editor;
     if (target == null || !target.mounted) return;
+    if (key == '123' || key == 'ABC') {
+      setState(() => numericOverride = key == '123');
+      return;
+    }
     if (key == 'Fermer') {
       setState(() => editor = null);
       return;
@@ -74,9 +86,10 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
   Widget build(BuildContext context) {
     final type = editor?.widget.keyboardType;
     final numeric =
-        type == TextInputType.number ||
-        type == TextInputType.phone ||
-        type?.index == TextInputType.number.index;
+        numericOverride ??
+        (type == TextInputType.number ||
+            type == TextInputType.phone ||
+            type?.index == TextInputType.number.index);
     return Column(
       children: [
         Expanded(
@@ -105,19 +118,11 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
                       for (final row
                           in numeric
                               ? [
-                                  [
-                                    '1',
-                                    '2',
-                                    '3',
-                                    '4',
-                                    '5',
-                                    '6',
-                                    '7',
-                                    '8',
-                                    '9',
-                                    '0',
-                                  ],
-                                  [',', '.', '-', '⌫', 'Entrée', 'Fermer'],
+                                  ['7', '8', '9', '⌫'],
+                                  ['4', '5', '6', 'ABC'],
+                                  ['1', '2', '3', '-'],
+                                  ['0', ',', '.', 'Entrée'],
+                                  ['Fermer'],
                                 ]
                               : [
                                   '1234567890'.split(''),
@@ -133,6 +138,7 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
                                     ',',
                                     '-',
                                     'Espace',
+                                    '123',
                                     'Entrée',
                                     'Fermer',
                                   ],
