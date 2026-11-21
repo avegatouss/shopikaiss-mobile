@@ -79,7 +79,7 @@ class _CashOperationsState extends State<CashOperationsDialog> {
             .where((m) => m['cash'] != true)
             .toList();
         for (final m in methods) {
-          amounts[m['code'] as String] = TextEditingController();
+          amounts[m['code'] as String] = TextEditingController(text: '0');
           justifications[m['code'] as String] = TextEditingController();
         }
       }
@@ -322,7 +322,7 @@ class _CashOperationsState extends State<CashOperationsDialog> {
       scrollable: true,
       title: Text(widget.returns ? 'Retour en espèces' : 'Clôturer ma session'),
       content: SizedBox(
-        width: 540,
+        width: widget.returns ? 540 : 860,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -385,32 +385,26 @@ class _CashOperationsState extends State<CashOperationsDialog> {
                 const Text(
                   'Saisissez uniquement les montants réellement comptés. Les montants attendus ne sont pas affichés.',
                 ),
-                TextField(
+                const SizedBox(height: 16),
+                closureRow(
+                  name: 'Espèces',
                   controller: cash,
-                  enabled: !busy && allowed,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Espèces comptées (F CFA)',
+                  icon: Icons.payments_outlined,
+                ),
+                if (methods.isNotEmpty) const SizedBox(height: 12),
+                for (final m in methods)
+                  closureRow(
+                    name: m['name'] as String,
+                    controller: amounts[m['code']],
+                    justification: justifications[m['code']],
+                    icon: Icons.account_balance_wallet_outlined,
+                  ),
+                const Padding(
+                  padding: EdgeInsets.only(top: 4, bottom: 16),
+                  child: Text(
+                    'Autres moyens préremplis à 0 : modifiez ceux utilisés. Ajoutez une justification si nécessaire.',
                   ),
                 ),
-                for (final m in methods) ...[
-                  TextField(
-                    controller: amounts[m['code']],
-                    enabled: !busy && allowed,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: '${m['name']} : montant compté (F CFA)',
-                    ),
-                  ),
-                  TextField(
-                    controller: justifications[m['code']],
-                    enabled: !busy && allowed,
-                    maxLength: 500,
-                    decoration: InputDecoration(
-                      labelText: 'Justification ${m['name']} (si nécessaire)',
-                    ),
-                  ),
-                ],
               ],
               TextField(
                 controller: reason,
@@ -465,6 +459,87 @@ class _CashOperationsState extends State<CashOperationsDialog> {
             ),
           ),
       ],
+    ),
+  );
+
+  Widget closureRow({
+    required String name,
+    required TextEditingController? controller,
+    required IconData icon,
+    TextEditingController? justification,
+  }) => Container(
+    margin: const EdgeInsets.only(bottom: 12),
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+    ),
+    child: Builder(
+      builder: (context) {
+        final label = Row(
+          children: [
+            Icon(icon, size: 22, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                name,
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        );
+        final amount = TextField(
+          controller: controller,
+          enabled: !busy && allowed,
+          keyboardType: TextInputType.number,
+          decoration: InputDecoration(
+            labelText: justification == null
+                ? 'Espèces comptées (F CFA)'
+                : 'Montant compté (F CFA)',
+            border: const OutlineInputBorder(),
+            filled: true,
+          ),
+        );
+        final detail = justification == null
+            ? const Text(
+                'Comptez le tiroir puis saisissez le montant.',
+                style: TextStyle(fontSize: 13),
+              )
+            : TextField(
+                controller: justification,
+                enabled: !busy && allowed,
+                maxLength: 500,
+                decoration: const InputDecoration(
+                  labelText: 'Justification (si nécessaire)',
+                  border: OutlineInputBorder(),
+                  counterText: '',
+                  filled: true,
+                ),
+              );
+        if (MediaQuery.sizeOf(context).width < 760) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              label,
+              const SizedBox(height: 12),
+              amount,
+              const SizedBox(height: 12),
+              detail,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(flex: 2, child: label),
+            const SizedBox(width: 16),
+            Expanded(flex: 3, child: amount),
+            const SizedBox(width: 16),
+            Expanded(flex: 4, child: detail),
+          ],
+        );
+      },
     ),
   );
 }

@@ -15,6 +15,7 @@ class OperationsHost implements WindowsHost {
   final calls = <(HostCommand, Map<String, dynamic>, String?)>[];
   bool lose = false;
   bool refuse = false;
+  List<Map<String, dynamic>> methods = [];
   @override
   Stream<Map<String, dynamic>> get events => changes.stream;
   @override
@@ -28,7 +29,7 @@ class OperationsHost implements WindowsHost {
     calls.add((command, arguments, operationId));
     switch (command) {
       case HostCommand.preparePayment:
-        return {'methods': []};
+        return {'methods': methods};
       case HostCommand.closeSession:
       case HostCommand.commitReturn:
         if (refuse) {
@@ -89,6 +90,69 @@ class OperationsHost implements WindowsHost {
 }
 
 void main() {
+  testWidgets(
+    'closure defaults other methods to zero and aligns each method on desktop',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final host = OperationsHost()
+        ..methods = [
+          {'code': 'especes', 'name': 'Espèces', 'cash': true},
+          {'code': 'wave', 'name': 'Wave', 'cash': false},
+          {'code': 'carte', 'name': 'Carte', 'cash': false},
+        ];
+      final c = WindowsRegisterController(host)
+        ..ready = true
+        ..capabilities = {
+          'close_session': {'allowed': true},
+        };
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: CashOperationsDialog(controller: c)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final fields = find.byType(TextField);
+      expect(tester.widget<TextField>(fields.at(0)).controller!.text, '');
+      expect(tester.widget<TextField>(fields.at(1)).controller!.text, '0');
+      expect(tester.widget<TextField>(fields.at(3)).controller!.text, '0');
+      expect(
+        tester.getCenter(find.text('Wave')).dy,
+        closeTo(tester.getCenter(fields.at(1)).dy, 1),
+      );
+      expect(
+        tester.getCenter(fields.at(1)).dy,
+        closeTo(tester.getCenter(fields.at(2)).dy, 1),
+      );
+      expect(
+        tester.getTopLeft(fields.at(1)).dy -
+            tester.getBottomLeft(fields.first).dy,
+        greaterThanOrEqualTo(24),
+      );
+      await tester.binding.setSurfaceSize(const Size(600, 900));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      await tester.pumpAndSettle();
+      await tester.enterText(fields.first, '1500');
+      await tester.enterText(fields.at(2), 'Aucun paiement Wave');
+      await tester.tap(find.text('Clôturer la session'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Confirmer'));
+      await tester.pumpAndSettle();
+      final args = host.calls
+          .firstWhere((call) => call.$1 == HostCommand.closeSession)
+          .$2;
+      expect(args['cash'], 1500);
+      expect(args['counts'], [
+        {'method': 'wave', 'amount': 0, 'justification': 'Aucun paiement Wave'},
+        {'method': 'carte', 'amount': 0, 'justification': ''},
+      ]);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
   testWidgets('refusal during recovery never discards unknown operation', (
     tester,
   ) async {
