@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../ipc/protocol.dart';
@@ -137,6 +139,7 @@ class PassPaymentDialog extends StatelessWidget {
                         if (context.mounted && c.lines.isEmpty) {
                           Navigator.pop(context);
                         }
+                        unawaited(c.printPendingTicket());
                       }
                     : null,
                 child: const Text('Valider la vente'),

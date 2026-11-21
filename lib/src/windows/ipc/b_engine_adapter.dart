@@ -159,6 +159,18 @@ class BEngineAdapter implements WindowsEngineAdapter {
       effectiveId ??= argumentId as String?;
     }
     try {
+      if (command == HostCommand.createProduct ||
+          command == HostCommand.updateProduct) {
+        if (effectiveId == null ||
+            (arguments['operation_id'] != null &&
+                arguments['operation_id'] != effectiveId)) {
+          throw const HostFailure(
+            'operation_required',
+            'Identifiant stable de modification requis.',
+          );
+        }
+        arguments = {...arguments, 'operation_id': effectiveId};
+      }
       final result = await inner.execute(
         command == HostCommand.cashClosureDocument
             ? 'closureDocument'

@@ -73,7 +73,21 @@ class _ProductEditorState extends State<_ProductEditor> {
           if (mounted) Navigator.pop(context);
           return;
         }
-        product = await widget.engine.updateProduct(widget.operator, e.productId, changes);
+        // Valeurs lues à l'ouverture (protection de C, `c31c0c9`) : refus si une synchronisation les a changées depuis.
+        final read = <String, Object?>{
+          'nom': e.name,
+          'reference': e.reference,
+          'categorie_uuid': e.categoryUuid,
+          'prix': e.price,
+          'prix_gros': e.wholesalePrice,
+          'gros_quantite_min': e.wholesaleMin,
+        };
+        product = await widget.engine.updateProduct(
+          widget.operator,
+          e.productId,
+          changes,
+          expected: {for (final k in changes.keys) k: read[k]},
+        );
       } else {
         product = await widget.engine.createProduct(
           widget.operator,

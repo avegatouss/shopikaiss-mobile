@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/ipc/protocol.dart';
@@ -8,6 +9,7 @@ import 'package:shopikaiss_terminal/src/windows/presentation/register_controller
 class PassHost implements WindowsHost {
   final changes = StreamController<Map<String, dynamic>>.broadcast();
   final calls = <HostCommand>[];
+  bool rejectSale = false;
   final state = <String, dynamic>{
     'schema': 1,
     'revision': 1,
@@ -38,6 +40,19 @@ class PassHost implements WindowsHost {
     String? operationId,
   }) async {
     calls.add(command);
+    if (command == HostCommand.commitSale) {
+      if (rejectSale) {
+        throw const HostFailure('refused', 'Sale refused');
+      }
+      state['lines'] = [];
+      state['passes'] = [];
+      state['can_pay'] = false;
+      return {
+        'state': 'committed',
+        'operation_id': operationId,
+        'number': 'P-1',
+      };
+    }
     if (command == HostCommand.status) {
       return {
         'capabilities': {
@@ -55,6 +70,48 @@ class PassHost implements WindowsHost {
 }
 
 void main() {
+  for (final rejected in [false, true]) {
+    testWidgets(
+      'pass checkout prints once only after success: rejected=$rejected',
+      (tester) async {
+        final host = PassHost()..rejectSale = rejected;
+        final c = WindowsRegisterController(host);
+        var prints = 0;
+        c.saleTicket = (_) async {
+          prints++;
+          return 'Printed';
+        };
+        await c.refresh();
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Builder(
+              builder: (context) => Scaffold(
+                body: TextButton(
+                  onPressed: () => showDialog<void>(
+                    context: context,
+                    builder: (_) => PassPaymentDialog(controller: c),
+                  ),
+                  child: const Text('Open'),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Open'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.widgetWithText(FilledButton, 'Valider la vente'));
+        await tester.pumpAndSettle();
+        expect(
+          host.calls.where((command) => command == HostCommand.commitSale),
+          hasLength(1),
+        );
+        expect(prints, rejected ? 0 : 1);
+        await c.printPendingTicket();
+        expect(prints, rejected ? 0 : 1);
+        c.dispose();
+      },
+    );
+  }
   testWidgets(
     'selected pass remains visible and removal reloads the authoritative draft',
     (tester) async {

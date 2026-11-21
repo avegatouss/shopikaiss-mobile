@@ -117,6 +117,7 @@ Future<bool> hasUnresolvedSiteIntent(String directory) async {
     'pending-sale-v2.json',
     'pending-return-v2.json',
     'pending-close-v2.json',
+    'pending-catalogue-v1.json',
     'pending-restaurant-v1.json',
     'pending-closure-edition-v1.json',
   ]) {
