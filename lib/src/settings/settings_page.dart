@@ -96,7 +96,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 decoration: InputDecoration(
                   labelText: 'Adresse de la boutique',
                   hintText: 'boutique.exemple.ci',
-                  helperText: 'Sans chemin, la caisse (/caisse) est ouverte.',
+                  helperText: 'Sans chemin, la caisse s’ouvre par /caisse/demarrer.',
                   errorText: _urlError,
                   prefixIcon: const Icon(Icons.storefront),
                 ),

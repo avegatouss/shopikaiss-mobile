@@ -1032,8 +1032,11 @@ List<String> _wrap(String text, int columns) {
 
 /// Ticket texte d'une structure de clôture (§3) : nom de la boutique en double taille, titre en gras, rubriques
 /// séparées par des tirets, « libellé … valeur » (valeur jamais tronquée), mentions centrées. Accents retirés.
-ZPrintout layoutClosureTicket(Map<String, dynamic> ticket, {required int paperWidth}) {
-  final columns = EscPos.columnsFor(paperWidth);
+/// [columns] impose le nombre de caractères par ligne (rouleau 42 colonnes, par exemple) ; sinon il suit [paperWidth].
+ZPrintout layoutClosureTicket(Map<String, dynamic> ticket, {required int paperWidth, int? columns}) =>
+    _layoutClosureTicket(ticket, columns ?? EscPos.columnsFor(paperWidth));
+
+ZPrintout _layoutClosureTicket(Map<String, dynamic> ticket, int columns) {
   final currency = _clean(ticket['devise'] ?? 'FCFA').isEmpty ? 'FCFA' : _clean(ticket['devise']);
   final lines = <String>[];
   final bold = <int>{};
@@ -1488,7 +1491,8 @@ class ClosureDocument {
   /// Pré-Z portant la mention « journée partielle ».
   bool get partial => model['avertissement'] == partialDayMention;
 
-  ZPrintout layout({required int paperWidth}) => layoutClosureTicket(ticket, paperWidth: paperWidth);
+  /// [columns] (32, 42 ou 48) prime sur la largeur déduite de [paperWidth].
+  ZPrintout layout({required int paperWidth, int? columns}) => layoutClosureTicket(ticket, paperWidth: paperWidth, columns: columns);
 }
 
 /// Document [kind] ([ZKind.preX], [ZKind.session], [ZKind.preZ]) en version [version], calculé sans réseau. Le pré-Z
