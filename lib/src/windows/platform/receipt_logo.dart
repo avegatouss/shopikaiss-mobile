@@ -30,7 +30,7 @@ Uint8List normalizeReceiptLogo(Uint8List bytes) {
       .clamp(0.0, 160 / source.height)
       .clamp(0.0, 1.0);
   final resized = img.copyResize(
-    source,
+    source.convert(format: img.Format.uint8, numChannels: 4),
     width: (source.width * scale).round().clamp(1, 320),
     height: (source.height * scale).round().clamp(1, 160),
   );
@@ -38,7 +38,9 @@ Uint8List normalizeReceiptLogo(Uint8List bytes) {
 }
 
 Uint8List receiptLogoRaster(Uint8List png, int paperWidth) {
-  final logo = img.decodePng(png);
+  final logo = img
+      .decodePng(png)
+      ?.convert(format: img.Format.uint8, numChannels: 4);
   if (logo == null) throw const FormatException('Logo local illisible.');
   final width = EscPos.dotsFor(paperWidth);
   final rowBytes = (width + 7) ~/ 8;
@@ -47,14 +49,19 @@ Uint8List receiptLogoRaster(Uint8List png, int paperWidth) {
   for (var y = 0; y < logo.height; y++) {
     for (var x = 0; x < logo.width; x++) {
       final p = logo.getPixel(x, y);
-      final alpha = p.a / 255;
+      final alpha = p.aNormalized;
       final luminance =
-          (.299 * p.r + .587 * p.g + .114 * p.b) * alpha + 255 * (1 - alpha);
+          255 *
+              (.299 * p.rNormalized +
+                  .587 * p.gNormalized +
+                  .114 * p.bNormalized) *
+              alpha +
+          255 * (1 - alpha);
       if (luminance < 160) {
         final px = left + x;
         bits[y * rowBytes + (px >> 3)] |= 0x80 >> (px & 7);
       }
     }
   }
-  return EscPos.raster(bits, width, logo.height, cut: false);
+  return EscPos.raster(bits, width, logo.height, cut: false, trailingLines: 0);
 }

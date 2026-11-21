@@ -12,6 +12,7 @@ import 'receipt_logo.dart';
 import 'raw_receipt_printer.dart';
 import 'production_printing.dart';
 import '../../restaurant/resto_engine.dart';
+import '../../printer/escpos.dart';
 
 /// App-specific printer; never changes the Windows system default.
 class ReceiptPrinting {
@@ -72,7 +73,10 @@ class ReceiptPrinting {
     }
   }
 
-  static Future<void> configure(BuildContext context, {File? settingsFile}) async {
+  static Future<void> configure(
+    BuildContext context, {
+    File? settingsFile,
+  }) async {
     final file = settingsFile ?? _file;
     final saved = await file.exists()
         ? jsonDecode(await file.readAsString()) as Map
@@ -100,6 +104,10 @@ class ReceiptPrinting {
               children: [
                 Text('${saved['name'] ?? 'Aucune imprimante sélectionnée'}'),
                 if (logo != null) Image.memory(base64Decode(logo!), height: 70),
+                if (logo == null)
+                  const Text(
+                    'Aucun logo enregistré. Importez une image puis cliquez sur Enregistrer pour l’imprimer sur les reçus.',
+                  ),
                 TextFormField(
                   decoration: const InputDecoration(
                     labelText: 'Chemin du logo (PNG/JPG)',
@@ -253,10 +261,7 @@ class ReceiptPrinting {
     );
     if (options != null) {
       await file.parent.create(recursive: true);
-      await file.writeAsString(
-        jsonEncode({...saved, ...options}),
-        flush: true,
-      );
+      await file.writeAsString(jsonEncode({...saved, ...options}), flush: true);
     }
   }
 
@@ -314,6 +319,9 @@ class ReceiptPrinting {
           );
       final batch = BytesBuilder(copy: false);
       for (var i = 0; i < copies; i++) {
+        if (useConfiguredCopies && escposBytes == null) {
+          batch.add([...EscPos.init(), EscPos.esc, 0x64, 3]);
+        }
         if (logo != null && escposBytes == null) {
           batch.add(
             receiptLogoRaster(logo, saved['paper_width'] == 58 ? 58 : 80),

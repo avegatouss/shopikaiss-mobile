@@ -17,10 +17,21 @@ class EscPos {
 
   static List<int> init() => [esc, 0x40];
 
-  static List<int> feedAndCut([int lines = 4]) => [esc, 0x64, lines, gs, 0x56, 66, 0];
+  static List<int> feedAndCut([int lines = 4]) => [
+    esc,
+    0x64,
+    lines,
+    gs,
+    0x56,
+    66,
+    0,
+  ];
 
   /// Ticket de test en ASCII (aucune table de caractères requise).
-  static Uint8List testTicket({required int paperWidth, required List<String> lines}) {
+  static Uint8List testTicket({
+    required int paperWidth,
+    required List<String> lines,
+  }) {
     final cols = columnsFor(paperWidth);
     final out = BytesBuilder()
       ..add(init())
@@ -32,7 +43,9 @@ class EscPos {
       ..add([esc, 0x61, 0]) // gauche
       ..add(_ascii('${'-' * cols}\n'));
     for (final line in lines) {
-      out.add(_ascii('${line.length > cols ? line.substring(0, cols) : line}\n'));
+      out.add(
+        _ascii('${line.length > cols ? line.substring(0, cols) : line}\n'),
+      );
     }
     out
       ..add(_ascii('${'-' * cols}\n'))
@@ -44,16 +57,37 @@ class EscPos {
 
   /// Image monochrome → commandes `GS v 0` par bandes de 128 lignes, puis avance et coupe.
   /// [bits] : une ligne = `widthBytes` octets, bit de poids fort = point le plus à gauche, 1 = noir.
-  static Uint8List raster(Uint8List bits, int widthDots, int height, {bool cut = true}) {
+  static Uint8List raster(
+    Uint8List bits,
+    int widthDots,
+    int height, {
+    bool cut = true,
+    int trailingLines = 4,
+  }) {
     final widthBytes = (widthDots + 7) >> 3;
     final out = BytesBuilder()..add(init());
     const band = 128;
     for (var y = 0; y < height; y += band) {
       final rows = (height - y) < band ? height - y : band;
-      out.add([gs, 0x76, 0x30, 0, widthBytes & 0xFF, widthBytes >> 8, rows & 0xFF, rows >> 8]);
-      out.add(Uint8List.sublistView(bits, y * widthBytes, (y + rows) * widthBytes));
+      out.add([
+        gs,
+        0x76,
+        0x30,
+        0,
+        widthBytes & 0xFF,
+        widthBytes >> 8,
+        rows & 0xFF,
+        rows >> 8,
+      ]);
+      out.add(
+        Uint8List.sublistView(bits, y * widthBytes, (y + rows) * widthBytes),
+      );
     }
-    out.add(cut ? feedAndCut() : [esc, 0x64, 4]);
+    if (cut) {
+      out.add(feedAndCut(trailingLines));
+    } else if (trailingLines > 0) {
+      out.add([esc, 0x64, trailingLines]);
+    }
     return out.toBytes();
   }
 
@@ -94,7 +128,8 @@ class MonoBitmap {
           for (var sx = sx0; sx < sx1; sx++, i += 4) {
             final a = rgba[i + 3];
             // Luminance (Rec. 601) composée sur fond blanc.
-            final l = (rgba[i] * 299 + rgba[i + 1] * 587 + rgba[i + 2] * 114) ~/ 1000;
+            final l =
+                (rgba[i] * 299 + rgba[i + 1] * 587 + rgba[i + 2] * 114) ~/ 1000;
             sum += 255 - ((255 - l) * a ~/ 255);
             count++;
           }
@@ -108,7 +143,13 @@ class MonoBitmap {
     }
     if (lastInk < 0) return;
     final keep = lastInk - firstInk + 1;
-    _rows.add(Uint8List.sublistView(page, firstInk * widthBytes, (lastInk + 1) * widthBytes));
+    _rows.add(
+      Uint8List.sublistView(
+        page,
+        firstInk * widthBytes,
+        (lastInk + 1) * widthBytes,
+      ),
+    );
     this.height += keep;
   }
 

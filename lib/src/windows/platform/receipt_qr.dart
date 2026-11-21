@@ -60,7 +60,6 @@ Uint8List receiptBytesWithQr(
   int paperWidth = 80,
 }) {
   final base = offlineTicketBytes(lines, compact: compact);
-  if (codes.isEmpty) return base;
   final out = BytesBuilder()
     ..add(base.sublist(0, base.length - EscPos.feedAndCut().length));
   for (final code in codes) {
@@ -90,8 +89,8 @@ Uint8List receiptBytesWithQr(
         }
       }
     }
-    out.add(EscPos.raster(bits, width, height, cut: false));
+    out.add(EscPos.raster(bits, width, height, cut: false, trailingLines: 0));
   }
-  out.add(EscPos.feedAndCut(compact ? 2 : 3));
+  out.add(EscPos.feedAndCut(2));
   return out.toBytes();
 }

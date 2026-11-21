@@ -1147,7 +1147,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 child: reason != null || snapshot == null
                     ? _scrollable(_Blocked(message: reason ?? 'Catalogue absent.', onRetry: () => _tryOnline()))
                     : _operator == null
-                    ? _scrollable(_OperatorLogin(engine: _engine, onLogged: (o) => setState(() {
+                    ? _scrollable(_OperatorLogin(engine: _engine, version: widget.session.appVersion, onLogged: (o) => setState(() {
                           _operator = o;
                           _floor = (_engine.restaurant?.restaurantProfile ?? false) && _cart.isEmpty;
                         })))
@@ -2257,6 +2257,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       approval = await _askApproval(globalDiscount);
       if (approval == null || !mounted) return;
     }
+    // Même panier que le ticket précédent : simple avertissement, l'encaissement continue (parité Windows a0236dc).
+    final sameBasket = await _engine.sameAsPreviousSale(_cart);
+    if (!mounted) return;
+    if (sameBasket) _toast(CaisseEngine.sameBasketWarning);
     // Répartition validée par le moteur avant de fermer la fenêtre : un refus s'affiche sur les lignes saisies.
     String? check(List<CartPayment> payments) {
       try {
@@ -2735,9 +2739,12 @@ class _Blocked extends StatelessWidget {
 
 /// Choix du caissier : PIN de caisse vérifié sur le terminal (empreinte reçue avec le catalogue).
 class _OperatorLogin extends StatefulWidget {
-  const _OperatorLogin({required this.engine, required this.onLogged});
+  const _OperatorLogin({required this.engine, required this.onLogged, this.version = ''});
 
   final CaisseEngine engine;
+
+  /// Version de l'application, visible à la connexion (comme Windows) pour savoir quel APK tourne.
+  final String version;
   final ValueChanged<Operator> onLogged;
 
   @override
@@ -2751,7 +2758,16 @@ class _OperatorLoginState extends State<_OperatorLogin> {
   bool _checking = false;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => widget.version.isEmpty
+      ? _login(context)
+      : Stack(
+          children: [
+            _login(context),
+            Positioned(right: 8, bottom: 4, child: Text('Version ${widget.version}', style: const TextStyle(fontSize: 11, color: Colors.black45))),
+          ],
+        );
+
+  Widget _login(BuildContext context) {
     final snapshot = widget.engine.snapshot!;
     final operators = snapshot.operators.where((o) => !snapshot.rules.pinRequired || (o.pinHash ?? '').isNotEmpty).toList();
     if (!snapshot.rules.pinRequired) {

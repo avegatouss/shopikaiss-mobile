@@ -91,6 +91,8 @@ class WindowsRegisterController extends ChangeNotifier {
   List<Map<String, dynamic>> paymentMethods = const [];
   int? paymentChange;
   int? paymentPayable;
+  int? paymentCashDue;
+  String? previousBasketWarning;
 
   List<Map<String, dynamic>> get products => _rows('products');
   List<Map<String, dynamic>> get lines => _rows('lines');
@@ -167,6 +169,8 @@ class WindowsRegisterController extends ChangeNotifier {
       paymentMethods = const [];
       paymentChange = null;
       paymentPayable = null;
+      paymentCashDue = null;
+      previousBasketWarning = null;
     }
     notifyListeners();
     try {
@@ -182,6 +186,8 @@ class WindowsRegisterController extends ChangeNotifier {
       }
       if (command == HostCommand.preparePayment) {
         paymentPayable = result['payable'] as int?;
+        paymentCashDue = result['cash_due'] as int?;
+        previousBasketWarning = result['previous_basket_warning'] as String?;
         paymentMethods = (result['methods'] as List? ?? const [])
             .whereType<Map<String, dynamic>>()
             .where((m) => m['code'] is String && m['name'] is String)

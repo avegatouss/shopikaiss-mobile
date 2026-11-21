@@ -1212,7 +1212,10 @@ class LocalRegisterAdapter {
       throw AdapterFailure('vente_refusee', e.message);
     }
     final payable = _payable(snapshot);
+    final same = await engine.sameAsPreviousSale(lines.cast<CartLine>());
     return {
+      'cash_due': engine.cashDue(payable),
+      'previous_basket_warning': same ? CaisseEngine.sameBasketWarning : null,
       'payable': payable,
       'payable_label': formatFcfa(payable),
       'methods': [for (final m in snapshot.methods) {'code': m.code, 'name': m.name, 'cash': m.isCash, 'reference': m.referenceMode}],
@@ -1286,7 +1289,10 @@ class LocalRegisterAdapter {
   /// Encaissement idempotent par [operationId] : rejoué (réponse perdue, hôte redémarré), il rend la même vente.
   Future<Map<String, dynamic>> _commit(String operationId, Map<String, dynamic> args) async {
     final already = await engine.saleStatus(operationId);
-    if (already != null) return _committed(already);
+    if (already != null) {
+      await _clearConsumedDraft();
+      return _committed(already);
+    }
     final snapshot = _snapshot();
     final operator = _operator;
     if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant d’encaisser.');
@@ -1420,6 +1426,15 @@ class LocalRegisterAdapter {
     }
   }
 
+  Future<void> _clearConsumedDraft() async {
+    // Every edited basket is saved. A confirmed sale whose basket is no longer
+    // open must not leave that consumed basket on screen after reconciliation.
+    if (_draft.lines.isNotEmpty && !(await engine.openDrafts()).any((d) => d.uuid == _draft.uuid)) {
+      _draft = _Draft(_newUuid());
+      _emit('vente');
+    }
+  }
+
   Map<String, dynamic> _committed(OfflineOperation sale) => {
     'state': 'committed',
     'operation_id': sale.uuid,
@@ -1433,6 +1448,7 @@ class LocalRegisterAdapter {
   Future<Map<String, dynamic>> _saleStatus(String operationId) async {
     final sale = await engine.saleStatus(operationId);
     if (sale == null) return {'state': 'not_found', 'operation_id': operationId, 'definitive': true};
+    await _clearConsumedDraft();
     return _committed(sale);
   }
 

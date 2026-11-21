@@ -208,6 +208,27 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Droit exigé pour une livraison (null : aucun droit particulier).
   String? get deliveryRight => null;
 
+  /// Avertissement non bloquant (C, `a0236dc`) : la dernière vente porte les mêmes produits, conditionnements et
+  /// quantités que [lines] (ordre indifférent). Encaisser ce nouveau client reste permis ; une vente différente
+  /// intercalée fait disparaître l'avertissement.
+  static const sameBasketWarning = 'Le ticket précédent contient les mêmes articles et quantités. Vous pouvez encaisser ce nouveau client.';
+
+  Future<bool> sameAsPreviousSale(List<CartLine> lines) async {
+    if (lines.isEmpty) return false;
+    final previous = (await history()).reversed.where((o) => o.isSale).firstOrNull;
+    return previous != null && _composition(lines) == _composition(ticketParts(previous).$1);
+  }
+
+  static String _composition(List<CartLine> lines) {
+    final quantities = <String, BigInt>{};
+    for (final line in lines) {
+      final key = '${line.product.id}:${line.packaging?.id}';
+      quantities[key] = (quantities[key] ?? BigInt.zero) + line.quantity;
+    }
+    final keys = quantities.keys.toList()..sort();
+    return keys.map((key) => '$key=${quantities[key]}').join('|');
+  }
+
   /// Montant dû au tiroir pour une ligne d'espèces de [amount] (arrondi de caisse).
   int cashDue(int amount) {
     final rounding = cashRounding;

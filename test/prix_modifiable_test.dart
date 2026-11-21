@@ -393,5 +393,24 @@ void main() {
     expect(count(duplicate, cut), 1);
     final bare = const ReceiptSettings(qrEnabled: false).saleBytes(lines, paperWidth: 80);
     expect((count(bare, cut), count(bare, raster)), (1, 0), reason: 'sans logo ni QR : texte seul');
+    expect(bare.sublist(0, 5), [0x1B, 0x40, 0x1B, 0x64, 3], reason: 'trois lignes avant le texte (marges C 398a128)');
+    expect(bare.sublist(bare.length - 7), [0x1B, 0x64, 2, 0x1D, 0x56, 66, 0], reason: 'deux lignes avant la coupe');
+
+  });
+  test('panier identique au ticket précédent : avertissement seulement, effacé par une vente différente', () async {
+    serve();
+    final e = await engine();
+    final savon = e.snapshot!.byCode('6190000000011')!.$1;
+    final emballage = e.snapshot!.products.firstWhere((p) => p.name == 'Emballage');
+    final cash = e.snapshot!.methods.firstWhere((m) => m.isCash);
+    Future<void> sell(Product product, int price) =>
+        e.recordSale([CartLine(product: product)], [CartPayment(method: cash, amount: price, received: price)], named(e, 'Awa'));
+    expect(await e.sameAsPreviousSale([CartLine(product: savon)]), isFalse);
+    await sell(savon, 1000);
+    expect(await e.sameAsPreviousSale([CartLine(product: savon)]), isTrue);
+    expect(await e.sameAsPreviousSale([CartLine(product: savon, quantity: BigInt.from(2000000))]), isFalse);
+    await sell(savon, 1000);
+    await sell(emballage, 100);
+    expect(await e.sameAsPreviousSale([CartLine(product: savon)]), isFalse, reason: 'vente différente intercalée');
   });
 }

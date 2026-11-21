@@ -1680,6 +1680,27 @@ class V2Engine extends CaisseEngine {
     return sold;
   }
 
+  Future<bool> _draftConsumed(String uuid) async {
+    final key = CaisseEngine.uuidPattern.hasMatch(uuid) ? uuid : const Uuid().v5(Namespace.url.value, 'brouillon:$uuid');
+    return (await v2.db.query('v2_paniers_consommes', columns: ['brouillon_uuid'], where: 'brouillon_uuid = ?', whereArgs: [key], limit: 1)).isNotEmpty;
+  }
+
+  @override
+  Future<bool> saveDraft(String uuid, int revision, Map<String, dynamic> content) => serialized(() async {
+    if (await _draftConsumed(uuid)) return false;
+    return store.saveDraft(uuid, revision, content);
+  });
+
+  @override
+  Future<List<StoredDraft>> openDrafts() => serialized(() async {
+    final drafts = await store.openDrafts();
+    final open = <StoredDraft>[];
+    for (final draft in drafts) {
+      if (!await _draftConsumed(draft.uuid)) open.add(draft);
+    }
+    return open;
+  });
+
   @override
   Future<List<OfflineOperation>> history() async {
     final rows = await v2.operationRows();
