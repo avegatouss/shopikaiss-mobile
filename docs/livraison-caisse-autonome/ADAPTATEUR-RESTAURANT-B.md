@@ -94,6 +94,30 @@ Effets : le résultat est noté au journal des bons du moteur avec la tentative 
 
 Le texte `lines` est celui de `RestoTicket.printLines` (largeur `engine.restoTicketColumns`) : l'interface ne recompose ni numéros ni quantités ; `ProductionPrinting.send` de C convient tel quel.
 
+## Documents de clôture (pré-X, pré-Z, duplicata du Z de session)
+
+Ajouté par B le 21/11/2026 sur `feat/mobile-socle-b` (`lib/src/register/register_adapter_closure.dart`). Deux commandes, sans `operationId`, qui rendent l'audit des éditions durable : **C peut remplacer sa table en mémoire `_editions` de `BEngineAdapter`** (`cashClosureDocument` / `cashClosureEdition`) par un simple relais vers ces commandes. Un redémarrage de l'hôte ne perd plus l'audit et il n'y a plus de blocage à 100 documents non confirmés. `status.version` reste **2** (ajout, pas de rupture ; un adaptateur plus ancien répond `commande_inconnue`).
+
+**`closureDocument {kind, version, duplicate?, columns? | paper_width?}`**
+
+- `kind` : `pre-x`, `pre-z` ou `z-session` ; `version` : `detailed` ou `short` ; `duplicate` (booléen) : par défaut vrai pour `z-session` (réimpression), faux sinon.
+- Largeur : `columns` 32, 42 ou 48 (prime), ou `paper_width` 58 ou 80 ; sans l'un ni l'autre, la largeur de l'adaptateur (80 mm, 48 colonnes). Le rendu suit donc le rouleau, y compris 42 colonnes.
+- Droits : caissier identifié (`caissier_requis`) ; `pre-z` exige `caisse_cloturer` (`document_interdit`), comme l'écran Android et `b_engine_adapter.dart`.
+- Réponse : `{kind, version, paper_width, columns, partial, ticket, lines[], escpos_base64, edition_id}`. `ticket` est la structure de clôture (`closureTicket`), `lines` le texte à la largeur demandée, `escpos_base64` les octets (gras, double taille, coupe).
+- `edition_id` (UUID) n'est présent que si une édition provisoire est à auditer (pré-X ou pré-Z) ; sinon `null` (Z de session). L'édition est alors conservée **en attente** dans la base du moteur (`adaptateur.editions_cloture`), avec le caissier qui l'a demandée.
+- Erreurs (toutes `not_committed: true`) : `caissier_requis`, `document_interdit`, `argument_invalide`, `document_absent` (pas de session à imprimer, ou documents locaux indisponibles).
+
+**`recordEdition {edition_id}`** — à appeler **après** l'impression effective.
+
+- Émet l'opération d'audit (`edition_pre_x` / `edition_pre_z`) **une seule fois**, sous l'UUID `edition_id`, attribuée au caissier qui a rendu le document (aucun caissier identifié n'est exigé : un hôte redémarré peut confirmer avant toute reconnexion), puis retire l'édition de l'attente. Réponse `{edition_id, recorded: true}`.
+- Rejeu : même réponse, rien de plus (les 200 dernières confirmations sont gardées ; un arrêt entre l'émission et l'écriture de la confirmation ne produit pas de seconde opération, le moteur reconnaît l'UUID).
+- Édition inconnue, expirée ou oubliée : `{edition_id, recorded: false, reason: "edition_inconnue"}`, rien n'est émis. Caissier disparu du référentiel : `reason: "caissier_inconnu"`, rien n'est émis.
+- Le moteur n'émet l'audit qu'avec `z.local` accordé par le serveur et un terminal appairé (règle existante de `recordEdition`) ; `recorded: true` veut dire « confirmation enregistrée et confiée au moteur ».
+
+**Éditions non confirmées.** Jamais émises d'elles-mêmes (le papier n'est peut-être pas sorti). Elles sont oubliées après **24 h**, et au-delà de **100** en attente les plus anciennes sont oubliées ; rien ne bloque jamais l'édition d'un nouveau document.
+
+À faire côté C : dans `BEngineAdapter`, `cashClosureDocument` → `inner.execute('closureDocument', {kind, version, columns ou paper_width}, null)` et `cashClosureEdition` → `inner.execute('recordEdition', {edition_id}, null)` ; supprimer `_editions` et l'erreur `edition_pending`. Les codes `AdapterFailure` deviennent des `HostFailure` comme pour les autres commandes (`document_forbidden` de C ↔ `document_interdit`).
+
 ## Points connus
 
 - Le règlement préparé est en mémoire : après un redémarrage de l'hôte, refaire `restoPrepareSettlement` (le rejeu de `restoSettle` avec le même identifiant reste sûr).
