@@ -1063,6 +1063,37 @@ void main() {
     expect(again.snapshot!.byCode('6190000000011')!.$1.packagings.single.id, product.packagings.single.id);
   });
 
+  test('confirmed reconciliation clears consumed basket but preserves a new basket', () async {
+    final e = await paired();
+    final adapter = LocalRegisterAdapter(e);
+    await adapter.start();
+    final view = await adapter.execute('scan', {'code': '6190000000011'}, null);
+    final sale = await e.recordSale([savon(e, units: 1)], [cash(e, 500)], e.snapshot!.operators.single,
+      draftUuid: view['draft_id'] as String);
+    await adapter.execute('saleStatus', {}, sale.uuid);
+    expect((await adapter.execute('view', {}, null))['lines'], isEmpty);
+    await adapter.execute('scan', {'code': '6190000000011'}, null);
+    await adapter.execute('saleStatus', {}, sale.uuid);
+    expect((await adapter.execute('view', {}, null))['lines'], hasLength(1));
+    await adapter.close();
+  });
+
+  test('v2 consumed drafts cannot be restored or saved, new identical basket allowed', () async {
+    final e = await paired();
+    const draft = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee01';
+    await e.saveDraft(draft, 1, {'lines': []});
+    final line = savon(e, units: 1);
+    final operator = e.snapshot!.operators.single;
+    await e.recordSale([line], [cash(e, 500)], operator, draftUuid: draft);
+    expect(await e.openDrafts(), isEmpty);
+    expect(await e.saveDraft(draft, 2, {}), isFalse);
+    final again = await engine();
+    expect(await again.openDrafts(), isEmpty);
+    await again.recordSale([line], [cash(again, 500)], operator,
+      draftUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeee02');
+    expect((await again.history()).where((o) => o.isSale), hasLength(2));
+  });
+
   test('vente : figée en v2, consommation locale, rejeu idempotent, envoi, numéro serveur, couverture sans double décompte', () async {
     final e = await paired();
     final operator = e.snapshot!.operators.single;

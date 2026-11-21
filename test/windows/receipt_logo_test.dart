@@ -34,6 +34,28 @@ void main() {
       expect(pdf.heights, hasLength(3));
     }
   });
+  test('one-bit opaque logo retains black ink', () {
+    final source = img.Image(
+      width: 16,
+      height: 16,
+      format: img.Format.uint1,
+      numChannels: 1,
+    );
+    for (var y = 0; y < 16; y++) {
+      for (var x = 8; x < 16; x++) {
+        source.setPixelRgba(x, y, 1, 1, 1, 1);
+      }
+    }
+    final original = Uint8List.fromList(img.encodePng(source));
+    final png = normalizeReceiptLogo(original);
+    // Old saved one-bit logos and newly imported logos must both retain white.
+    for (final bytes in [original, png]) {
+      expect(
+        receiptLogoRaster(bytes, 80).sublist(10).where((b) => b != 0).length,
+        16,
+      );
+    }
+  });
   test('opaque logo produces black dots instead of a blank receipt', () {
     final source = img.Image(width: 16, height: 16, numChannels: 4);
     img.fill(source, color: img.ColorRgba8(0, 0, 0, 255));

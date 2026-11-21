@@ -32,7 +32,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Pré-X de la session'), findsOneWidget);
-      expect(find.textContaining('documents provisoires'), findsOneWidget);
+      expect(find.textContaining('les ventes des sessions ouvertes sont exclues'), findsOneWidget);
       await tester.tap(find.text('Détaillé'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Court').last);

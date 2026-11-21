@@ -304,6 +304,11 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     const Center(child: ShopikaissLogo(width: 300)),
+                    const Center(
+                      child: Text(
+                        'Version ${String.fromEnvironment('SHOPIKAISS_BUILD_VERSION', defaultValue: 'développement')}',
+                      ),
+                    ),
                     const SizedBox(height: 24),
                     const Text(
                       'Mise en service de la caisse',

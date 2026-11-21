@@ -54,6 +54,21 @@ void main() {
     await run('setPayment', {'method': 'especes', 'received': 5000});
   }
 
+  test('distinct identical baskets are payable; only consecutive composition warns', () async {
+    await cartOf2Soaps();
+    expect((await run('preparePayment'))['previous_basket_warning'], isNull);
+    await run('commitSale', {}, uuid());
+    await cartOf2Soaps();
+    expect((await run('preparePayment'))['previous_basket_warning'], isNotNull);
+    expect((await run('preparePayment'))['cash_due'], 2000);
+    await run('commitSale', {}, uuid());
+    await run('scan', {'code': '6190000000011'});
+    await run('setPayment', {'method': 'especes'});
+    await run('commitSale', {}, uuid());
+    await cartOf2Soaps();
+    expect((await run('preparePayment'))['previous_basket_warning'], isNull);
+  });
+
   test('stock après le panier : conditionnements cumulés, alerte sur la première ligne du produit, sans blocage', () async {
     await run('scan', {'code': '6190000000011'}); // savon : 10 en stock
     var view = await run('scan', {'code': '6190000000011'});

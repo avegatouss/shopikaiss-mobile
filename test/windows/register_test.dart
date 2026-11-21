@@ -119,6 +119,8 @@ class _Host implements WindowsHost {
         );
       }
       return {
+        'payable': 2000,
+        'cash_due': 2000,
         'methods': [
           {'code': 'especes', 'name': 'Espèces', 'cash': true},
         ],
@@ -800,6 +802,7 @@ void main() {
     final pending = Completer<Map<String, dynamic>>();
     host.pendingView = pending;
     final input = find.widgetWithText(TextField, 'Montant reçu (F CFA)');
+    expect(tester.widget<TextField>(input).controller!.text, '2000');
     await tester.enterText(input, '5000');
     await tester.pump(const Duration(milliseconds: 300));
     await tester.enterText(input, '6000');

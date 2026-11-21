@@ -241,6 +241,11 @@ class _MultiplePaymentsState extends State<MultiplePayments> {
               'Reste à répartir : $remaining F CFA',
               style: const TextStyle(fontSize: 16),
             ),
+          if (c.previousBasketWarning != null)
+            Text(
+              c.previousBasketWarning!,
+              style: const TextStyle(fontSize: 14, color: Colors.orange),
+            ),
           PaymentMessage(message: c.message),
         ],
       ),

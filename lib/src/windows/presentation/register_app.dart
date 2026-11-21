@@ -1747,6 +1747,11 @@ class _PaymentState extends State<_Payment> {
         mainAxisSize: MainAxisSize.min,
         children: [
           const Text('Paiement'),
+          if (c.previousBasketWarning != null)
+            Text(
+              c.previousBasketWarning!,
+              style: const TextStyle(fontSize: 14, color: Colors.orange),
+            ),
           PaymentMessage(message: c.message),
         ],
       ),
@@ -1778,7 +1783,11 @@ class _PaymentState extends State<_Payment> {
                               _method = method['code'] as String;
                               _cash = method['cash'] == true;
                               _accepted = false;
-                              _received.clear();
+                              _received.text = _cash
+                                  ? (c.paymentCashDue ?? c.paymentPayable)
+                                            ?.toString() ??
+                                        ''
+                                  : '';
                             });
                             ++_editRevision;
                             _apply();
