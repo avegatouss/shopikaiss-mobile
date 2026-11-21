@@ -37,6 +37,37 @@ void main() {
   }
 
   testWidgets(
+    'lot 10 validates barcodes and preserves decimal wholesale quantity',
+    (tester) async {
+      CatalogueProductDraft? saved;
+      await open(tester, (draft) async {
+        saved = draft;
+        return null;
+      }, initial: const CatalogueProductDraft(name: 'Pain', price: 250));
+      Future<void> enter(String label, String value) async {
+        final field = find.widgetWithText(TextFormField, label);
+        await tester.ensureVisible(field);
+        await tester.enterText(field, value);
+      }
+
+      await enter('Codes-barres', 'CODE AVEC ESPACE');
+      await tester.tap(find.text('Enregistrer localement'));
+      await tester.pumpAndSettle();
+      expect(saved, isNull);
+      await enter('Codes-barres', '00123');
+      await enter('Prix d’achat', '100');
+      await enter('Prix de gros', '200');
+      await enter('Quantité minimale de gros', '2,5');
+      await tester.tap(find.text('Enregistrer localement'));
+      await tester.pumpAndSettle();
+      expect(saved!.purchasePrice, 100);
+      expect(saved!.wholesalePrice, 200);
+      expect(saved!.wholesaleMinimum, '2.500000');
+      expect(saved!.unlimitedStock, false);
+    },
+  );
+
+  testWidgets(
     'validates, preserves barcode zeros and submits once while saving',
     (tester) async {
       final completion = Completer<String?>();

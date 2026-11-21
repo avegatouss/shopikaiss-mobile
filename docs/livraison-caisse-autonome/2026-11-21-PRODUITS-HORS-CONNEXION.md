@@ -37,3 +37,34 @@ installation de cette fonctionnalité. La version installée reste `9e044dd`.
 Contrôle du journal et du worktree de A répété pendant le travail : aucun contrat
 catalogue publié constaté, dernier commit observé `4176383b` (prix modifiable).
 Demandes et accord sur les commandes consignés dans INBOX-A et INBOX-B.
+
+## Suite de préparation
+
+Le lot B `ab2faff` est fusionné sans conflit (`cecac88`). Le panneau
+`CatalogueChangesPanel` affiche les états et motifs et propose l'ouverture de
+l'arbitrage web si l'appelant fournit cette action. Il ne réémet aucune mutation.
+Deux tests supplémentaires couvrent l'état vide et le conflit sur écran étroit.
+Les deux composants restent non raccordés au catalogue : champs complémentaires,
+droits, stockage et réconciliation restent dépendants du contrat A et du moteur B.
+
+Veille locale : `tool/windows/Watch-CatalogueCoordination.ps1`, toutes les cinq
+minutes pendant cinq heures par défaut. Un mutex empêche deux instances.
+`VEILLE-C-CATALOGUE.json` indique le processus et le dernier contrôle ;
+`VEILLE-C-CATALOGUE-EVENEMENTS.jsonl` enregistre les changements détectés.
+Créer `VEILLE-C-CATALOGUE.stop` dans le dossier de coordination arrête la veille.
+Elle lit uniquement les notes de coordination, ne fusionne rien et ne réveille
+pas une session Codex : une nouvelle publication demande une relecture par C.
+
+## Contrat A détecté pendant la préparation
+
+Le commit A `c87b57c1` publie maintenant le lot 10. Le constat d'absence de contrat
+ci-dessus décrit le contrôle initial et est remplacé par cette publication.
+Le formulaire est adapté : nom 160 caractères, référence 80, cinq codes ASCII
+sans espace au maximum, catégorie, prix d'achat facultatif, prix de gros et seuil
+à six décimales (normalisé sans calcul flottant), stock illimité ou suivi à zéro.
+En édition, codes-barres, coût d'achat et mode de stock restent inchangés : ils ne
+font pas partie de `modification_produit`. Aucune quantité de stock n'est saisie.
+
+Le moteur de B reste à livrer : pas de commande de sauvegarde raccordée, pas de
+mise en vente de ces fiches, pas d'arbitrage local. Le suivi visuel et le formulaire
+sont prêts à recevoir ces commandes ; leur activation n'est pas annoncée.
