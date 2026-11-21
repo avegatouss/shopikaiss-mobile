@@ -7,10 +7,10 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
 import 'receipt_pdf.dart';
+import 'receipt_qr.dart';
 import 'raw_receipt_printer.dart';
 import 'production_printing.dart';
 import '../../restaurant/resto_engine.dart';
-import '../../offline/ticket.dart';
 
 /// App-specific printer; never changes the Windows system default.
 class ReceiptPrinting {
@@ -81,6 +81,8 @@ class ReceiptPrinting {
     var fallback = saved['pdf_fallback'] != false;
     var width = saved['paper_width'] == 58 ? 58 : 80;
     var copies = copyCount(saved['copies']);
+    var qrEnabled = saved['qr_enabled'] != false;
+    var link = saved['qr_link'] as String? ?? '';
     if (!context.mounted) return;
     final options = await showDialog<Map<String, dynamic>>(
       context: context,
@@ -94,6 +96,23 @@ class ReceiptPrinting {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text('${saved['name']}'),
+                SwitchListTile(
+                  title: const Text('QR code des informations du ticket'),
+                  subtitle: const Text(
+                    'Résumé lisible hors connexion : boutique, numéro, date et totaux imprimés.',
+                  ),
+                  value: qrEnabled,
+                  onChanged: (value) => update(() => qrEnabled = value),
+                ),
+                TextFormField(
+                  initialValue: link,
+                  decoration: InputDecoration(
+                    labelText: 'Lien facultatif : site ou Facebook',
+                    helperText: 'Un second QR ouvre directement ce lien. Vide : aucun lien.',
+                    errorText: validReceiptLink(link.trim()) ? null : 'Adresse HTTP(S) valide requise (350 octets maximum).',
+                  ),
+                  onChanged: (value) => update(() => link = value),
+                ),
                 DropdownButtonFormField<int>(
                   initialValue: copies,
                   decoration: const InputDecoration(
@@ -159,12 +178,16 @@ class ReceiptPrinting {
               child: const Text('Annuler'),
             ),
             FilledButton(
-              onPressed: () => Navigator.pop(context, {
-                'mode': mode,
-                'pdf_fallback': fallback,
-                'paper_width': width,
-                'copies': copies,
-              }),
+              onPressed: !validReceiptLink(link.trim())
+                  ? null
+                  : () => Navigator.pop(context, {
+                      'mode': mode,
+                      'pdf_fallback': fallback,
+                      'paper_width': width,
+                      'copies': copies,
+                      'qr_enabled': qrEnabled,
+                      'qr_link': link.trim(),
+                    }),
               child: const Text('Enregistrer'),
             ),
           ],
@@ -202,6 +225,13 @@ class ReceiptPrinting {
     }
     final saved = jsonDecode(await _file.readAsString()) as Map;
     final copies = useConfiguredCopies ? copyCount(saved['copies']) : 1;
+    final qrCodes = useConfiguredCopies
+        ? receiptQrCodes(
+            lines,
+            enabled: saved['qr_enabled'] != false,
+            link: saved['qr_link'] as String? ?? '',
+          )
+        : <ReceiptQr>[];
     final printers = await Printing.listPrinters();
     final matching = printers.where(
       (p) => p.url == saved['url'] && p.isAvailable,
@@ -212,7 +242,14 @@ class ReceiptPrinting {
     final mode = saved['mode'] as String? ?? 'raw';
     var fallbackUsed = false;
     if (mode == 'raw') {
-      final ticket = escposBytes ?? offlineTicketBytes(lines, compact: compact);
+      final ticket =
+          escposBytes ??
+          receiptBytesWithQr(
+            lines,
+            qrCodes,
+            compact: compact,
+            paperWidth: saved['paper_width'] == 58 ? 58 : 80,
+          );
       final batch = BytesBuilder(copy: false);
       for (var i = 0; i < copies; i++) {
         batch.add(ticket);
@@ -244,6 +281,7 @@ class ReceiptPrinting {
       a4: mode == 'pdf_a4',
       paperWidth: saved['paper_width'] == 58 ? 58 : 80,
       copies: copies,
+      qrCodes: qrCodes,
     );
     final sent = await Printing.directPrintPdf(
       printer: matching.first,

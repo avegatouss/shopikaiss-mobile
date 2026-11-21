@@ -3,6 +3,8 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'receipt_qr.dart';
+
 /// Measured roll pages: short receipts do not become 297 mm sheets.
 /// Long documents keep every line and are split into manageable roll sections.
 Future<({Uint8List bytes, PdfPageFormat format, List<double> heights})>
@@ -12,6 +14,7 @@ buildReceiptPdf(
   bool a4 = false,
   int paperWidth = 80,
   int copies = 1,
+  List<ReceiptQr> qrCodes = const [],
 }) async {
   if (copies < 1 || copies > 3) {
     throw const FormatException('Nombre d’exemplaires invalide');
@@ -39,6 +42,29 @@ buildReceiptPdf(
           children: [
             for (final line in lines.sublist(start, end))
               pw.Text(line, style: const pw.TextStyle(fontSize: 9)),
+            if (end == lines.length)
+              for (final code in qrCodes)
+                pw.Center(
+                  child: pw.Column(
+                    children: [
+                      pw.SizedBox(height: 8),
+                      pw.Text(
+                        code.label,
+                        style: const pw.TextStyle(fontSize: 9),
+                      ),
+                      pw.Padding(
+                        padding: const pw.EdgeInsets.all(8),
+                        child: pw.BarcodeWidget(
+                          barcode: pw.Barcode.qrCode(),
+                          data: code.data,
+                          width: 110,
+                          height: 110,
+                          drawText: false,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
           ],
         ),
       );

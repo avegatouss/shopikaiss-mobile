@@ -112,119 +112,121 @@ class _TouchKeyboardState extends State<TouchKeyboard> {
           ),
         ),
         if (editor != null)
-          Align(
-            alignment: Alignment.centerRight,
-            child: SizedBox(
-              width: numeric ? 360 : double.infinity,
-              child: Material(
-                elevation: 8,
-                color: const Color(0xffedf2ef),
-                child: SafeArea(
-                  top: false,
-                  child: Focus(
-                    canRequestFocus: false,
-                    descendantsAreFocusable: false,
-                    child: Padding(
-                      padding: const EdgeInsets.all(4),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (numeric)
-                            Row(
-                              children: [
-                                const Expanded(
-                                  child: Padding(
-                                    padding: EdgeInsets.only(left: 8),
-                                    child: Text(
-                                      'Pavé numérique',
-                                      style: TextStyle(
-                                        fontWeight: FontWeight.w600,
+          TextFieldTapRegion(
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: SizedBox(
+                width: numeric ? 360 : double.infinity,
+                child: Material(
+                  elevation: 8,
+                  color: const Color(0xffedf2ef),
+                  child: SafeArea(
+                    top: false,
+                    child: Focus(
+                      canRequestFocus: false,
+                      descendantsAreFocusable: false,
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (numeric)
+                              Row(
+                                children: [
+                                  const Expanded(
+                                    child: Padding(
+                                      padding: EdgeInsets.only(left: 8),
+                                      child: Text(
+                                        'Pavé numérique',
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                       ),
                                     ),
                                   ),
-                                ),
-                                TextButton(
-                                  onPressed: () => key('ABC'),
-                                  child: const Text('ABC'),
-                                ),
-                                TextButton(
-                                  onPressed: () => key('Fermer'),
-                                  child: const Text('Fermer'),
-                                ),
-                              ],
-                            ),
-                          for (final row
-                              in numeric
-                                  ? [
-                                      ['7', '8', '9', '⌫'],
-                                      ['4', '5', '6', 'Effacer'],
-                                      ['1', '2', '3', 'Entrée'],
-                                      ['0', '00', ',', '.'],
-                                    ]
-                                  : [
-                                      '1234567890'.split(''),
-                                      'azertyuiop'.split(''),
-                                      'qsdfghjklm'.split(''),
-                                      ['Maj', ...'wxcvbn'.split(''), '⌫'],
-                                      [
-                                        'é',
-                                        'è',
-                                        "'",
-                                        '@',
-                                        '.',
-                                        ',',
-                                        '-',
-                                        'Espace',
-                                        '123',
-                                        'Entrée',
-                                        'Fermer',
-                                      ],
-                                    ])
-                            Row(
-                              children: [
-                                for (final value in row)
-                                  Expanded(
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(2),
-                                      child: SizedBox(
-                                        height: numeric ? 48 : 42,
-                                        child: OutlinedButton(
-                                          style: OutlinedButton.styleFrom(
-                                            padding: EdgeInsets.zero,
-                                            backgroundColor:
-                                                numeric && value == 'Entrée'
-                                                ? Theme.of(context)
-                                                      .colorScheme
-                                                      .primary
-                                                : Colors.white,
-                                            foregroundColor:
-                                                numeric && value == 'Entrée'
-                                                ? Colors.white
-                                                : null,
-                                            shape: RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.circular(8),
+                                  TextButton(
+                                    onPressed: () => key('ABC'),
+                                    child: const Text('ABC'),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => key('Fermer'),
+                                    child: const Text('Fermer'),
+                                  ),
+                                ],
+                              ),
+                            for (final row
+                                in numeric
+                                    ? [
+                                        ['7', '8', '9', '⌫'],
+                                        ['4', '5', '6', 'Effacer'],
+                                        ['1', '2', '3', 'Entrée'],
+                                        ['0', '00', ',', '.'],
+                                      ]
+                                    : [
+                                        '1234567890'.split(''),
+                                        'azertyuiop'.split(''),
+                                        'qsdfghjklm'.split(''),
+                                        ['Maj', ...'wxcvbn'.split(''), '⌫'],
+                                        [
+                                          'é',
+                                          'è',
+                                          "'",
+                                          '@',
+                                          '.',
+                                          ',',
+                                          '-',
+                                          'Espace',
+                                          '123',
+                                          'Entrée',
+                                          'Fermer',
+                                        ],
+                                      ])
+                              Row(
+                                children: [
+                                  for (final value in row)
+                                    Expanded(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(2),
+                                        child: SizedBox(
+                                          height: numeric ? 48 : 42,
+                                          child: OutlinedButton(
+                                            style: OutlinedButton.styleFrom(
+                                              padding: EdgeInsets.zero,
+                                              backgroundColor:
+                                                  numeric && value == 'Entrée'
+                                                  ? Theme.of(context)
+                                                        .colorScheme
+                                                        .primary
+                                                  : Colors.white,
+                                              foregroundColor:
+                                                  numeric && value == 'Entrée'
+                                                  ? Colors.white
+                                                  : null,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(8),
+                                              ),
                                             ),
-                                          ),
-                                          onPressed: () => key(value),
-                                          child: Text(
-                                            upper && value.length == 1
-                                                ? value.toUpperCase()
-                                                : value,
-                                            style: TextStyle(
-                                              fontSize:
-                                                  numeric && value.length <= 2
-                                                  ? 22
-                                                  : 14,
+                                            onPressed: () => key(value),
+                                            child: Text(
+                                              upper && value.length == 1
+                                                  ? value.toUpperCase()
+                                                  : value,
+                                              style: TextStyle(
+                                                fontSize:
+                                                    numeric && value.length <= 2
+                                                    ? 22
+                                                    : 14,
+                                              ),
                                             ),
                                           ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                              ],
-                            ),
-                        ],
+                                ],
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

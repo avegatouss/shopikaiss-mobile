@@ -1,9 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'dart:ui' show PointerDeviceKind;
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shopikaiss_terminal/src/windows/presentation/touch_keyboard.dart';
 
 void main() {
+  testWidgets('mouse clicks keep keyboard and field focus across digits', (
+    tester,
+  ) async {
+    final controller = TextEditingController();
+    final focus = FocusNode();
+    addTearDown(controller.dispose);
+    addTearDown(focus.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: ThemeData(platform: TargetPlatform.windows),
+        builder: (_, child) => TouchKeyboard(child: child!),
+        home: Scaffold(
+          body: TextField(
+            controller: controller,
+            focusNode: focus,
+            keyboardType: TextInputType.number,
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer();
+    for (final key in ['1', '2', '3']) {
+      await mouse.down(
+        tester.getCenter(find.widgetWithText(OutlinedButton, key)),
+      );
+      await tester.pump();
+      expect(focus.hasFocus, isTrue);
+      await mouse.up();
+      await tester.pumpAndSettle();
+      expect(find.text('Pavé numérique'), findsOneWidget);
+    }
+    expect(controller.text, '123');
+    await mouse.removePointer();
+  });
   testWidgets('numeric keypad can be selected on a text field', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
@@ -21,7 +61,10 @@ void main() {
     final four = tester.getCenter(find.widgetWithText(OutlinedButton, '4'));
     expect(seven.dy, eight.dy);
     expect(seven.dx, four.dx);
-    expect(tester.getSize(find.widgetWithText(OutlinedButton, '7')).width, lessThan(100));
+    expect(
+      tester.getSize(find.widgetWithText(OutlinedButton, '7')).width,
+      lessThan(100),
+    );
     for (final key in ['1', '2', '3']) {
       await tester.tap(find.widgetWithText(OutlinedButton, key));
       await tester.pump();
