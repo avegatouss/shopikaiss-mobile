@@ -15,12 +15,13 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.widgetWithText(OutlinedButton, '123'));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(OutlinedButton, 'ABC'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'ABC'), findsOneWidget);
     final seven = tester.getCenter(find.widgetWithText(OutlinedButton, '7'));
     final eight = tester.getCenter(find.widgetWithText(OutlinedButton, '8'));
     final four = tester.getCenter(find.widgetWithText(OutlinedButton, '4'));
     expect(seven.dy, eight.dy);
     expect(seven.dx, four.dx);
+    expect(tester.getSize(find.widgetWithText(OutlinedButton, '7')).width, lessThan(100));
     for (final key in ['1', '2', '3']) {
       await tester.tap(find.widgetWithText(OutlinedButton, key));
       await tester.pump();
@@ -29,7 +30,7 @@ void main() {
       tester.widget<EditableText>(find.byType(EditableText)).controller.text,
       '123',
     );
-    await tester.tap(find.widgetWithText(OutlinedButton, 'ABC'));
+    await tester.tap(find.widgetWithText(TextButton, 'ABC'));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(OutlinedButton, 'Espace'), findsOneWidget);
   });
