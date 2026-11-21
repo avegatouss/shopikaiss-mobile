@@ -26,7 +26,7 @@ Future<Map<String, dynamic>> localClosureDocument(
     document = await engine.closureDocument(
       kind as String,
       version as String,
-      duplicate: kind == ZKind.session,
+      duplicate: kind == ZKind.session && arguments['duplicate'] != false,
     );
   } on ClosureUnavailable catch (e) {
     throw HostFailure('document_absent', e.message);

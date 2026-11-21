@@ -13,6 +13,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 Future<void> main(List<String> args) async {
   String? directory;
   var version = '';
+  var paperWidth = 80;
   for (var i = 0; i < args.length; i++) {
     final value = i + 1 < args.length ? args[i + 1] : null;
     switch (args[i]) {
@@ -21,6 +22,9 @@ Future<void> main(List<String> args) async {
         i++;
       case '--version' when value != null:
         version = value;
+        i++;
+      case '--paper-width' when value == '58' || value == '80':
+        paperWidth = int.parse(value!);
         i++;
       default:
         stderr.writeln('Argument non reconnu.');
@@ -31,14 +35,21 @@ Future<void> main(List<String> args) async {
   final EngineHost host;
   try {
     sqfliteFfiInit();
-    host = await EngineHost.open(directory: directory ?? EngineHost.defaultDirectory(), appVersion: version, factory: databaseFactoryFfi);
+    host = await EngineHost.open(
+      directory: directory ?? EngineHost.defaultDirectory(),
+      appVersion: version,
+      factory: databaseFactoryFfi,
+      paperWidth: paperWidth,
+    );
   } on EngineHostBusy {
     stderr.writeln('Moteur déjà démarré sur cette base.');
     exitCode = 3;
     return;
   } catch (e) {
     final detail = '$e';
-    stderr.writeln('Démarrage du moteur impossible : ${detail.length > 300 ? detail.substring(0, 300) : detail}');
+    stderr.writeln(
+      'Démarrage du moteur impossible : ${detail.length > 300 ? detail.substring(0, 300) : detail}',
+    );
     exitCode = 1;
     return;
   }

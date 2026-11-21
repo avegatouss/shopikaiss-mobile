@@ -135,6 +135,11 @@ CreatePlatformChannel(flutter::BinaryMessenger* messenger, HWND window) {
       } else if (mode != "off") { result->Error("display_mode", "Mode inconnu."); return; }
       result->Success(); return;
     }
+    if (call.method_name() == "closeWindow") {
+      result->Success();
+      PostMessage(window, WM_CLOSE, 0, 0);
+      return;
+    }
     if (call.method_name() == "toggleFullscreen") {
       if (!fullscreen) {
         saved.length = sizeof(WINDOWPLACEMENT);

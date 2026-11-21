@@ -33,7 +33,7 @@ Future<void> main(List<String> args) async {
       );
       continue;
     }
-    if (request['command'] == 'commitSale') {
+    if (request['command'] == 'commitSale' || request['operation_id'] != null) {
       if (args.contains('lose-reply')) exit(0);
       if (args.contains('timeout')) continue;
     }

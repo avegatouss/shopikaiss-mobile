@@ -54,6 +54,7 @@ class ProcessWindowsHost implements WindowsHost {
   final _events = StreamController<Map<String, dynamic>>.broadcast();
   final _pending = <String, Completer<Map<String, dynamic>>>{};
   final _commands = <String, HostCommand>{};
+  final _mutations = <String>{};
   late final StreamSubscription<Map<String, dynamic>> _output;
   late final StreamSubscription<List<int>> _errors;
   int _sequence = 0;
@@ -70,7 +71,7 @@ class ProcessWindowsHost implements WindowsHost {
     Map<String, dynamic> arguments = const {},
     String? operationId,
   }) async {
-    if (_disconnected) throw _failure(command);
+    if (_disconnected) throw _failure(command, operationId != null);
     if (command == HostCommand.commitSale && operationId == null) {
       throw const HostFailure(
         'operation_required',
@@ -94,8 +95,11 @@ class ProcessWindowsHost implements WindowsHost {
     final result = Completer<Map<String, dynamic>>();
     _pending[id] = result;
     _commands[id] = command;
+    if (operationId != null) _mutations.add(id);
     final timer = Timer(timeout, () {
-      _pending.remove(id)?.completeError(_failure(command));
+      _pending
+          .remove(id)
+          ?.completeError(_failure(command, _mutations.remove(id)));
       _commands.remove(id);
     });
     try {
@@ -111,6 +115,7 @@ class ProcessWindowsHost implements WindowsHost {
       return await result.future;
     } finally {
       timer.cancel();
+      _mutations.remove(id);
       _pending.remove(id);
       _commands.remove(id);
     }
@@ -128,6 +133,7 @@ class ProcessWindowsHost implements WindowsHost {
     }
     final completer = _pending.remove(id);
     final command = _commands.remove(id);
+    final mutation = _mutations.remove(id);
     if (completer == null) {
       return; // Late result never mutates the current view.
     }
@@ -141,7 +147,7 @@ class ProcessWindowsHost implements WindowsHost {
       if ((error['code'] != null && error['code'] is! String) ||
           (error['message'] != null && error['message'] is! String) ||
           (error['not_committed'] != null && error['not_committed'] is! bool)) {
-        completer.completeError(_failure(command));
+        completer.completeError(_failure(command, mutation));
         _disconnect();
         return;
       }
@@ -151,32 +157,38 @@ class ProcessWindowsHost implements WindowsHost {
           error['message'] as String? ?? 'Opération locale non terminée.',
           // Only the engine can prove that a failed commit did not take place.
           outcomeUnknown:
-              command == HostCommand.commitSale &&
+              (mutation || command == HostCommand.commitSale) &&
               error['not_committed'] != true,
         ),
       );
     } else {
-      completer.completeError(_failure(command));
+      completer.completeError(_failure(command, mutation));
       _disconnect();
     }
   }
 
-  HostFailure _failure(HostCommand? command) => HostFailure(
+  HostFailure _failure(
+    HostCommand? command, [
+    bool mutation = false,
+  ]) => HostFailure(
     'host_unavailable',
     command == HostCommand.commitSale
         ? 'Résultat de la vente à vérifier. Ne réencaissez pas ce panier.'
         : 'Le moteur local ne répond pas. Votre opération doit être vérifiée.',
-    outcomeUnknown: command == HostCommand.commitSale,
+    outcomeUnknown: mutation || command == HostCommand.commitSale,
   );
 
   void _disconnect() {
     if (_disconnected) return;
     _disconnected = true;
     for (final item in _pending.entries) {
-      item.value.completeError(_failure(_commands[item.key]));
+      item.value.completeError(
+        _failure(_commands[item.key], _mutations.contains(item.key)),
+      );
     }
     _pending.clear();
     _commands.clear();
+    _mutations.clear();
     if (!_events.isClosed) {
       _events.add({
         'version': windowsIpcVersion,

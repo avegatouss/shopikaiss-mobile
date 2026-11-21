@@ -4,6 +4,24 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:shopikaiss_terminal/src/windows/platform/receipt_pdf.dart';
 
 void main() {
+  test('copies preserve complete multipage tickets in order', () async {
+    final receipt = await buildReceiptPdf(
+      List.generate(45, (i) => 'Article $i'),
+      font: pw.Font.helvetica(),
+      copies: 3,
+    );
+    expect(receipt.heights, hasLength(6));
+    expect(receipt.heights.take(2), receipt.heights.skip(2).take(2));
+    expect(receipt.heights.take(2), receipt.heights.skip(4).take(2));
+  });
+  test('58 mm paper uses the chosen roll width', () async {
+    final receipt = await buildReceiptPdf(
+      ['TOTAL : 1000 F'],
+      font: pw.Font.helvetica(),
+      paperWidth: 58,
+    );
+    expect(receipt.format.width, 58 * PdfPageFormat.mm);
+  });
   test('A4 mode keeps A4 paper instead of roll dimensions', () async {
     final receipt = await buildReceiptPdf(
       ['TEST A4'],

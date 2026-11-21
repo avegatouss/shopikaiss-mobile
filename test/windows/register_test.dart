@@ -26,6 +26,7 @@ class _Host implements WindowsHost {
   bool approvalSeen = false;
   bool refuseApproval = false;
   bool refusePreparation = false;
+  bool refusePrice = false;
   String? lookupId;
   Completer<Map<String, dynamic>>? pendingView;
   final Map<String, dynamic> state = {
@@ -52,7 +53,7 @@ class _Host implements WindowsHost {
       },
     ],
     'lines': [
-      {
+      <String, dynamic>{
         'id': 'l1',
         'name': 'Article en panier',
         'quantity_label': '1',
@@ -70,6 +71,9 @@ class _Host implements WindowsHost {
   }) async {
     calls.add(command);
     argumentsByCommand[command] = arguments;
+    if (command == HostCommand.setLinePrice && refusePrice) {
+      throw const HostFailure('prix_refuse', 'Droit de modification retiré.');
+    }
     if (command == HostCommand.drafts) {
       return {
         'items': [
@@ -109,7 +113,10 @@ class _Host implements WindowsHost {
     }
     if (command == HostCommand.preparePayment) {
       if (refusePreparation) {
-        throw const HostFailure('vente_refusee', 'Le tarif gros ne se cumule pas avec une remise.');
+        throw const HostFailure(
+          'vente_refusee',
+          'Le tarif gros ne se cumule pas avec une remise.',
+        );
       }
       return {
         'methods': [
@@ -157,6 +164,137 @@ class _Host implements WindowsHost {
 }
 
 void main() {
+  testWidgets(
+    'search debounces typing and clear restores catalogue without scanning',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      final field = find.widgetWithText(TextField, 'Rechercher un produit');
+      await tester.enterText(field, 'sa');
+      await tester.pump(const Duration(milliseconds: 150));
+      await tester.enterText(field, 'savon');
+      await tester.pump(const Duration(milliseconds: 249));
+      expect(host.calls.where((c) => c == HostCommand.search), isEmpty);
+      await tester.pump(const Duration(milliseconds: 1));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.search]?['query'], 'savon');
+      await tester.tap(find.byTooltip('Effacer la recherche'));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.search]?['query'], '');
+      expect(find.byTooltip('Effacer la recherche'), findsNothing);
+      expect(host.calls, isNot(contains(HostCommand.scan)));
+    },
+  );
+  testWidgets(
+    'line price sends integers and null and keeps refusal in dialog',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      final line = (host.state['lines'] as List).first as Map<String, dynamic>;
+      line.addAll({
+        'price_editable': true,
+        'entered_price': 1500,
+        'unit_price_label': '1 500 F',
+        'usual_price_label': '2 000 F',
+      });
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Prix unitaire : 1 500 F'));
+      await tester.pumpAndSettle();
+      final field = find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      );
+      await tester.enterText(field, '12.5');
+      await tester.tap(find.text('Appliquer'));
+      await tester.pumpAndSettle();
+      expect(host.calls, isNot(contains(HostCommand.setLinePrice)));
+      await tester.enterText(field, '1250');
+      host.refusePrice = true;
+      await tester.tap(find.text('Appliquer'));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.setLinePrice], {
+        'line_id': 'l1',
+        'amount': 1250,
+      });
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Droit de modification retiré.'),
+        ),
+        findsOneWidget,
+      );
+      host.refusePrice = false;
+      await tester.tap(find.text('Prix habituel'));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.setLinePrice], {
+        'line_id': 'l1',
+        'amount': null,
+      });
+      expect(find.byType(AlertDialog), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'line price hidden without eligibility but removable after right loss',
+    (tester) async {
+      tester.view.physicalSize = const Size(1366, 768);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final host = _Host();
+      final line = (host.state['lines'] as List).first as Map<String, dynamic>;
+      final c = WindowsRegisterController(host);
+      addTearDown(() async {
+        c.dispose();
+        await host.close();
+      });
+      await tester.pumpWidget(WindowsRegisterApp(controller: c));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Prix unitaire :'), findsNothing);
+      line.addAll({
+        'price_editable': false,
+        'entered_price': 1500,
+        'unit_price_label': '1 500 F',
+        'price_edit_reason': 'Droit retiré.',
+      });
+      await c.refresh();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Prix unitaire : 1 500 F'));
+      await tester.pumpAndSettle();
+      expect(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+        findsNothing,
+      );
+      await tester.tap(find.text('Prix habituel'));
+      await tester.pumpAndSettle();
+      expect(host.argumentsByCommand[HostCommand.setLinePrice], {
+        'line_id': 'l1',
+        'amount': null,
+      });
+    },
+  );
   testWidgets(
     'approval cancelled or refused preserves basket and never retains the code',
     (tester) async {
@@ -781,6 +919,7 @@ void main() {
             HostCommand.view,
             HostCommand.history,
             HostCommand.reprint,
+            HostCommand.restaurantView,
           ].contains(command),
         ),
         isTrue,
@@ -940,20 +1079,31 @@ void main() {
     await File(dir.path).delete();
   });
 
-  testWidgets('payment refusal is a visible dialog and never opens payment', (tester) async {
+  testWidgets('payment refusal is a visible dialog and never opens payment', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1366, 768);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     final host = _Host()..refusePreparation = true;
     final c = WindowsRegisterController(host);
-    addTearDown(() async { c.dispose(); await host.close(); });
+    addTearDown(() async {
+      c.dispose();
+      await host.close();
+    });
     await tester.pumpWidget(WindowsRegisterApp(controller: c));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Payer (F4)'));
     await tester.pumpAndSettle();
     expect(find.text('Paiement indisponible'), findsOneWidget);
-    expect(find.descendant(of: find.byType(AlertDialog), matching: find.text('Le tarif gros ne se cumule pas avec une remise.')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.text('Le tarif gros ne se cumule pas avec une remise.'),
+      ),
+      findsOneWidget,
+    );
     expect(host.calls, isNot(contains(HostCommand.commitSale)));
     await tester.tap(find.text('Compris'));
     await tester.pumpAndSettle();
@@ -1162,6 +1312,12 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final host = _Host();
+      ((host.state['lines'] as List).first as Map<String, dynamic>).addAll({
+        'price_editable': true,
+        'unit_price_label': '2 000 F',
+        'usual_price_label': '2 000 F',
+        'stock_after_label': '',
+      });
       final c = WindowsRegisterController(host);
       addTearDown(() async {
         c.dispose();
@@ -1174,6 +1330,19 @@ void main() {
         await tester.tap(find.text('Panier').first);
         await tester.pumpAndSettle();
       }
+      await tester.tap(find.text('Prix unitaire : 2 000 F'));
+      expect(find.textContaining('Après vente :'), findsNothing);
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.byType(TextField),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Annuler'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Payer (F4)'));
       await tester.pumpAndSettle();
       expect(find.text('Paiement'), findsOneWidget);

@@ -2,7 +2,10 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+
 import 'lot_wholesale.dart';
+import 'line_price.dart';
+
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -20,6 +23,7 @@ import 'quantity_step.dart';
 import 'multiple_payments.dart';
 import 'searchable_choice.dart';
 import 'calculator.dart';
+import 'touch_keyboard.dart';
 import 'discount_approval.dart';
 import 'web_destinations.dart';
 import 'customer_picker.dart';
@@ -37,6 +41,7 @@ class WindowsRegisterApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
+    builder: (context, child) => TouchKeyboard(child: child!),
     title: 'Shopikaiss · Caisse',
     theme: ThemeData(
       useMaterial3: true,
@@ -163,16 +168,36 @@ class _Register extends StatefulWidget {
 
 class _RegisterState extends State<_Register> {
   final _search = TextEditingController();
+  Timer? _searchDelay;
+  void _queueSearch() {
+    _searchDelay?.cancel();
+    _searchDelay = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted || !c.ready || c.uncertainOperation != null) return;
+      if (c.busy) {
+        _queueSearch();
+        return;
+      }
+      _searchCatalogue();
+    });
+  }
+
   Future<void> _searchCatalogue({
     String? category,
     String? brand,
     String? supplier,
-  }) => c.command(HostCommand.search, {
-    'query': _search.text,
-    'category': category ?? c.view['category'] ?? '',
-    'brand': brand ?? c.view['brand'] ?? '',
-    'supplier': supplier ?? c.view['supplier'] ?? '',
-  });
+  }) async {
+    _searchDelay?.cancel();
+    if (c.busy) {
+      _queueSearch();
+      return;
+    }
+    await c.command(HostCommand.search, {
+      'query': _search.text,
+      'category': category ?? c.view['category'] ?? '',
+      'brand': brand ?? c.view['brand'] ?? '',
+      'supplier': supplier ?? c.view['supplier'] ?? '',
+    });
+  }
 
   Widget _catalogueFilter(String field, String label, String all) {
     final values = (c.view['${field}s'] as List? ?? const []).cast<String>();
@@ -229,6 +254,9 @@ class _RegisterState extends State<_Register> {
   bool get _compact => _screen.compact;
   Timer? _saveSettings;
   void _screenChanged() {
+    if (!_screen.scannerAutoFocus && _scanFocus.hasFocus) {
+      _scanFocus.unfocus();
+    }
     setState(() {});
     _saveSettings?.cancel();
     _saveSettings = Timer(const Duration(milliseconds: 400), () async {
@@ -248,7 +276,7 @@ class _RegisterState extends State<_Register> {
     });
   }
 
-  final _scanFocus = FocusNode();
+  final _scanFocus = FocusNode(debugLabel: 'barcode');
   final _searchFocus = FocusNode();
   final _categoriesScroll = ScrollController();
   void _scrollCategories(int direction) {
@@ -340,8 +368,9 @@ class _RegisterState extends State<_Register> {
 
   Future<void> _backOffice({bool cashRegister = false}) async {
     final uri = cashRegister
-        ? caisseStartWebsite(c.webOrigin)
+        ? await resolveCaisseStartWebsite(c.webOrigin)
         : _screen.backOfficeUri ?? caisseWebsite(c.webOrigin, '/accueil');
+    if (!mounted) return;
     if (uri == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -383,6 +412,7 @@ class _RegisterState extends State<_Register> {
     ),
   );
   WindowsRegisterController get c => widget.controller;
+
   /// Ticket après une vente : demandé au caissier, ou imprimé d'office selon le réglage du poste.
   Future<String> _saleTicket(String operation) async {
     if (_screen.ticketMode != 'auto') {
@@ -391,8 +421,15 @@ class _RegisterState extends State<_Register> {
         builder: (context) => AlertDialog(
           title: const Text('Imprimer le ticket ?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Non')),
-            FilledButton(autofocus: true, onPressed: () => Navigator.pop(context, true), child: const Text('Imprimer')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Non'),
+            ),
+            FilledButton(
+              autofocus: true,
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Imprimer'),
+            ),
           ],
         ),
       );
@@ -407,7 +444,25 @@ class _RegisterState extends State<_Register> {
     c.saleTicket = _saleTicket;
     _display = CustomerDisplayService(c);
     unawaited(_display.start());
-    c.refresh();
+    unawaited(_enterWorkspace());
+  }
+
+  Future<void> _enterWorkspace() async {
+    await c.refresh();
+    if (!mounted || !c.ready) return;
+    try {
+      final room = await c.host.call(HostCommand.restaurantView);
+      if (mounted &&
+          (room['table_service'] == true || room['production'] == true)) {
+        await showDialog<void>(
+          context: context,
+          builder: (_) =>
+              RestaurantDialog(host: c.host, intent: c.restaurantIntent),
+        );
+      }
+    } catch (_) {
+      /* The explicit restaurant entry retains diagnostic access. */
+    }
   }
 
   @override
@@ -415,6 +470,7 @@ class _RegisterState extends State<_Register> {
     _display.dispose();
     _saveSettings?.cancel();
     _search.dispose();
+    _searchDelay?.cancel();
     _scan.dispose();
     _scanFocus.dispose();
     _searchFocus.dispose();
@@ -444,8 +500,15 @@ class _RegisterState extends State<_Register> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Paiement indisponible'),
-          content: Text(c.message ?? 'Le paiement ne peut pas être préparé. Réessayez après vérification du panier.'),
-          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
+          content: Text(
+            c.message ?? 'Le paiement ne peut pas être préparé. Réessayez après vérification du panier.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Compris'),
+            ),
+          ],
         ),
       );
       return;
@@ -534,7 +597,7 @@ class _RegisterState extends State<_Register> {
     await c.command(HostCommand.scan, {'code': _scan.text.trim()});
     if (!mounted) return;
     if (c.message == null) _scan.clear();
-    _scanFocus.requestFocus();
+    if (_screen.scannerAutoFocus) _scanFocus.requestFocus();
   }
 
   Future<void> _addProduct(Map<String, dynamic> product) async {
@@ -660,6 +723,7 @@ class _RegisterState extends State<_Register> {
           },
         },
         child: Scaffold(
+          resizeToAvoidBottomInset: false,
           endDrawer: ScreenSettingsPanel(
             display: _display,
             host: c.host,
@@ -773,7 +837,11 @@ class _RegisterState extends State<_Register> {
                 onPressed: c.ready && !c.busy
                     ? () => showDialog<void>(
                         context: context,
-                        builder: (_) => SalesHistoryDialog(host: c.host),
+                        builder: (_) => SalesHistoryDialog(
+                          host: c.host,
+                          restaurantIntent: c.restaurantIntent,
+                          editionFile: c.closureEditionFile,
+                        ),
                       )
                     : null,
                 icon: const Icon(Icons.receipt_long_outlined),
@@ -845,8 +913,11 @@ class _RegisterState extends State<_Register> {
                           onPressed: c.ready && !c.busy
                               ? () => showDialog<void>(
                                   context: context,
-                                  builder: (_) =>
-                                      SalesHistoryDialog(host: c.host),
+                                  builder: (_) => SalesHistoryDialog(
+                                    host: c.host,
+                                    restaurantIntent: c.restaurantIntent,
+                                    editionFile: c.closureEditionFile,
+                                  ),
                                 )
                               : null,
                           icon: const Icon(Icons.history),
@@ -856,8 +927,11 @@ class _RegisterState extends State<_Register> {
                           onPressed: c.ready && !c.busy
                               ? () => showDialog<void>(
                                   context: context,
-                                  builder: (_) =>
-                                      SalesHistoryDialog(host: c.host),
+                                  builder: (_) => SalesHistoryDialog(
+                                    host: c.host,
+                                    restaurantIntent: c.restaurantIntent,
+                                    editionFile: c.closureEditionFile,
+                                  ),
                                 )
                               : null,
                           icon: const Icon(Icons.receipt_long_outlined),
@@ -892,9 +966,21 @@ class _RegisterState extends State<_Register> {
                           label: const Text('Calculatrice'),
                         ),
                         TextButton.icon(
-                          onPressed: c.ready && !c.busy ? () => showDialog<void>(context: context, builder: (_) => RestaurantDialog(host: c.host)) : null,
+                          onPressed: c.ready && !c.busy
+                              ? () => showDialog<void>(
+                                  context: context,
+                                  builder: (_) => RestaurantDialog(
+                                    host: c.host,
+                                    intent: c.restaurantIntent,
+                                  ),
+                                )
+                              : null,
                           icon: const Icon(Icons.table_restaurant_outlined),
-                          label: const Text('Salle et tables'),
+                          label: Text(
+                            c.productionMessage == null
+                                ? 'Salle et tables'
+                                : 'Bons à vérifier · Salle et tables',
+                          ),
                         ),
                         TextButton.icon(
                           onPressed: _shortcuts,
@@ -935,7 +1021,9 @@ class _RegisterState extends State<_Register> {
               if (c.receipt != null)
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text('Vente enregistrée · ${c.receipt}${c.ticketMessage == null ? '' : ' · ${c.ticketMessage}'}'),
+                  child: Text(
+                    'Vente enregistrée · ${c.receipt}${c.ticketMessage == null ? '' : ' · ${c.ticketMessage}'}',
+                  ),
                 ),
               Expanded(
                 child: LayoutBuilder(
@@ -990,7 +1078,8 @@ class _RegisterState extends State<_Register> {
               child: TextField(
                 controller: _scan,
                 focusNode: _scanFocus,
-                autofocus: true,
+                keyboardType: TextInputType.none,
+                autofocus: _screen.scannerAutoFocus,
                 enabled: c.ready && !c.busy && c.uncertainOperation == null,
                 decoration: InputDecoration(
                   isDense: true,
@@ -1010,16 +1099,35 @@ class _RegisterState extends State<_Register> {
               child: TextField(
                 controller: _search,
                 focusNode: _searchFocus,
-                enabled: _canEdit,
+                enabled: c.ready && c.uncertainOperation == null,
                 decoration: InputDecoration(
                   isDense: true,
                   labelText: 'Rechercher un produit',
-                  suffixIcon: IconButton(
-                    tooltip: 'Rechercher',
-                    onPressed: _canEdit ? () => _searchCatalogue() : null,
-                    icon: const Icon(Icons.search),
+                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: _search,
+                    builder: (_, value, _) => Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (value.text.isNotEmpty)
+                          IconButton(
+                            tooltip: 'Effacer la recherche',
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _search.clear();
+                              _searchCatalogue();
+                              _searchFocus.requestFocus();
+                            },
+                          ),
+                        IconButton(
+                          tooltip: 'Rechercher',
+                          icon: const Icon(Icons.search),
+                          onPressed: () => _searchCatalogue(),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+                onChanged: (_) => _queueSearch(),
                 onSubmitted: (_) => _searchCatalogue(),
               ),
             ),
@@ -1120,7 +1228,12 @@ class _RegisterState extends State<_Register> {
                         children: [
                           Text('Stock : ${p['stock_label'] ?? "à vérifier"}'),
                           if (p['wholesale_price_label'] != null)
-                            Text('Gros : ${p['wholesale_price_label']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                            Text(
+                              'Gros : ${p['wholesale_price_label']}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 11),
+                            ),
                           ProductBadges(product: p),
                         ],
                       ),
@@ -1210,7 +1323,12 @@ class _RegisterState extends State<_Register> {
                               ),
                               const SizedBox(height: 4),
                               if (p['wholesale_price_label'] != null)
-                                Text('Gros : ${p['wholesale_price_label']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                                Text(
+                                  'Gros : ${p['wholesale_price_label']}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 11),
+                                ),
                               ProductBadges(product: p),
                               Text(
                                 p['stock_label'] as String? ??
@@ -1310,7 +1428,10 @@ class _RegisterState extends State<_Register> {
                               ),
                             ),
                             LineLotChoice(controller: c, line: line),
-                            if (line['stock_after_label'] != null)
+                            LinePriceButton(controller: c, line: line),
+                            if ((line['stock_after_label'] as String? ?? '')
+                                .trim()
+                                .isNotEmpty)
                               Text(
                                 'Après vente : ${line['stock_after_label']}',
                                 style: const TextStyle(fontSize: 11),
@@ -1487,7 +1608,9 @@ class _RegisterState extends State<_Register> {
                     padding: const EdgeInsets.all(12),
                   ),
                   icon: const Icon(Icons.payments_outlined),
-                  label: Text(_allowed('pass') ? 'Scanner le pass (F4)' : 'Payer (F4)'),
+                  label: Text(
+                    _allowed('pass') ? 'Scanner le pass (F4)' : 'Payer (F4)',
+                  ),
                 ),
               ),
             ],

@@ -88,7 +88,7 @@ class _RestaurantWorkspaceState extends State<RestaurantWorkspace> {
             ),
             const SizedBox(height: 4),
             Text(
-              '${widget.tables.length} tables · ${widget.tables.where((t) => t.state == RestaurantTableState.occupied).length} occupées',
+              '${widget.tables.length} tables · ${widget.tables.where((t) => t.state != RestaurantTableState.free).length} occupées',
             ),
             const SizedBox(height: 20),
             TextField(
@@ -327,19 +327,24 @@ class _RestaurantWorkspaceState extends State<RestaurantWorkspace> {
           ],
           const SizedBox(height: 24),
           FilledButton(
-            onPressed: table == null || widget.onOpen == null ? null : () => widget.onOpen!(table),
+            onPressed: table == null || widget.onOpen == null
+                ? null
+                : () => widget.onOpen!(table),
             child: Text('Ouvrir / modifier la commande'),
           ),
-          if (widget.onOpen == null) const OutlinedButton(
-            onPressed: null,
-            child: Text('Envoyer en cuisine'),
-          ),
-          if (widget.onOpen == null) const OutlinedButton(onPressed: null, child: Text('Encaisser')),
+          if (widget.onOpen == null)
+            const OutlinedButton(
+              onPressed: null,
+              child: Text('Envoyer en cuisine'),
+            ),
+          if (widget.onOpen == null)
+            const OutlinedButton(onPressed: null, child: Text('Encaisser')),
           const SizedBox(height: 8),
-          if (widget.onOpen == null) const Text(
-            'Actions disponibles après raccordement du moteur restaurant.',
-            style: TextStyle(fontSize: 12),
-          ),
+          if (widget.onOpen == null)
+            const Text(
+              'Actions disponibles après raccordement du moteur restaurant.',
+              style: TextStyle(fontSize: 12),
+            ),
         ],
       ),
     ),

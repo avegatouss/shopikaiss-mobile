@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'dart:io';
+
+import '../platform/restaurant_intent.dart';
+
 import 'cash_documents.dart';
 
 import '../ipc/protocol.dart';
@@ -21,7 +25,7 @@ Future<String> printOriginalTicket(WindowsHost host, String operation) async {
       lines.any((v) => v is! String)) {
     throw const FormatException();
   }
-  return ReceiptPrinting.printLines(
+  return ReceiptPrinting.printSale(
     lines.cast<String>(),
     compact: result['compact'] == true,
   );
@@ -32,9 +36,13 @@ class SalesHistoryDialog extends StatefulWidget {
   const SalesHistoryDialog({
     super.key,
     required this.host,
-    this.printReceipt = ReceiptPrinting.printLines,
+    this.printReceipt = ReceiptPrinting.printSale,
+    this.restaurantIntent,
+    this.editionFile,
   });
   final WindowsHost host;
+  final RestaurantIntent? restaurantIntent;
+  final File? editionFile;
   final Future<String> Function(List<String> lines, {bool compact})
   printReceipt;
 
@@ -192,7 +200,11 @@ class _SalesHistoryDialogState extends State<SalesHistoryDialog> {
             ? null
             : () => showDialog<void>(
                 context: context,
-                builder: (_) => CashDocumentsDialog(host: widget.host),
+                builder: (_) => CashDocumentsDialog(
+                  host: widget.host,
+                  restaurantIntent: widget.restaurantIntent,
+                  editionFile: widget.editionFile,
+                ),
               ),
         child: const Text('Bons de retour / Z'),
       ),

@@ -3,16 +3,11 @@ import '../../offline/ticket.dart';
 import '../../offline/money.dart';
 import 'host_server.dart';
 import 'protocol.dart';
-import 'closure_document.dart';
-import '../../offline/x_z_report.dart';
-import '../../offline/models.dart';
-import 'package:uuid/uuid.dart';
 
 /// Transport adaptation only; business rules stay in B's shared engine.
 class BEngineAdapter implements WindowsEngineAdapter {
   BEngineAdapter(this.inner);
   final LocalRegisterAdapter inner;
-  final _editions = <String, (Operator, ClosureDocument)>{};
   @override
   Stream<Map<String, dynamic>> get committedChanges => inner.committedChanges;
   @override
@@ -21,51 +16,120 @@ class BEngineAdapter implements WindowsEngineAdapter {
     Map<String, dynamic> arguments,
     String? operationId,
   ) async {
-    if (command == HostCommand.cashClosureEdition) {
-      final pending = _editions.remove(arguments['edition_id']);
-      if (pending != null) await inner.engine.recordEdition(pending.$1, pending.$2);
-      return {'recorded': pending != null};
-    }
-    if (command == HostCommand.cashClosureDocument) {
+    if (command == HostCommand.restaurantCatalog) {
       final status = await inner.execute('status', const {}, null);
       if (status['operator'] == null) {
-        throw const HostFailure('operator_required', 'Identifiez le caissier pour consulter les documents.');
+        throw const HostFailure('operator_required', 'Identifiez le caissier.');
       }
-      final operator = inner.engine.snapshot?.operatorById((status['operator'] as Map)['id'] as int);
-      if (operator == null ||
-          (arguments['kind'] == 'pre-z' && !inner.engine.hasRight(operator, 'caisse_cloturer'))) {
-        throw const HostFailure('document_forbidden', 'Vous ne pouvez pas éditer ce document sur ce poste.');
+      final snapshot = inner.engine.snapshot;
+      if (snapshot == null) {
+        throw const HostFailure('catalog_absent', 'Catalogue indisponible.');
       }
-      if (_editions.length >= 100) {
-        throw const HostFailure('edition_pending', 'Trop de documents en attente de confirmation.');
+      final limit = (arguments['limit'] as int? ?? 60).clamp(1, 500);
+      final offset = arguments['offset'] as int? ?? 0;
+      if (offset < 0) {
+        throw const HostFailure('argument_invalid', 'Page invalide.');
       }
-      final id = const Uuid().v4();
-      final result = await localClosureDocument(inner.engine, arguments,
-          onPrepared: (document) => _editions[id] = (operator, document));
-      return {...result, 'edition_id': id};
+      final products = snapshot.search(
+        arguments['query'] as String? ?? '',
+        limit: null,
+        category: arguments['category'] as String?,
+      );
+      return {
+        'categories': snapshot.categories,
+        'has_more': products.length > offset + limit,
+        'products': [
+          for (final p in products.skip(offset).take(limit))
+            {
+              'id': p.id,
+              'name': p.name,
+              'category': p.category,
+              'price_label': formatFcfa(p.price, snapshot.store.currency),
+              'packagings': [
+                for (final k in p.packagings)
+                  {
+                    'id': k.id,
+                    'name': k.name,
+                    'price_label': formatFcfa(k.price, snapshot.store.currency),
+                  },
+              ],
+            },
+        ],
+      };
     }
-    if (command == HostCommand.cashDocuments || command == HostCommand.cashDocument) {
-      final documents = (await inner.engine.history()).where((o) => o.type == 'retour' || o.type == 'cloture_session').toList().reversed;
+    if (command == HostCommand.cashDocuments ||
+        command == HostCommand.cashDocument) {
+      final documents = (await inner.engine.history())
+          .where((o) => o.type == 'retour' || o.type == 'cloture_session')
+          .toList()
+          .reversed;
       if (command == HostCommand.cashDocuments) {
-        return {'items': [for (final o in documents) {'operation_id': o.uuid, 'title': o.type == 'retour' ? 'Bon de retour' : 'Rapport Z', 'date': o.date.toIso8601String(), 'available': o.type == 'retour' || o.content['z'] is Map, 'status': o.serverStatus ?? o.status}]};
+        return {
+          'items': [
+            for (final o in documents)
+              {
+                'operation_id': o.uuid,
+                'title': o.type == 'retour'
+                    ? 'Bon de retour'
+                    : 'Résumé serveur',
+                'date': o.date.toIso8601String(),
+                'available': o.type == 'retour' || o.content['z'] is Map,
+                'status': o.serverStatus ?? o.status,
+              },
+          ],
+        };
       }
-      final matches = documents.where((o) => o.uuid == arguments['operation_id']);
-      if (matches.isEmpty) throw const HostFailure('document_absent', 'Document introuvable sur ce poste.');
+      final matches = documents.where(
+        (o) => o.uuid == arguments['operation_id'],
+      );
+      if (matches.isEmpty) {
+        throw const HostFailure(
+          'document_absent',
+          'Document introuvable sur ce poste.',
+        );
+      }
       final o = matches.first;
       final snapshot = inner.engine.snapshot;
-      if (snapshot == null) throw const HostFailure('document_absent', 'Référentiel indisponible.');
-      final rows = <(String, String)>[('Operation', o.uuid), ('Etat', o.serverStatus ?? o.status)];
+      if (snapshot == null) {
+        throw const HostFailure('document_absent', 'Référentiel indisponible.');
+      }
+      final rows = <(String, String)>[
+        ('Operation', o.uuid),
+        ('Etat', o.serverStatus ?? o.status),
+      ];
       if (o.type == 'retour') {
-        rows.add(('Remboursement especes', formatFcfa(o.content['montant'] as int)));
+        rows.add((
+          'Remboursement especes',
+          formatFcfa(o.content['montant'] as int),
+        ));
         rows.add(('Motif', '${o.content['motif'] ?? ''}'));
       } else {
         final z = o.content['z'];
-        if (z is! Map) throw const HostFailure('z_attendu', 'Le rapport Z sera disponible après synchronisation.');
-        for (final entry in {'compte': 'Compte', 'theorique': 'Theorique', 'ecart': 'Ecart'}.entries) {
+        if (z is! Map) {
+          throw const HostFailure(
+            'z_attendu',
+            'Le rapport Z sera disponible après synchronisation.',
+          );
+        }
+        for (final entry in {
+          'compte': 'Compte',
+          'theorique': 'Theorique',
+          'ecart': 'Ecart',
+        }.entries) {
           rows.add((entry.value, formatFcfa(z[entry.key] as int)));
         }
       }
-      return {'operation_id': o.uuid, 'lines': offlineSlipLines(snapshot: snapshot, title: o.type == 'retour' ? 'BON DE RETOUR' : 'RAPPORT Z', date: o.date, operatorName: snapshot.operatorById(o.operatorId)?.name ?? '', paperWidth: 80, rows: rows)};
+      return {
+        'operation_id': o.uuid,
+        'lines': offlineSlipLines(
+          snapshot: snapshot,
+          title: o.type == 'retour' ? 'BON DE RETOUR' : 'RESUME SERVEUR',
+          date: o.date,
+          operatorName: snapshot.operatorById(o.operatorId)?.name ?? '',
+          paperWidth: inner.paperWidth,
+          rows: rows,
+        ),
+      };
     }
     if (command == HostCommand.login) {
       final snapshot = inner.engine.snapshot;
@@ -95,12 +159,21 @@ class BEngineAdapter implements WindowsEngineAdapter {
       effectiveId ??= argumentId as String?;
     }
     try {
-      final result = await inner.execute(command.name, arguments, effectiveId);
-      if (command == HostCommand.restaurantView) {
-        return {...result, 'interface': inner.engine.restaurantInterface.toJson()};
-      }
+      final result = await inner.execute(
+        command == HostCommand.cashClosureDocument
+            ? 'closureDocument'
+            : command == HostCommand.cashClosureEdition
+            ? 'recordEdition'
+            : command.name,
+        arguments,
+        effectiveId,
+      );
       if (command == HostCommand.status) {
-        return {...result, 'web_origin': await inner.engine.storedOrigin(), 'terminal_name': inner.engine.snapshot?.terminal.name};
+        return {
+          ...result,
+          'web_origin': await inner.engine.storedOrigin(),
+          'terminal_name': inner.engine.snapshot?.terminal.name,
+        };
       }
       return result;
     } on AdapterFailure catch (error) {

@@ -1,4 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
+
+import '../platform/closure_edition_journal.dart';
+import '../platform/restaurant_intent.dart';
 
 import 'package:flutter/material.dart';
 
@@ -6,8 +10,17 @@ import '../ipc/protocol.dart';
 import '../platform/receipt_printing.dart';
 
 class CashDocumentsDialog extends StatefulWidget {
-  const CashDocumentsDialog({super.key, required this.host});
+  const CashDocumentsDialog({
+    super.key,
+    required this.host,
+    this.originalZ = false,
+    this.editionFile,
+    this.restaurantIntent,
+  });
   final WindowsHost host;
+  final bool originalZ;
+  final File? editionFile;
+  final RestaurantIntent? restaurantIntent;
   @override
   State<CashDocumentsDialog> createState() => _CashDocumentsState();
 }
@@ -16,8 +29,13 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
   List<Map> documents = [];
   bool busy = true;
   String? message;
+  late final editions = ClosureEditionJournal(
+    widget.host,
+    file: widget.editionFile,
+  );
   String closureKind = 'pre-x';
   String closureVersion = 'detailed';
+  bool originalRequested = false;
 
   Future<void> printClosure() async {
     setState(() {
@@ -25,6 +43,13 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
       message = null;
     });
     try {
+      await widget.restaurantIntent?.requireResolved();
+      await editions.load();
+      if (editions.pending != null) {
+        throw StateError(
+          "Édition précédente à vérifier avant une nouvelle impression.",
+        );
+      }
       final unavailable = await ReceiptPrinting.unavailableReason();
       if (unavailable != null) {
         message = unavailable;
@@ -34,15 +59,22 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
           arguments: {
             'kind': closureKind,
             'version': closureVersion,
-            'paper_width': 80,
+            'paper_width': await ReceiptPrinting.paperWidth(),
+            'duplicate':
+                closureKind == 'z-session' &&
+                !(widget.originalZ &&
+                    !originalRequested &&
+                    closureKind == 'z-session'),
           },
         );
+        final editionId = result['edition_id'] as String?;
+        if (editionId != null) await editions.begin(editionId);
+        if (closureKind == 'z-session') originalRequested = true;
         message = await ReceiptPrinting.printLines(
           (result['lines'] as List).cast<String>(),
           escposBytes: base64Decode(result['escpos_base64'] as String),
+          onTransmitted: editionId == null ? null : editions.confirm,
         );
-        await widget.host.call(HostCommand.cashClosureEdition,
-            arguments: {'edition_id': result['edition_id']});
       }
     } catch (e) {
       message = e is HostFailure
@@ -52,9 +84,27 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
     if (mounted) setState(() => busy = false);
   }
 
+  Future<void> resolveEdition(bool transmitted) async {
+    setState(() => busy = true);
+    try {
+      if (transmitted) {
+        await editions.confirm();
+      } else {
+        await editions.discard();
+      }
+      message = 'Vérification enregistrée. Aucun ticket renvoyé.';
+    } catch (e) {
+      message = e is HostFailure
+          ? e.message
+          : 'Confirmation à reprendre, sans réimpression.';
+    }
+    if (mounted) setState(() => busy = false);
+  }
+
   @override
   void initState() {
     super.initState();
+    if (widget.originalZ) closureKind = 'z-session';
     load();
   }
 
@@ -64,10 +114,13 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
       message = null;
     });
     try {
+      await editions.load();
       final result = await widget.host.call(HostCommand.cashDocuments);
       documents = (result['items'] as List).cast<Map>();
-    } catch (_) {
-      message = 'Documents indisponibles. Aucune opération renvoyée.';
+    } catch (e) {
+      message = e is HostFailure
+          ? e.message
+          : 'Documents indisponibles. Aucune opération renvoyée.';
     }
     if (mounted) setState(() => busy = false);
   }
@@ -106,6 +159,24 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
         children: [
           if (busy) const LinearProgressIndicator(),
           if (message != null) Text(message!),
+          if (editions.pending != null)
+            Wrap(
+              spacing: 8,
+              children: [
+                const Text(
+                  'Édition précédente : vérifier le papier et la file Windows.',
+                ),
+                TextButton(
+                  onPressed: busy ? null : () => resolveEdition(true),
+                  child: const Text('Confirmer la transmission'),
+                ),
+                if (editions.pending?['state'] == 'prepared')
+                  TextButton(
+                    onPressed: busy ? null : () => resolveEdition(false),
+                    child: const Text('Confirmer aucun envoi'),
+                  ),
+              ],
+            ),
           Row(
             children: [
               Expanded(
@@ -115,18 +186,22 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
                     labelText: 'Document local',
                   ),
                   isExpanded: true,
-                  items: const [
-                    DropdownMenuItem(
+                  items: [
+                    const DropdownMenuItem(
                       value: 'pre-x',
                       child: Text('Pré-X de la session'),
                     ),
-                    DropdownMenuItem(
+                    const DropdownMenuItem(
                       value: 'pre-z',
                       child: Text('Pré-Z de la journée'),
                     ),
                     DropdownMenuItem(
                       value: 'z-session',
-                      child: Text('Dernier Z (duplicata)'),
+                      child: Text(
+                        widget.originalZ && !originalRequested
+                            ? 'Z original de la clôture'
+                            : 'Dernier Z (duplicata)',
+                      ),
                     ),
                   ],
                   onChanged: busy
