@@ -48,10 +48,12 @@ class RestaurantWorkspace extends StatefulWidget {
     required this.tables,
     this.stations = const [],
     required this.availabilityMessage,
+    this.onOpen,
   });
   final List<RestaurantTableView> tables;
   final List<RestaurantStationView> stations;
   final String availabilityMessage;
+  final void Function(RestaurantTableView)? onOpen;
   @override
   State<RestaurantWorkspace> createState() => _RestaurantWorkspaceState();
 }
@@ -324,17 +326,17 @@ class _RestaurantWorkspaceState extends State<RestaurantWorkspace> {
               ),
           ],
           const SizedBox(height: 24),
-          const FilledButton(
-            onPressed: null,
+          FilledButton(
+            onPressed: table == null || widget.onOpen == null ? null : () => widget.onOpen!(table),
             child: Text('Ouvrir / modifier la commande'),
           ),
-          const OutlinedButton(
+          if (widget.onOpen == null) const OutlinedButton(
             onPressed: null,
             child: Text('Envoyer en cuisine'),
           ),
-          const OutlinedButton(onPressed: null, child: Text('Encaisser')),
+          if (widget.onOpen == null) const OutlinedButton(onPressed: null, child: Text('Encaisser')),
           const SizedBox(height: 8),
-          const Text(
+          if (widget.onOpen == null) const Text(
             'Actions disponibles après raccordement du moteur restaurant.',
             style: TextStyle(fontSize: 12),
           ),

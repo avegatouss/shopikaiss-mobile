@@ -3,11 +3,16 @@ import '../../offline/ticket.dart';
 import '../../offline/money.dart';
 import 'host_server.dart';
 import 'protocol.dart';
+import 'closure_document.dart';
+import '../../offline/x_z_report.dart';
+import '../../offline/models.dart';
+import 'package:uuid/uuid.dart';
 
 /// Transport adaptation only; business rules stay in B's shared engine.
 class BEngineAdapter implements WindowsEngineAdapter {
   BEngineAdapter(this.inner);
   final LocalRegisterAdapter inner;
+  final _editions = <String, (Operator, ClosureDocument)>{};
   @override
   Stream<Map<String, dynamic>> get committedChanges => inner.committedChanges;
   @override
@@ -16,6 +21,29 @@ class BEngineAdapter implements WindowsEngineAdapter {
     Map<String, dynamic> arguments,
     String? operationId,
   ) async {
+    if (command == HostCommand.cashClosureEdition) {
+      final pending = _editions.remove(arguments['edition_id']);
+      if (pending != null) await inner.engine.recordEdition(pending.$1, pending.$2);
+      return {'recorded': pending != null};
+    }
+    if (command == HostCommand.cashClosureDocument) {
+      final status = await inner.execute('status', const {}, null);
+      if (status['operator'] == null) {
+        throw const HostFailure('operator_required', 'Identifiez le caissier pour consulter les documents.');
+      }
+      final operator = inner.engine.snapshot?.operatorById((status['operator'] as Map)['id'] as int);
+      if (operator == null ||
+          (arguments['kind'] == 'pre-z' && !inner.engine.hasRight(operator, 'caisse_cloturer'))) {
+        throw const HostFailure('document_forbidden', 'Vous ne pouvez pas éditer ce document sur ce poste.');
+      }
+      if (_editions.length >= 100) {
+        throw const HostFailure('edition_pending', 'Trop de documents en attente de confirmation.');
+      }
+      final id = const Uuid().v4();
+      final result = await localClosureDocument(inner.engine, arguments,
+          onPrepared: (document) => _editions[id] = (operator, document));
+      return {...result, 'edition_id': id};
+    }
     if (command == HostCommand.cashDocuments || command == HostCommand.cashDocument) {
       final documents = (await inner.engine.history()).where((o) => o.type == 'retour' || o.type == 'cloture_session').toList().reversed;
       if (command == HostCommand.cashDocuments) {
@@ -68,6 +96,9 @@ class BEngineAdapter implements WindowsEngineAdapter {
     }
     try {
       final result = await inner.execute(command.name, arguments, effectiveId);
+      if (command == HostCommand.restaurantView) {
+        return {...result, 'interface': inner.engine.restaurantInterface.toJson()};
+      }
       if (command == HostCommand.status) {
         return {...result, 'web_origin': await inner.engine.storedOrigin(), 'terminal_name': inner.engine.snapshot?.terminal.name};
       }

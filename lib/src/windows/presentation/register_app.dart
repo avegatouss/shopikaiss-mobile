@@ -27,6 +27,7 @@ import 'payment_message.dart';
 import 'cash_operations.dart';
 import 'product_badges.dart';
 import 'pass_payment.dart';
+import 'restaurant_dialog.dart';
 
 class WindowsRegisterApp extends StatelessWidget {
   const WindowsRegisterApp({super.key, this.controller, this.onConnection});
@@ -339,7 +340,7 @@ class _RegisterState extends State<_Register> {
 
   Future<void> _backOffice({bool cashRegister = false}) async {
     final uri = cashRegister
-        ? caisseWebsite(c.webOrigin, '/caisse')
+        ? caisseStartWebsite(c.webOrigin)
         : _screen.backOfficeUri ?? caisseWebsite(c.webOrigin, '/accueil');
     if (uri == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -889,6 +890,11 @@ class _RegisterState extends State<_Register> {
                           ),
                           icon: const Icon(Icons.calculate_outlined),
                           label: const Text('Calculatrice'),
+                        ),
+                        TextButton.icon(
+                          onPressed: c.ready && !c.busy ? () => showDialog<void>(context: context, builder: (_) => RestaurantDialog(host: c.host)) : null,
+                          icon: const Icon(Icons.table_restaurant_outlined),
+                          label: const Text('Salle et tables'),
                         ),
                         TextButton.icon(
                           onPressed: _shortcuts,

@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +10,8 @@ import '../ipc/protocol.dart';
 import '../ipc/supervised_host.dart';
 import '../platform/sale_intent.dart';
 import '../platform/site_profiles.dart';
+import '../platform/production_queue.dart';
+import '../platform/receipt_printing.dart';
 import 'register_app.dart';
 import 'brand_logo.dart';
 import 'register_controller.dart';
@@ -23,6 +26,7 @@ class WindowsBootstrap extends StatefulWidget {
 class _WindowsBootstrapState extends State<WindowsBootstrap> {
   SupervisedWindowsHost? host;
   WindowsRegisterController? controller;
+  ProductionQueue? productionQueue;
   final origin = TextEditingController();
   final code = TextEditingController();
   final pin = TextEditingController();
@@ -95,6 +99,8 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
       await controller!.recoverIntent();
     }
     await host!.connect();
+    productionQueue ??= ProductionQueue(host!, send: ReceiptPrinting.printProduction)..start();
+    await productionQueue!.drain();
     await _status();
   }
 
@@ -122,6 +128,8 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
       final blocked = siteSwitchRefusal(currentStatus, view, uncertain: controller!.uncertainOperation != null || await hasUnresolvedSiteIntent(profiles!.dataDirectory));
       if (blocked != null) throw HostFailure('site_switch_refused', blocked);
       // Complete normal engine shutdown before changing the active directory.
+      await productionQueue?.close();
+      productionQueue = null;
       await host!.close();
       controller?.dispose();
       controller = null;
@@ -162,7 +170,10 @@ class _WindowsBootstrapState extends State<WindowsBootstrap> {
   void dispose() {
     controller?.dispose();
     // OS EOF on window termination also drains the host queue before closing.
-    host?.close().catchError((Object _) {});
+    unawaited(() async {
+      await productionQueue?.close();
+      await host?.close();
+    }().catchError((Object _) {}));
     origin.dispose();
     code.dispose();
     pin.dispose();

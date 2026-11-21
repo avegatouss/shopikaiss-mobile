@@ -40,6 +40,35 @@ class PaymentHost implements WindowsHost {
 }
 
 void main() {
+  testWidgets('a full first payment can be split without manual subtraction', (
+    tester,
+  ) async {
+    final c = WindowsRegisterController(PaymentHost())..ready = true;
+    await c.command(HostCommand.preparePayment, {});
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: MultiplePayments(controller: c)),
+      ),
+    );
+    final add = find.text('Ajouter un paiement');
+    await tester.ensureVisible(add);
+    await tester.tap(add);
+    await tester.pump();
+    final second = find.byWidgetPredicate(
+      (w) => w is TextFormField && w.controller?.text == '0',
+    );
+    expect(second, findsOneWidget);
+    await tester.enterText(second, '5000');
+    await tester.pump();
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is TextFormField && w.controller?.text == '5000',
+      ),
+      findsNWidgets(2),
+    );
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
   testWidgets('desktop payment fields share one row', (tester) async {
     await tester.binding.setSurfaceSize(const Size(1280, 800));
     tester.view.physicalSize = const Size(1280, 800);
