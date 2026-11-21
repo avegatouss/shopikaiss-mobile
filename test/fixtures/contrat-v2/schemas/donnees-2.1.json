@@ -1017,6 +1017,59 @@
                                     "minimum": 1
                                 }
                             }
+                        },
+                        "produit_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacités produit.creation / produit.modification (2.1 lot 10) : produit serveur désigné par produit_uuid (lui-même, ou le produit auquel il est rattaché ; l’uuid du terminal reste alors un alias sans limite)."
+                        },
+                        "produit_resolution": {
+                            "type": "object",
+                            "description": "2.1 lot 10 : décision appliquée à une creation_produit ou une modification_produit.",
+                            "required": [
+                                "decision",
+                                "champs_serveur",
+                                "decide_par"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "decision": {
+                                    "enum": [
+                                        "creee",
+                                        "rattachee",
+                                        "creee_distincte",
+                                        "appliquee",
+                                        "sans_effet",
+                                        "arbitree"
+                                    ]
+                                },
+                                "champs_serveur": {
+                                    "type": "array",
+                                    "uniqueItems": true,
+                                    "maxItems": 10,
+                                    "description": "Champs de la modification où la valeur du serveur a été gardée par arbitrage.",
+                                    "items": {
+                                        "enum": [
+                                            "nom",
+                                            "reference",
+                                            "categorie_uuid",
+                                            "prix",
+                                            "prix_gros",
+                                            "gros_quantite_min"
+                                        ]
+                                    }
+                                },
+                                "decide_par": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                                        }
+                                    ],
+                                    "description": "Utilisateur qui a arbitré ; null sans arbitrage."
+                                }
+                            }
                         }
                     }
                 }

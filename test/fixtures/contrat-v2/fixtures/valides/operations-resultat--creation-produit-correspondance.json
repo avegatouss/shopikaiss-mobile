@@ -1,0 +1,29 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000101",
+    "etat": "a_arbitrer",
+    "version_etat": "1795248000000",
+    "raison": {
+        "code": "produit.correspondance",
+        "message": "Code-barres ou référence déjà utilisés dans la boutique : à arbitrer.",
+        "details": {
+            "produit_uuid": "c3000000-0000-4000-8000-000000000001",
+            "correspondances": [
+                {
+                    "produit_uuid": "c0000000-0000-4000-8000-000000000002",
+                    "nom": "Gâteau maison",
+                    "reference": "GAT-01",
+                    "prix": 1400,
+                    "actif": true,
+                    "motifs": [
+                        "code_barres"
+                    ]
+                }
+            ]
+        }
+    },
+    "vente": null,
+    "mouvements": [],
+    "couverture": {
+        "curseur": null
+    }
+}

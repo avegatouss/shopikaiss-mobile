@@ -1,0 +1,27 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000103",
+    "type": "modification_produit",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 52,
+    "cree_le": "2026-11-21T08:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "produit_uuid": "c3000000-0000-4000-8000-000000000001",
+        "revision_base": null,
+        "champs": {
+            "reference": {
+                "avant": "GAT-JOUR",
+                "apres": null
+            }
+        }
+    },
+    "empreinte": "13950b8b8d69c23e9c9ee49b7ad2b1de9132103a225330b3964aad52c004aad1"
+}

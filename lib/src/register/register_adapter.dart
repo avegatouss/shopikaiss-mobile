@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
+import '../offline/catalogue_edit.dart';
 import '../offline/engine.dart';
 import '../offline/local_prices.dart';
 import '../offline/models.dart';
@@ -206,6 +207,16 @@ class LocalRegisterAdapter {
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
       case 'setLinePrice':
         return _setLinePrice(_text(args, 'line_id', max: 64), args['amount']);
+      case 'catalogueForm':
+        return _catalogueForm();
+      case 'createProduct':
+        return _createProduct(args);
+      case 'productForEdit':
+        return _productForEdit(_int(args, 'product_id'));
+      case 'updateProduct':
+        return _updateProduct(args);
+      case 'catalogueChanges':
+        return {'items': [for (final c in await engine.catalogueChanges()) c.toJson()]};
       case 'localPriceSettings':
         return _localPrices();
       case 'setLocalPriceSettings':
@@ -350,6 +361,9 @@ class LocalRegisterAdapter {
           ? null
           : '${_operator!.name} n’a pas le droit de modifier le prix de vente.'),
       'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
+      // Catalogue hors connexion (2.1 lot 10) : capacité accordée et droit du caissier connecté.
+      'product_create': cap(engine.productCreateBlocker(_operator)),
+      'product_edit': cap(engine.productEditBlocker(_operator)),
       'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
       'global_discount': {...cap(_extrasRefusal() ?? _globalDiscountRefusal()), 'max_percent': rules?.maxGlobalDiscountPercent ?? 0},
@@ -545,6 +559,7 @@ class LocalRegisterAdapter {
                   ? null
                   : {'uuid': p.image!.uuid, 'hash': p.image!.hash, 'width': p.image!.width, 'height': p.image!.height, 'path': engine.imagePath(p.image!)},
               'price_label': formatFcfa(displayedPrice(p), currency),
+              'local_state': p.localState,
               'wholesale_price_label': p.wholesalePrice == null || engine.wholesaleRules == null ? null : formatFcfa(p.wholesalePrice!, currency),
               'stock_label': p.unlimitedStock ? '' : _stockLabel(p, sold[p.id] ?? BigInt.zero),
               'stock_after_label': p.unlimitedStock ? '' : _stockLabel(p, (sold[p.id] ?? BigInt.zero) + (demand[p.id] ?? BigInt.zero)),
@@ -853,6 +868,127 @@ class LocalRegisterAdapter {
       return _view();
     }
     return result;
+  }
+
+  // ------------------------------------------------------------------ Catalogue hors connexion (2.1 lot 10)
+
+  Map<String, dynamic> _catalogueForm() => {
+    'create': {'allowed': engine.productCreateBlocker(_operator) == null, 'reason': engine.productCreateBlocker(_operator)},
+    'edit': {'allowed': engine.productEditBlocker(_operator) == null, 'reason': engine.productEditBlocker(_operator)},
+    'categories': [for (final c in engine.productCategories) {'uuid': c.uuid, 'name': c.name}],
+    'limits': {
+      'name': CatalogueLimits.name,
+      'reference': CatalogueLimits.reference,
+      'barcodes': CatalogueLimits.barcodes,
+      'barcode': CatalogueLimits.barcode,
+      'max_amount': CatalogueLimits.maxAmount,
+    },
+  };
+
+  static String? _optionalString(Map<String, dynamic> args, String key) {
+    final value = args[key];
+    if (value != null && value is! String) throw AdapterFailure('argument_invalide', 'Texte attendu pour $key.');
+    return value as String?;
+  }
+
+  static int? _optionalInt(Map<String, dynamic> args, String key) {
+    final value = args[key];
+    if (value != null && value is! int) throw AdapterFailure('argument_invalide', 'Entier attendu pour $key.');
+    return value as int?;
+  }
+
+  /// Refus du moteur pour le catalogue : code propre s'il en a un, sinon champ invalide.
+  static AdapterFailure _catalogueFailure(OfflineRefusal e) => AdapterFailure(e.code ?? 'champ_invalide', e.message);
+
+  Operator _catalogueOperator(String? blocker) {
+    if (blocker != null) throw AdapterFailure('produit_refuse', blocker);
+    return _operator!;
+  }
+
+  Future<Map<String, dynamic>> _createProduct(Map<String, dynamic> args) async {
+    final operator = _catalogueOperator(engine.productCreateBlocker(_operator));
+    final barcodes = args['barcodes'] ?? const <Object?>[];
+    if (barcodes is! List || barcodes.any((c) => c is! String)) throw const AdapterFailure('argument_invalide', 'Liste de codes-barres attendue.');
+    if (args['price'] is! int) throw const AdapterFailure('argument_invalide', 'Prix de vente entier attendu.');
+    if (args['unlimited_stock'] != null && args['unlimited_stock'] is! bool) throw const AdapterFailure('argument_invalide', 'Choix du stock illimité attendu.');
+    final operationId = _optionalString(args, 'operation_id');
+    try {
+      final product = await engine.createProduct(
+        operator,
+        NewProduct(
+          name: _optionalString(args, 'name') ?? '',
+          reference: _optionalString(args, 'reference'),
+          barcodes: barcodes.cast<String>(),
+          categoryUuid: _optionalString(args, 'category_uuid'),
+          price: args['price'] as int,
+          purchasePrice: _optionalInt(args, 'purchase_price'),
+          wholesalePrice: _optionalInt(args, 'wholesale_price'),
+          wholesaleMin: _optionalString(args, 'wholesale_min'),
+          unlimitedStock: args['unlimited_stock'] == true,
+        ),
+        operationUuid: operationId,
+      );
+      _emit('catalogue');
+      return {'product_id': product.id, 'product_uuid': engine.productFields(product.id)?.uuid, 'local_state': 'a_synchroniser'};
+    } on OfflineRefusal catch (e) {
+      throw _catalogueFailure(e);
+    }
+  }
+
+  Map<String, dynamic> _productForEdit(int productId) {
+    final fields = engine.productFields(productId);
+    if (fields == null) throw const AdapterFailure('produit_inconnu', 'Produit inconnu sur ce terminal.');
+    final reason = engine.productEditBlocker(_operator);
+    return {
+      'product_id': fields.productId,
+      'product_uuid': fields.uuid,
+      'name': fields.name,
+      'reference': fields.reference,
+      'barcodes': fields.barcodes,
+      'category_uuid': fields.categoryUuid,
+      'price': fields.price,
+      'wholesale_price': fields.wholesalePrice,
+      'wholesale_min': fields.wholesaleMin,
+      'wholesale_min_label': fields.wholesaleMin == null ? null : Decimal6.label(Decimal6.parse(fields.wholesaleMin!)),
+      'unlimited_stock': fields.unlimitedStock,
+      'local_state': fields.localState,
+      'editable': reason == null,
+      'reason': reason,
+    };
+  }
+
+  static const _fieldNames = {
+    'name': 'nom',
+    'reference': 'reference',
+    'category_uuid': 'categorie_uuid',
+    'price': 'prix',
+    'wholesale_price': 'prix_gros',
+    'wholesale_min': 'gros_quantite_min',
+  };
+
+  Future<Map<String, dynamic>> _updateProduct(Map<String, dynamic> args) async {
+    final operator = _catalogueOperator(engine.productEditBlocker(_operator));
+    final productId = _int(args, 'product_id');
+    final fields = args['fields'];
+    if (fields is! Map || fields.isEmpty) throw const AdapterFailure('aucun_changement', 'Aucun changement à enregistrer.');
+    final changes = <String, Object?>{};
+    for (final e in fields.entries) {
+      final name = _fieldNames[e.key];
+      if (name == null) throw AdapterFailure('argument_invalide', 'Champ non modifiable : ${e.key}.');
+      final value = e.value;
+      final integer = name == 'prix' || name == 'prix_gros';
+      if (integer ? (value != null && value is! int) : (value != null && value is! String)) {
+        throw AdapterFailure('argument_invalide', 'Valeur invalide pour ${e.key}.');
+      }
+      changes[name] = value;
+    }
+    try {
+      final product = await engine.updateProduct(operator, productId, changes, operationUuid: _optionalString(args, 'operation_id'));
+      _emit('catalogue');
+      return {'product_id': product.id, 'local_state': 'a_synchroniser'};
+    } on OfflineRefusal catch (e) {
+      throw _catalogueFailure(e);
+    }
   }
 
   Future<Map<String, dynamic>> _localPrices() async => (await LocalPrices.read(engine)).toJson();

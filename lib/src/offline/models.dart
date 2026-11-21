@@ -482,6 +482,7 @@ class Product {
       negativeStock = ((m['stock'] ?? '0') as String).startsWith('-'),
       managedByLots = m['gere_par_lots'] == true,
       priceEditable = m['prix_modifiable'] == true,
+      localState = m['etat_local'] as String?,
       lotMode = (m['lots_mode'] ?? 'fifo') as String,
       lots = [for (final l in (m['lots'] as List? ?? const [])) ProductLot(Map<String, dynamic>.from(l as Map))],
       packagings = [for (final p in (m['conditionnements'] as List? ?? const [])) Packaging(Map<String, dynamic>.from(p as Map))],
@@ -491,6 +492,10 @@ class Product {
   final String name;
   final String? reference;
   final String? category;
+
+  /// Catalogue hors connexion (2.1 lot 10) : `cree_local`, `modifie_local`, `conflit` ; null pour une fiche du serveur
+  /// sans changement en attente.
+  final String? localState;
 
   /// Prix de la fiche produit ; [price] d'un produit à lots suit son premier lot.
   final int catalogPrice;

@@ -82,6 +82,9 @@ class V2Keys {
 
   /// Z restaurant rendu par le serveur (`details.z_restaurant` : clôture de session ou de registre), par opération.
   static const zRestaurantPrefix = 'v2.zr.';
+
+  /// Résultat d'une `creation_produit` / `modification_produit` (2.1 lot 10) : `details` du serveur, par opération.
+  static const productResultPrefix = 'v2.produit.';
   static const imageWindow = 'v2.images_plage';
 
   /// Dernière lecture complète du journal (horodatage UTC) et échec de la dernière tentative (lot Z local : mention
@@ -524,6 +527,8 @@ class V2Store {
     if (z != null) await write('${V2Keys.zPrefix}$uuid', jsonEncode(z), txn);
     final zRestaurant = (r['details'] as Map?)?['z_restaurant'];
     if (zRestaurant != null) await write('${V2Keys.zRestaurantPrefix}$uuid', jsonEncode(zRestaurant), txn);
+    final product = r['details'] is Map ? {for (final k in const ['produit_uuid_canonique', 'produit_resolution']) if ((r['details'] as Map)[k] != null) k: (r['details'] as Map)[k]} : const {};
+    if (product.isNotEmpty) await write('${V2Keys.productResultPrefix}$uuid', jsonEncode(product), txn);
     await txn.update(
       'v2_operations',
       {
