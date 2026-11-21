@@ -17,7 +17,8 @@
         "operateur_nom": { "type": ["string", "null"], "maxLength": 255 },
         "fond_initial": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant" }], "description": "Fond de caisse déclaré à l'ouverture (espèces). null : inconnu du serveur ; le ticket affiche alors « — »." },
         "retours": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/retour_en_ligne" }, "description": "Du plus ancien au plus récent ; les 100 plus récents au plus." },
-        "retours_omis": { "type": "integer", "minimum": 0, "description": "Retours en ligne de la session non publiés (au-delà de 100) : le pré-X local est alors partiel." }
+        "retours_omis": { "type": "integer", "minimum": 0, "description": "Retours en ligne de la session non publiés (au-delà de 100) : le pré-X local est alors partiel." },
+        "modifications": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/detail_modification" }, "description": "Facultatif, capacité vente.modification (2.1 lot 11) : tickets modifiés EN LIGNE dans la session (pas ceux d’une opération vente_modification du terminal : il les a déjà), du plus ancien au plus récent, 100 au plus. Clé absente sans la capacité." }
       }
     },
     "retour_en_ligne": {
@@ -277,7 +278,8 @@
               "amount": { "$ref": "#/$defs/montant_texte" }
             }
           }
-        }
+        },
+        "modifications": { "$ref": "#/$defs/detail_modifications", "description": "Facultatif (2.1 lot 11) : rubrique « Tickets modifiés », présente seulement si au moins un ticket des sessions a été modifié après encaissement." }
       }
     },
     "detail_synthese": {
@@ -366,6 +368,71 @@
               "amount": { "$ref": "#/$defs/montant_texte" }
             }
           }
+        }
+      }
+    },
+    "detail_modifications": {
+      "description": "Rubrique « Tickets modifiés » du bloc de détail (2.1 lot 11) : nombre, total des différences, compléments et remboursements (par moyen), et chaque ticket modifié.",
+      "type": "object",
+      "required": ["count", "difference", "complements", "refunds", "methods", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "difference": { "$ref": "#/$defs/montant_texte", "description": "Somme des différences : compléments − remboursements." },
+        "complements": { "$ref": "#/$defs/montant_texte" },
+        "refunds": { "$ref": "#/$defs/montant_texte", "description": "Somme des remboursements, positive." },
+        "methods": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["code", "label", "complements", "refunds"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "label": { "type": "string", "maxLength": 120 },
+              "complements": { "$ref": "#/$defs/montant_texte" },
+              "refunds": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        },
+        "rows": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/detail_modification" } }
+      }
+    },
+    "detail_modification": {
+      "description": "Ticket modifié après encaissement (2.1 lot 11) : n° d’origine → n° nouveau, articles retirés et ajoutés (quantités, montants), différence et moyen, responsable, caissier, heure, motif.",
+      "type": "object",
+      "required": ["original", "replacement", "at", "original_amount", "replacement_amount", "difference", "method", "method_label", "approver", "cashier", "reason", "source", "removed", "added"],
+      "additionalProperties": false,
+      "properties": {
+        "original": { "type": "string", "maxLength": 60 },
+        "replacement": { "type": "string", "maxLength": 60 },
+        "at": { "type": ["string", "null"], "maxLength": 40, "description": "Horodatage ISO 8601 UTC de la modification." },
+        "original_amount": { "$ref": "#/$defs/montant_texte" },
+        "replacement_amount": { "$ref": "#/$defs/montant_texte" },
+        "difference": { "$ref": "#/$defs/montant_texte", "description": "Positive : complément encaissé ; négative : remboursement." },
+        "method": { "type": ["string", "null"], "maxLength": 64, "description": "Moyen de règlement de la différence (null : différence nulle)." },
+        "method_label": { "type": ["string", "null"], "maxLength": 120 },
+        "approver": { "type": "string", "maxLength": 255, "description": "Responsable qui a donné son code." },
+        "cashier": { "type": "string", "maxLength": 255 },
+        "reason": { "type": ["string", "null"], "maxLength": 2000 },
+        "source": { "enum": ["web", "terminal"] },
+        "removed": { "$ref": "#/$defs/detail_modification_lignes" },
+        "added": { "$ref": "#/$defs/detail_modification_lignes" }
+      }
+    },
+    "detail_modification_lignes": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["label", "packaging", "quantity", "amount"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "maxLength": 300 },
+          "packaging": { "type": ["string", "null"], "maxLength": 120 },
+          "quantity": { "$ref": "#/$defs/quantite_texte" },
+          "amount": { "$ref": "#/$defs/montant_texte" }
         }
       }
     }

@@ -1,0 +1,13 @@
+{
+    "operateur_id": "9",
+    "nom": "Awa Responsable",
+    "pin_empreinte": null,
+    "droits": [
+        "vente"
+    ],
+    "remise_max_pourcent": null,
+    "remise_max_montant": null,
+    "approbateur_remise": false,
+    "code_autorisation_empreinte": "$2y$12$abcdefghijklmnopqrstuuJ2Zr0V1y0k1pZ5c6F7m8n9o0p1q2r3s",
+    "approbateur_modification": true
+}

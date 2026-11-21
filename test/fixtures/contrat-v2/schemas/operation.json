@@ -51,6 +51,9 @@
         },
         {
             "$ref": "#/$defs/modification_produit"
+        },
+        {
+            "$ref": "#/$defs/vente_modification"
         }
     ],
     "$defs": {
@@ -4161,6 +4164,264 @@
                             }
                         }
                     }
+                }
+            }
+        },
+        "contenu_vente_modification": {
+            "description": "Révision 2.1 lot 11 (capacité vente.modification) : ticket déjà encaissé modifié après coup. Le contenu de remplacement est complet (toutes les lignes gardées, changées ou ajoutées, comme une vente) ; la différence se règle sur UN moyen de la vente d’origine ; un responsable l’autorise par son code (vérifié localement, identifié par le code seul). Au serveur : annulation de la vente d’origine et vente de remplacement liée, dans la même transaction (correction du jour, ADR-182).",
+            "type": "object",
+            "required": [
+                "vente_ref",
+                "numero_local",
+                "session_uuid",
+                "tva",
+                "lignes",
+                "remise_globale",
+                "livraison",
+                "totaux",
+                "a_payer_origine",
+                "difference",
+                "reglement",
+                "motif",
+                "autorisation",
+                "mouvements"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "vente_ref": {
+                    "type": "object",
+                    "required": [
+                        "operation_uuid",
+                        "vente_uuid",
+                        "numero"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Vente modifiée : `operation_uuid` = uuid de l’opération vente de CE terminal (vente faite hors ligne, intégrée ou non : en attente tant qu’elle ne l’est pas), sinon `vente_uuid` = uuid serveur d’une vente publiée ou encaissée en ligne. Au moins l’un des deux. `numero` : numéro imprimé sur le ticket d’origine (local ou définitif), informatif.",
+                    "properties": {
+                        "operation_uuid": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            ]
+                        },
+                        "vente_uuid": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            ]
+                        },
+                        "numero": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 60
+                        }
+                    }
+                },
+                "numero_local": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9][A-Z0-9-]{0,29}$"
+                },
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Session de la vente de remplacement : celle de la vente d’origine (règle du web : jamais une session close)."
+                },
+                "tva": {
+                    "type": "object",
+                    "required": [
+                        "taux",
+                        "incluse"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "taux": {
+                            "$ref": "commun.json#/$defs/taux"
+                        },
+                        "incluse": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/ligne"
+                    },
+                    "description": "Contenu COMPLET du ticket de remplacement, prix figés comme une vente (catalogue publié). Une ligne retirée n’y figure plus ; un produit nouveau y est ajouté."
+                },
+                "remise_globale": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "livraison": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Celle de la vente d’origine (inchangée)."
+                },
+                "totaux": {
+                    "type": "object",
+                    "required": [
+                        "brut",
+                        "remises",
+                        "base_ht",
+                        "tva",
+                        "a_payer"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "brut": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "remises": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "base_ht": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "tva": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "a_payer": {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    }
+                },
+                "a_payer_origine": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Montant à payer de la vente d’origine."
+                },
+                "difference": {
+                    "$ref": "commun.json#/$defs/montant_signe",
+                    "description": "totaux.a_payer − a_payer_origine : positive = complément encaissé, négative = remboursement."
+                },
+                "reglement": {
+                    "type": "object",
+                    "required": [
+                        "moyen",
+                        "sens",
+                        "montant",
+                        "reference"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Règlement de la différence, sur un moyen de la vente d’origine (choisi par la caissière si la vente en avait plusieurs). sens = aucun ⇔ difference = 0 (moyen null).",
+                    "properties": {
+                        "moyen": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/code"
+                                }
+                            ]
+                        },
+                        "sens": {
+                            "enum": [
+                                "encaissement",
+                                "remboursement",
+                                "aucun"
+                            ]
+                        },
+                        "montant": {
+                            "$ref": "commun.json#/$defs/montant",
+                            "description": "|difference|."
+                        },
+                        "reference": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 120
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisation": {
+                    "type": "object",
+                    "required": [
+                        "approbateur_id",
+                        "preuve"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Responsable reconnu par son code seul : le terminal compare le code saisi aux empreintes publiées des opérateurs `approbateur_modification` ; exactement un doit correspondre (zéro : code inconnu ; plusieurs : code en double, refusé).",
+                    "properties": {
+                        "approbateur_id": {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        },
+                        "preuve": {
+                            "type": "string",
+                            "maxLength": 500,
+                            "description": "`code_local|<horodatage>` ; jamais le code ni son empreinte."
+                        }
+                    }
+                },
+                "mouvements": {
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                        "$ref": "#/$defs/mouvement"
+                    },
+                    "description": "Variations locales nettes : positives pour un article retiré, négatives pour un article ajouté."
+                }
+            }
+        },
+        "vente_modification": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "description": "Opération CRITIQUE (2.1 lot 11, capacité vente.modification) : modification d’un ticket déjà encaissé. Sans la capacité : rejet_protocole capacite_absente.",
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "vente_modification"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_vente_modification"
                 }
             }
         }

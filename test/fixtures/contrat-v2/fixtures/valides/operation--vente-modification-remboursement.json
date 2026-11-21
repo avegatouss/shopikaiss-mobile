@@ -1,0 +1,75 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000012",
+    "type": "vente_modification",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 44,
+    "cree_le": "2026-11-21T10:40:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "2",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "e5f37ecdd11d2f43a078615268e4df9322e9b4aa29d92feead9a8629c0033e45",
+    "contenu": {
+        "vente_ref": {
+            "operation_uuid": null,
+            "vente_uuid": "2a000000-0000-4000-8000-000000000001",
+            "numero": "V-2026-000118"
+        },
+        "numero_local": "HL-001-000044",
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+        "tva": {
+            "taux": "18.000000",
+            "incluse": true
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "e0000000-0000-4000-8000-000000000011",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "conditionnement_uuid": null,
+                "libelle": "Riz parfumé 1 kg",
+                "quantite": "1.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "1.000000",
+                "prix_unitaire": 1000,
+                "remise": 0,
+                "total": 1000,
+                "revision_prix": "3"
+            }
+        ],
+        "remise_globale": 0,
+        "livraison": 0,
+        "totaux": {
+            "brut": 1000,
+            "remises": 0,
+            "base_ht": 847,
+            "tva": 153,
+            "a_payer": 1000
+        },
+        "a_payer_origine": 2000,
+        "difference": -1000,
+        "reglement": {
+            "moyen": "mobile_money",
+            "sens": "remboursement",
+            "montant": 1000,
+            "reference": null
+        },
+        "motif": null,
+        "autorisation": {
+            "approbateur_id": "9",
+            "preuve": "code_local|2026-11-21T10:39:52Z"
+        },
+        "mouvements": [
+            {
+                "mouvement_uuid": "f0000000-0000-4000-8000-000000000011",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "lot_uuid": null,
+                "variation": "1.000000"
+            }
+        ]
+    }
+}

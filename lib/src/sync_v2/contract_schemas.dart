@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b, lot 10 catalogue c87b57c1) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b, lot 10 catalogue c87b57c1, lot 11 modifier un ticket 2c11cfbd) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -672,6 +672,10 @@ const contractV2Schemas = <String, String>{
                         "assistant",
                         null
                     ]
+                },
+                "approbateur_modification": {
+                    "const": true,
+                    "description": "Capacité vente.modification (2.1 lot 11) : responsable qui peut autoriser « Modifier le ticket » (manager ou assistant manager qui détient CORRIGER_VENTE et ANNULATION). Son `code_autorisation_empreinte` est alors publié, même sans REMISE. Clé absente pour les autres opérateurs et pour les terminaux sans la capacité."
                 }
             }
         },
@@ -938,6 +942,28 @@ const contractV2Schemas = <String, String>{
                                 "prix_unique"
                             ],
                             "description": "Capacité lots.vente seulement : règle d’allocation de la boutique, même sens que la caisse web."
+                        },
+                        "modification_ticket": {
+                            "description": "Capacité vente.modification (2.1 lot 11) : option « Modifier un ticket après encaissement » de la boutique (Paramètres › Règles de gestion › Correction des ventes). Absente sans la capacité.",
+                            "type": "object",
+                            "required": [
+                                "actif",
+                                "fenetre"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "actif": {
+                                    "type": "boolean",
+                                    "description": "false : le bouton « Modifier le ticket » n’est pas proposé."
+                                },
+                                "fenetre": {
+                                    "enum": [
+                                        "same_day",
+                                        "open_session"
+                                    ],
+                                    "description": "same_day : le jour même (fuseau de la boutique) ET session de la vente ouverte ; open_session : tant que la session de la vente est ouverte. Jamais une session close."
+                                }
+                            }
                         }
                     }
                 },
@@ -2928,7 +2954,8 @@ const contractV2Schemas = <String, String>{
         "operateur_nom": { "type": ["string", "null"], "maxLength": 255 },
         "fond_initial": { "oneOf": [{ "type": "null" }, { "$ref": "commun.json#/$defs/montant" }], "description": "Fond de caisse déclaré à l'ouverture (espèces). null : inconnu du serveur ; le ticket affiche alors « — »." },
         "retours": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/retour_en_ligne" }, "description": "Du plus ancien au plus récent ; les 100 plus récents au plus." },
-        "retours_omis": { "type": "integer", "minimum": 0, "description": "Retours en ligne de la session non publiés (au-delà de 100) : le pré-X local est alors partiel." }
+        "retours_omis": { "type": "integer", "minimum": 0, "description": "Retours en ligne de la session non publiés (au-delà de 100) : le pré-X local est alors partiel." },
+        "modifications": { "type": "array", "maxItems": 100, "items": { "$ref": "#/$defs/detail_modification" }, "description": "Facultatif, capacité vente.modification (2.1 lot 11) : tickets modifiés EN LIGNE dans la session (pas ceux d’une opération vente_modification du terminal : il les a déjà), du plus ancien au plus récent, 100 au plus. Clé absente sans la capacité." }
       }
     },
     "retour_en_ligne": {
@@ -3188,7 +3215,8 @@ const contractV2Schemas = <String, String>{
               "amount": { "$ref": "#/$defs/montant_texte" }
             }
           }
-        }
+        },
+        "modifications": { "$ref": "#/$defs/detail_modifications", "description": "Facultatif (2.1 lot 11) : rubrique « Tickets modifiés », présente seulement si au moins un ticket des sessions a été modifié après encaissement." }
       }
     },
     "detail_synthese": {
@@ -3277,6 +3305,71 @@ const contractV2Schemas = <String, String>{
               "amount": { "$ref": "#/$defs/montant_texte" }
             }
           }
+        }
+      }
+    },
+    "detail_modifications": {
+      "description": "Rubrique « Tickets modifiés » du bloc de détail (2.1 lot 11) : nombre, total des différences, compléments et remboursements (par moyen), et chaque ticket modifié.",
+      "type": "object",
+      "required": ["count", "difference", "complements", "refunds", "methods", "rows"],
+      "additionalProperties": false,
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "difference": { "$ref": "#/$defs/montant_texte", "description": "Somme des différences : compléments − remboursements." },
+        "complements": { "$ref": "#/$defs/montant_texte" },
+        "refunds": { "$ref": "#/$defs/montant_texte", "description": "Somme des remboursements, positive." },
+        "methods": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["code", "label", "complements", "refunds"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "label": { "type": "string", "maxLength": 120 },
+              "complements": { "$ref": "#/$defs/montant_texte" },
+              "refunds": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        },
+        "rows": { "type": "array", "maxItems": 500, "items": { "$ref": "#/$defs/detail_modification" } }
+      }
+    },
+    "detail_modification": {
+      "description": "Ticket modifié après encaissement (2.1 lot 11) : n° d’origine → n° nouveau, articles retirés et ajoutés (quantités, montants), différence et moyen, responsable, caissier, heure, motif.",
+      "type": "object",
+      "required": ["original", "replacement", "at", "original_amount", "replacement_amount", "difference", "method", "method_label", "approver", "cashier", "reason", "source", "removed", "added"],
+      "additionalProperties": false,
+      "properties": {
+        "original": { "type": "string", "maxLength": 60 },
+        "replacement": { "type": "string", "maxLength": 60 },
+        "at": { "type": ["string", "null"], "maxLength": 40, "description": "Horodatage ISO 8601 UTC de la modification." },
+        "original_amount": { "$ref": "#/$defs/montant_texte" },
+        "replacement_amount": { "$ref": "#/$defs/montant_texte" },
+        "difference": { "$ref": "#/$defs/montant_texte", "description": "Positive : complément encaissé ; négative : remboursement." },
+        "method": { "type": ["string", "null"], "maxLength": 64, "description": "Moyen de règlement de la différence (null : différence nulle)." },
+        "method_label": { "type": ["string", "null"], "maxLength": 120 },
+        "approver": { "type": "string", "maxLength": 255, "description": "Responsable qui a donné son code." },
+        "cashier": { "type": "string", "maxLength": 255 },
+        "reason": { "type": ["string", "null"], "maxLength": 2000 },
+        "source": { "enum": ["web", "terminal"] },
+        "removed": { "$ref": "#/$defs/detail_modification_lignes" },
+        "added": { "$ref": "#/$defs/detail_modification_lignes" }
+      }
+    },
+    "detail_modification_lignes": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "required": ["label", "packaging", "quantity", "amount"],
+        "additionalProperties": false,
+        "properties": {
+          "label": { "type": "string", "maxLength": 300 },
+          "packaging": { "type": ["string", "null"], "maxLength": 120 },
+          "quantity": { "$ref": "#/$defs/quantite_texte" },
+          "amount": { "$ref": "#/$defs/montant_texte" }
         }
       }
     }
@@ -3730,6 +3823,9 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/modification_produit"
+        },
+        {
+            "$ref": "#/$defs/vente_modification"
         }
     ],
     "$defs": {
@@ -7840,6 +7936,264 @@ const contractV2Schemas = <String, String>{
                             }
                         }
                     }
+                }
+            }
+        },
+        "contenu_vente_modification": {
+            "description": "Révision 2.1 lot 11 (capacité vente.modification) : ticket déjà encaissé modifié après coup. Le contenu de remplacement est complet (toutes les lignes gardées, changées ou ajoutées, comme une vente) ; la différence se règle sur UN moyen de la vente d’origine ; un responsable l’autorise par son code (vérifié localement, identifié par le code seul). Au serveur : annulation de la vente d’origine et vente de remplacement liée, dans la même transaction (correction du jour, ADR-182).",
+            "type": "object",
+            "required": [
+                "vente_ref",
+                "numero_local",
+                "session_uuid",
+                "tva",
+                "lignes",
+                "remise_globale",
+                "livraison",
+                "totaux",
+                "a_payer_origine",
+                "difference",
+                "reglement",
+                "motif",
+                "autorisation",
+                "mouvements"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "vente_ref": {
+                    "type": "object",
+                    "required": [
+                        "operation_uuid",
+                        "vente_uuid",
+                        "numero"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Vente modifiée : `operation_uuid` = uuid de l’opération vente de CE terminal (vente faite hors ligne, intégrée ou non : en attente tant qu’elle ne l’est pas), sinon `vente_uuid` = uuid serveur d’une vente publiée ou encaissée en ligne. Au moins l’un des deux. `numero` : numéro imprimé sur le ticket d’origine (local ou définitif), informatif.",
+                    "properties": {
+                        "operation_uuid": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            ]
+                        },
+                        "vente_uuid": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            ]
+                        },
+                        "numero": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 60
+                        }
+                    }
+                },
+                "numero_local": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9][A-Z0-9-]{0,29}$"
+                },
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Session de la vente de remplacement : celle de la vente d’origine (règle du web : jamais une session close)."
+                },
+                "tva": {
+                    "type": "object",
+                    "required": [
+                        "taux",
+                        "incluse"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "taux": {
+                            "$ref": "commun.json#/$defs/taux"
+                        },
+                        "incluse": {
+                            "type": "boolean"
+                        }
+                    }
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 200,
+                    "items": {
+                        "$ref": "#/$defs/ligne"
+                    },
+                    "description": "Contenu COMPLET du ticket de remplacement, prix figés comme une vente (catalogue publié). Une ligne retirée n’y figure plus ; un produit nouveau y est ajouté."
+                },
+                "remise_globale": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "livraison": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Celle de la vente d’origine (inchangée)."
+                },
+                "totaux": {
+                    "type": "object",
+                    "required": [
+                        "brut",
+                        "remises",
+                        "base_ht",
+                        "tva",
+                        "a_payer"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "brut": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "remises": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "base_ht": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "tva": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "a_payer": {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    }
+                },
+                "a_payer_origine": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Montant à payer de la vente d’origine."
+                },
+                "difference": {
+                    "$ref": "commun.json#/$defs/montant_signe",
+                    "description": "totaux.a_payer − a_payer_origine : positive = complément encaissé, négative = remboursement."
+                },
+                "reglement": {
+                    "type": "object",
+                    "required": [
+                        "moyen",
+                        "sens",
+                        "montant",
+                        "reference"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Règlement de la différence, sur un moyen de la vente d’origine (choisi par la caissière si la vente en avait plusieurs). sens = aucun ⇔ difference = 0 (moyen null).",
+                    "properties": {
+                        "moyen": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/code"
+                                }
+                            ]
+                        },
+                        "sens": {
+                            "enum": [
+                                "encaissement",
+                                "remboursement",
+                                "aucun"
+                            ]
+                        },
+                        "montant": {
+                            "$ref": "commun.json#/$defs/montant",
+                            "description": "|difference|."
+                        },
+                        "reference": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 120
+                        }
+                    }
+                },
+                "motif": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                },
+                "autorisation": {
+                    "type": "object",
+                    "required": [
+                        "approbateur_id",
+                        "preuve"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Responsable reconnu par son code seul : le terminal compare le code saisi aux empreintes publiées des opérateurs `approbateur_modification` ; exactement un doit correspondre (zéro : code inconnu ; plusieurs : code en double, refusé).",
+                    "properties": {
+                        "approbateur_id": {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        },
+                        "preuve": {
+                            "type": "string",
+                            "maxLength": 500,
+                            "description": "`code_local|<horodatage>` ; jamais le code ni son empreinte."
+                        }
+                    }
+                },
+                "mouvements": {
+                    "type": "array",
+                    "maxItems": 400,
+                    "items": {
+                        "$ref": "#/$defs/mouvement"
+                    },
+                    "description": "Variations locales nettes : positives pour un article retiré, négatives pour un article ajouté."
+                }
+            }
+        },
+        "vente_modification": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "description": "Opération CRITIQUE (2.1 lot 11, capacité vente.modification) : modification d’un ticket déjà encaissé. Sans la capacité : rejet_protocole capacite_absente.",
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "vente_modification"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_vente_modification"
                 }
             }
         }

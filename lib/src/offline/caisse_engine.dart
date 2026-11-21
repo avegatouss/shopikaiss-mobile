@@ -257,6 +257,61 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Prix modifiable à la vente (2.1 lot 9) : capacité `prix.modifiable` annoncée et accordée.
   bool get editablePriceSupported => false;
 
+  /// Modifier un ticket après encaissement (2.1 lot 11) : capacité `vente.modification` accordée et option de la
+  /// boutique `regles.modification_ticket.actif`.
+  bool get saleEditSupported => false;
+
+  /// Pourquoi [operator] ne peut pas modifier [sale], ou null.
+  String? saleEditBlocker(Operator? operator, OfflineOperation sale) => 'Modification de ticket non disponible sur ce terminal.';
+
+  /// [saleEditBlocker] plus les contrôles qui lisent la file : ticket déjà remplacé, retour déjà fait.
+  Future<String?> saleEditCheck(Operator? operator, OfflineOperation sale) async => saleEditBlocker(operator, sale);
+
+  /// Responsables publiés `approbateur_modification` (code de 8 chiffres).
+  List<Operator> get editApprovers => const [];
+
+  /// Responsable reconnu par son code seul : exactement un responsable doit correspondre (note A lot 11 §3). Les échecs
+  /// sont comptés comme pour les autres codes (blocage progressif sur ce terminal).
+  Future<Operator> identifyEditApprover(String code) async {
+    const key = '${StoreKeys.approvalFailures}modification';
+    final locked = await _lockedFor(key);
+    if (locked != null) throw OfflineRefusal('Trop d’essais : réessayez dans ${locked.inSeconds + 1} s.');
+    final matches = <Operator>[];
+    if (RegExp(r'^\d{8}$').hasMatch(code)) {
+      for (final approver in editApprovers) {
+        final hash = approver.approvalCodeHash;
+        if (hash != null && hash.isNotEmpty && await _verifyPin(code, hash)) matches.add(approver);
+      }
+    }
+    if (matches.length > 1) {
+      throw const OfflineRefusal('Ce code correspond à plusieurs responsables : il n’identifie personne. Faites redéfinir leurs codes.');
+    }
+    if (matches.isEmpty) {
+      final failures = (int.tryParse((await store.read(key))?.split('|').first ?? '') ?? 0) + 1;
+      final lockedUntil = failures >= 3 ? now.add(Duration(seconds: (30 * (1 << (failures - 3).clamp(0, 5))).clamp(30, 900))) : null;
+      await store.write(key, '$failures|${lockedUntil?.toUtc().toIso8601String() ?? ''}');
+      throw const OfflineRefusal('Code responsable inconnu.');
+    }
+    await store.write(key, null);
+    return matches.single;
+  }
+
+  /// Ancien total, nouveau total, différence et moyens de règlement possibles d'une modification de [sale].
+  SaleEditPreview previewSaleEdit(OfflineOperation sale, List<CartLine> lines) =>
+      throw const OfflineRefusal('Modification de ticket non disponible sur ce terminal.');
+
+  /// Enregistre le ticket de remplacement de [sale] : contenu complet [lines], différence réglée sur [method] (un moyen
+  /// de la vente d'origine), autorisation de [approver] reconnu par son code. La vente d'origine n'est jamais modifiée.
+  Future<OfflineOperation> recordSaleEdit(
+    Operator cashier,
+    OfflineOperation sale,
+    List<CartLine> lines, {
+    required Operator approver,
+    String? method,
+    String? reason,
+    String? operationUuid,
+  }) => throw const OfflineRefusal('Modification de ticket non disponible sur ce terminal.');
+
   /// Catalogue hors connexion (2.1 lot 10) : capacités `produit.creation` et `produit.modification` accordées.
   bool get productCreationSupported => false;
   bool get productEditSupported => false;

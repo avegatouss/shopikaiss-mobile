@@ -71,6 +71,25 @@ class ProductFields {
   final String? localState;
 }
 
+/// Aperçu d'une modification de ticket (2.1 lot 11).
+class SaleEditPreview {
+  const SaleEditPreview({required this.originalTotal, required this.newTotal, required this.methods});
+
+  final int originalTotal;
+  final int newTotal;
+
+  /// Moyens de la vente d'origine, dans l'ordre de ses paiements (code et montant).
+  final List<({String code, int amount})> methods;
+
+  int get difference => newTotal - originalTotal;
+
+  /// `encaissement`, `remboursement` ou `aucun`.
+  String get direction => difference > 0 ? 'encaissement' : (difference < 0 ? 'remboursement' : 'aucun');
+
+  /// Le caissier choisit le moyen seulement si la vente en avait plusieurs et que la différence n'est pas nulle.
+  bool get methodChoice => difference != 0 && methods.length > 1;
+}
+
 /// Suivi d'une création ou d'une modification envoyée (ou à envoyer) au serveur.
 class CatalogueChange {
   const CatalogueChange({

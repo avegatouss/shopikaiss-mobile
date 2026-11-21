@@ -66,6 +66,12 @@ class ClosureSession {
   /// ajoutés à ceux du terminal, jamais en double ([applyZSession]).
   final List<Map> onlineReturns = [];
 
+  /// Tickets modifiés sur ce terminal (2.1 lot 11) : `{operation, original}` (opérations brutes).
+  final List<Map> modifications = [];
+
+  /// Tickets modifiés en ligne dans la session (`z.session.modifications`), forme `detail_modification`.
+  final List<Map> onlineModifications = [];
+
   /// Retours en ligne de la session non publiés (`retours_omis`, au-delà de 100) : documents alors partiels.
   int onlineReturnsOmitted = 0;
 
@@ -165,6 +171,41 @@ List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSess
         if (current == null || current.closed || (uuid != null && current.uuid != null && current.uuid != uuid)) current = start(uuid: uuid);
         current.uuid ??= uuid;
         current.sales.add(o);
+      case 'vente_modification':
+        // Ticket de remplacement (2.1 lot 11) : vendu à la place de la vente d'origine, avec les paiements de l'origine
+        // corrigés de la différence réglée. La vente d'origine sort des ventes du document (remplacée).
+        final original = sales[(content['vente_ref'] as Map?)?['operation_uuid']];
+        final paid = <String, int>{};
+        for (final p in ((original?['contenu'] as Map?)?['paiements'] as List? ?? const []).cast<Map>()) {
+          paid.update('${p['moyen']}', (v) => v + _int(p['montant']), ifAbsent: () => _int(p['montant']));
+        }
+        final settlement = (content['reglement'] as Map?) ?? const {};
+        if (settlement['moyen'] != null) {
+          final delta = settlement['sens'] == 'remboursement' ? -_int(settlement['montant']) : _int(settlement['montant']);
+          paid.update('${settlement['moyen']}', (v) => v + delta, ifAbsent: () => delta);
+        }
+        final replacement = {
+          ...o,
+          'type': 'vente',
+          'contenu': {
+            ...content,
+            'paiements': [
+              for (final e in paid.entries)
+                if (e.value != 0) {'moyen': e.key, 'montant': e.value},
+            ],
+          },
+        };
+        sales[o['uuid']] = replacement;
+        final uuid = content['session_uuid'] as String?;
+        if (current == null || current.closed || (uuid != null && current.uuid != null && current.uuid != uuid)) current = start(uuid: uuid);
+        current.uuid ??= uuid;
+        if (original != null) {
+          for (final s in sessions) {
+            s.sales.removeWhere((x) => x['uuid'] == original['uuid']);
+          }
+        }
+        current.sales.add(replacement);
+        current.modifications.add({'operation': o, 'original': original});
       case 'retour' || 'resto_remboursement':
         if (current == null || current.closed) current = start();
         current.returns.add(o);
@@ -204,6 +245,13 @@ void applyZSession(List<ClosureSession> sessions, Map? zSession) {
   session.openerId ??= int.tryParse('${zSession['operateur_id'] ?? ''}');
   session.openedAt ??= _date(zSession['ouverte_le']);
   session.onlineReturnsOmitted = (zSession['retours_omis'] as int?) ?? 0;
+  // Tickets modifiés en ligne (2.1 lot 11) : jamais ceux que ce terminal a lui-même envoyés (il les connaît).
+  final mine = {for (final s in sessions) for (final m in s.modifications) '${((m['operation'] as Map)['contenu'] as Map)['numero_local']}'};
+  final known = {for (final m in session.onlineModifications) '${m['replacement']}'};
+  for (final m in ((zSession['modifications'] as List?) ?? const []).cast<Map>()) {
+    if (m['source'] == 'terminal' || mine.contains('${m['replacement']}') || !known.add('${m['replacement']}')) continue;
+    session.onlineModifications.add(detailFromContract(m));
+  }
   final own = {for (final s in sessions) for (final r in s.returns) '${r['uuid']}'};
   final seen = {for (final r in session.onlineReturns) '${r['retour_uuid']}'};
   for (final r in ((zSession['retours'] as List?) ?? const []).cast<Map>()) {
@@ -333,7 +381,9 @@ Map<String, dynamic> closureDetail(
     row['ttc'] = (row['ttc'] as int) + _int(totals['a_payer']) - _int(content['livraison']);
   }
   final vatRows = vat.values.toList()..sort((a, b) => (parseMicros(a['rate'] as String) ?? BigInt.zero).compareTo(parseMicros(b['rate'] as String) ?? BigInt.zero));
+  final modifications = _modifications(sessions, methodNames: methodNames, operatorName: operatorName);
   return {
+    'modifications': ?modifications,
     'version': 1,
     'summary': _summary(sales, articles, returns.totals),
     'payments': [for (final row in payments.values) {'code': row['code'], 'label': row['label'], 'count': (row['sales'] as Set).length, 'amount': row['amount']}],
@@ -812,6 +862,7 @@ Map<String, dynamic> _assemble(
     'articles': detail['articles'],
     'top': detail['top'],
     'retours': detail['returns'],
+    'modifications': detail['modifications'],
     'tva': detail['vat'],
     'mentions': [
       if (provisional) 'Document provisoire : rien n’est clôturé ni figé. Les chiffres définitifs sont ceux du Z.',
@@ -840,6 +891,9 @@ Map<String, dynamic> closureTicket(Map<String, dynamic> model, String version) {
 
   if (short) {
     sections.add({'titre': 'Résumé', 'lignes': _resume(summary)});
+    if (model['modifications'] case final Map edits) {
+      sections.add({'titre': 'Tickets modifiés', 'lignes': [zValue('Nombre de tickets modifiés', '${edits['count']}'), zMoney('Total des modifications', _int(edits['difference']), bold: true)]});
+    }
     sections.add({'titre': 'Par moyen de paiement', 'lignes': paymentLines(false)});
     final top = [for (final (i, row) in (model['top'] as List).cast<Map>().indexed) zMoney('${i + 1}. ${row['label']} x${zQuantity(row['quantity'] as BigInt)}', row['amount'] as int)];
     sections.add({'titre': 'Top $zTop des articles', 'lignes': top.isEmpty ? [zValue('Aucune vente', '')] : top});
@@ -878,6 +932,7 @@ Map<String, dynamic> closureTicket(Map<String, dynamic> model, String version) {
     });
     final returns = (model['retours'] as List).cast<Map>();
     if (returns.isNotEmpty) sections.add({'titre': 'Retours et annulations', 'lignes': _returnLines(returns)});
+    if (model['modifications'] case final Map edits) sections.add({'titre': 'Tickets modifiés', 'lignes': _modificationLines(edits)});
     final vat = (model['tva'] as List).cast<Map>();
     if (vat.isNotEmpty) {
       sections.add({
@@ -940,6 +995,126 @@ List<Map<String, dynamic>> _category(Map category) => [
   ],
   zMoney('Sous-total (${zQuantity(category['quantity'] as BigInt)})', category['amount'] as int, bold: true),
 ];
+
+/// Rubrique « Tickets modifiés » (2.1 lot 11, `detail_modifications`) : modifications de ce terminal et celles faites en
+/// ligne dans ses sessions ; null s'il n'y en a aucune.
+Map<String, dynamic>? _modifications(List<ClosureSession> sessions, {required Map<String, String> methodNames, String Function(int? id)? operatorName}) {
+  String name(Object? id, String fallback) {
+    final value = operatorName?.call(int.tryParse('${id ?? ''}'));
+    return value == null || value.isEmpty ? '$fallback ${id ?? '?'}' : value;
+  }
+
+  final rows = <Map<String, dynamic>>[];
+  for (final s in sessions) {
+    for (final m in s.modifications) {
+      final operation = m['operation'] as Map;
+      final content = operation['contenu'] as Map;
+      final original = (m['original'] as Map?)?['contenu'] as Map?;
+      final settlement = (content['reglement'] as Map?) ?? const {};
+      final method = settlement['moyen'] as String?;
+      // Articles retirés et ajoutés : écart de quantité par article (et conditionnement), montant au prorata de la ligne.
+      final before = _editLines(original?['lignes'] as List?);
+      final after = _editLines(content['lignes'] as List?);
+      final removed = <Map<String, dynamic>>[];
+      final added = <Map<String, dynamic>>[];
+      for (final key in {...before.keys, ...after.keys}) {
+        final b = before[key];
+        final a = after[key];
+        final delta = (a?.quantity ?? BigInt.zero) - (b?.quantity ?? BigInt.zero);
+        if (delta == BigInt.zero) continue;
+        final source = delta.isNegative ? b! : a!;
+        final quantity = delta.abs();
+        final amount = source.quantity == BigInt.zero ? 0 : (BigInt.from(source.amount) * quantity ~/ source.quantity).toInt();
+        (delta.isNegative ? removed : added).add({'label': source.label, 'packaging': null, 'quantity': quantity, 'amount': amount});
+      }
+      rows.add({
+        'original': '${(content['vente_ref'] as Map?)?['numero'] ?? original?['numero_local'] ?? ''}',
+        'replacement': '${content['numero_local']}',
+        'at': operation['cree_le'],
+        'original_amount': _int(content['a_payer_origine']),
+        'replacement_amount': _int((content['totaux'] as Map?)?['a_payer']),
+        'difference': _int(content['difference']),
+        'method': method,
+        'method_label': method == null ? null : (methodNames[method] ?? method),
+        'approver': name((content['autorisation'] as Map?)?['approbateur_id'], 'Responsable'),
+        'cashier': name(operation['operateur_id'], 'Caissier'),
+        'reason': content['motif'],
+        'source': 'terminal',
+        'removed': removed,
+        'added': added,
+      });
+    }
+    rows.addAll([for (final m in s.onlineModifications) Map<String, dynamic>.from(m)]);
+  }
+  return rows.isEmpty ? null : _modificationTotals(rows);
+}
+
+Map<String, ({String label, BigInt quantity, int amount})> _editLines(List? lines) {
+  final out = <String, ({String label, BigInt quantity, int amount})>{};
+  for (final l in (lines ?? const []).cast<Map>()) {
+    final key = '${l['produit_uuid']}|${l['conditionnement_uuid'] ?? ''}';
+    final previous = out[key];
+    out[key] = (
+      label: '${l['libelle']}',
+      quantity: (previous?.quantity ?? BigInt.zero) + (parseMicros('${l['quantite']}') ?? BigInt.zero),
+      amount: (previous?.amount ?? 0) + _int(l['total']),
+    );
+  }
+  return out;
+}
+
+/// Totaux de la rubrique : nombre, différence, compléments, remboursements, par moyen (format interne : entiers).
+Map<String, dynamic> _modificationTotals(List<Map<String, dynamic>> rows) {
+  var complements = 0;
+  var refunds = 0;
+  final methods = <String, Map<String, dynamic>>{};
+  for (final r in rows) {
+    final difference = _int(r['difference']);
+    if (difference > 0) complements += difference;
+    if (difference < 0) refunds -= difference;
+    final code = r['method'] as String?;
+    if (code == null || difference == 0) continue;
+    final m = methods.putIfAbsent(code, () => {'code': code, 'label': r['method_label'] ?? code, 'complements': 0, 'refunds': 0});
+    if (difference > 0) m['complements'] = (m['complements'] as int) + difference;
+    if (difference < 0) m['refunds'] = (m['refunds'] as int) - difference;
+  }
+  return {'count': rows.length, 'difference': complements - refunds, 'complements': complements, 'refunds': refunds, 'methods': methods.values.toList(), 'rows': rows};
+}
+
+/// Rendu détaillé du web : « X → Y » et heure, ancien total, articles retirés et ajoutés, nouveau total, règlement,
+/// responsable, caissier, motif ; puis les totaux.
+List<Map<String, dynamic>> _modificationLines(Map edits) {
+  int amount(Object? v) => _int(v);
+  BigInt quantity(Object? v) => v is BigInt ? v : BigInt.zero;
+  final lines = <Map<String, dynamic>>[];
+  for (final r in (edits['rows'] as List).cast<Map>()) {
+    final at = _date(r['at']);
+    lines.add(zValue('${r['original']} → ${r['replacement']}', at == null ? '' : '${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}', bold: true));
+    lines.add(zMoney('Ancien total', amount(r['original_amount'])));
+    for (final l in (r['removed'] as List).cast<Map>()) {
+      lines.add(zMoney('− ${zQuantity(quantity(l['quantity']))} × ${l['label']}', -amount(l['amount'])));
+    }
+    for (final l in (r['added'] as List).cast<Map>()) {
+      lines.add(zMoney('+ ${zQuantity(quantity(l['quantity']))} × ${l['label']}', amount(l['amount'])));
+    }
+    lines.add(zMoney('Nouveau total', amount(r['replacement_amount'])));
+    final difference = amount(r['difference']);
+    if (difference > 0) lines.add(zMoney('Complément encaissé (${r['method_label'] ?? r['method']})', difference));
+    if (difference < 0) lines.add(zMoney('Remboursé (${r['method_label'] ?? r['method']})', difference));
+    lines.add(zValue('Responsable', '${r['approver']}'));
+    lines.add(zValue('Caissier', '${r['cashier']}'));
+    if (r['reason'] case final String reason when reason.trim().isNotEmpty) lines.add(zValue('Motif', reason));
+  }
+  lines.add(zValue('Nombre de tickets modifiés', '${edits['count']}'));
+  lines.add(zMoney('Compléments encaissés', amount(edits['complements'])));
+  lines.add(zMoney('Remboursements', -amount(edits['refunds'])));
+  for (final m in (edits['methods'] as List).cast<Map>()) {
+    lines.add(zMoney('${m['label']} : compléments', amount(m['complements'])));
+    lines.add(zMoney('${m['label']} : remboursements', -amount(m['refunds'])));
+  }
+  lines.add(zMoney('Total des modifications', amount(edits['difference']), bold: true));
+  return lines;
+}
 
 List<Map<String, dynamic>> _returnLines(List<Map> returns) => [
   for (final r in returns) ...[
@@ -1099,6 +1274,8 @@ const _amountFields = {
   'revenue', 'delivery_fees', 'payable', 'credit', 'average_basket', 'gross_value', 'line_discounts', 'global_discounts', //
   'discounts', 'offered_value', 'ht', 'vat', 'returns_amount', 'cancellations_amount', 'net_after_returns', 'amount', 'value',
   'discount', 'unit_price', 'base', 'ttc', 'total',
+  // Tickets modifiés (2.1 lot 11).
+  'difference', 'complements', 'refunds', 'original_amount', 'replacement_amount',
 };
 
 /// Longueurs maximales du schéma `detail_cloture` (la plus petite quand un nom de champ sert à plusieurs endroits).
@@ -1259,6 +1436,8 @@ Map<String, dynamic> composeDetails(List<Map<String, dynamic>> details) {
     'refunds': byCode('refunds'),
     'vat': vat.values.toList()..sort((a, b) => (parseMicros('${a['rate']}') ?? BigInt.zero).compareTo(parseMicros('${b['rate']}') ?? BigInt.zero)),
   };
+  final modifications = [for (final d in details) if (d['modifications'] is Map) d['modifications'] as Map];
+  if (modifications.isNotEmpty) out['modifications'] = _modificationTotals([for (final m in modifications) ...(m['rows'] as List).cast<Map<String, dynamic>>()]);
   bool all(String rubric) => details.isNotEmpty && details.every((d) => d[rubric] != null);
   if (all('payments_count')) out['payments_count'] = details.fold<int>(0, (sum, d) => sum + (d['payments_count'] as int));
   if (all('cashiers')) {

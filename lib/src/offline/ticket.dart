@@ -98,6 +98,11 @@ List<String> offlineTicketLines({
   for (final block in model?.top ?? TicketModel.originTop) {
     blocks[block]?.call();
   }
+  // Ticket de remplacement (2.1 lot 11) : mention imprimée hors de tout modèle, jamais masquable.
+  if (operation.content['remplace'] case final String replaced when replaced.isNotEmpty) {
+    out.add('-' * cols);
+    wrap('Remplace le ticket n° $replaced (ticket modifié)');
+  }
   out.add('-' * cols);
   for (final line in lines) {
     final quantity = formatMicros(line.quantity);
@@ -125,6 +130,13 @@ List<String> offlineTicketLines({
     out.add(pair(vatIncluded ? 'dont TVA $rate %' : 'TVA $rate %', money(vat)));
   }
   out.add(pair('TOTAL', money(payable)));
+  if (operation.content['modification'] case final Map edit) {
+    final settlement = edit['reglement'] as Map;
+    final method = snapshot.methods.where((m) => m.code == settlement['moyen']).firstOrNull?.name ?? '${settlement['moyen'] ?? ''}';
+    out.add(pair('Ancien total', money((edit['a_payer_origine'] as num).toInt())));
+    if (settlement['sens'] == 'encaissement') out.add(pair('Complement encaisse ($method)', money((settlement['montant'] as num).toInt())));
+    if (settlement['sens'] == 'remboursement') out.add(pair('Rembourse ($method)', money((settlement['montant'] as num).toInt())));
+  }
   for (final block in model?.bottom ?? TicketModel.originBottom) {
     blocks[block]?.call();
   }

@@ -1,7 +1,9 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commit : c87b57c1 (2.1 lot 10 « catalogue hors connexion », creation_produit / modification_produit,
-186 fixtures, 15 schémas ; contenu identique au commit pour schemas/, fixtures/ et canonicalisation/).
-Précédent : 4176383b (2.1 lot 9 « prix modifiable »).
+Commits : c87b57c1 (2.1 lot 10 « catalogue hors connexion », feat/catalogue-hors-ligne) + 2c11cfbd (2.1 lot 11
+« modifier un ticket », feat/modifier-ticket, vente_modification). Les deux branches partent de 4176383b : fusion à
+trois voies par B des fichiers touchés par les deux (operation.json, fixtures/index.json), les autres sont identiques
+à leur commit. 194 fixtures, 15 schémas.
+Précédent : c87b57c1 seul (186 fixtures), puis 4176383b (2.1 lot 9 « prix modifiable »).
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

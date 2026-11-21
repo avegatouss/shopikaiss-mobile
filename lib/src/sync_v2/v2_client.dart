@@ -134,6 +134,10 @@ class CaisseV2Client {
   static const productCreateCapability = 'produit.creation';
   static const productEditCapability = 'produit.modification';
 
+  /// Modifier un ticket après encaissement (2.1 lot 11) : opération critique `vente_modification`, option
+  /// `boutique.regles.modification_ticket`, `operateur.approbateur_modification`. Accordée seulement avec `contrat.2_1`.
+  static const saleEditCapability = 'vente.modification';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;

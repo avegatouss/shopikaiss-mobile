@@ -999,6 +999,50 @@
             "schema": "donnees-2.1.json#/$defs/operation_etat",
             "valide": false,
             "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "valides/operation--vente-modification-complement.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--vente-modification-remboursement.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--vente-modification-sens-inconnu.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "invalides/operation--vente-modification-sans-autorisation.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "autorisation"
+        },
+        {
+            "fichier": "valides/donnees-2.1--operateur-approbateur-modification.json",
+            "schema": "donnees-2.1.json#/$defs/operateur",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-2.1--operateur-approbateur-modification-faux.json",
+            "schema": "donnees-2.1.json#/$defs/operateur",
+            "valide": false,
+            "erreur_attendue": "valeur attendue true"
+        },
+        {
+            "fichier": "valides/donnees-z-local--modifications.json",
+            "schema": "donnees-z-local-1.json#/$defs/detail_modifications",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-z-local--modifications-source-inconnue.json",
+            "schema": "donnees-z-local-1.json#/$defs/detail_modifications",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
         }
     ]
 }

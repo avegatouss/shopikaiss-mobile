@@ -1,0 +1,46 @@
+{
+    "count": 1,
+    "difference": "500",
+    "complements": "500",
+    "refunds": "0",
+    "methods": [
+        {
+            "code": "especes",
+            "label": "Espèces",
+            "complements": "500",
+            "refunds": "0"
+        }
+    ],
+    "rows": [
+        {
+            "original": "V-2026-000118",
+            "replacement": "V-2026-000121",
+            "at": "2026-11-21T10:40:00Z",
+            "original_amount": "2000",
+            "replacement_amount": "2500",
+            "difference": "500",
+            "method": "especes",
+            "method_label": "Espèces",
+            "approver": "Awa Responsable",
+            "cashier": "Koffi Caissier",
+            "reason": "Le client échange un riz contre de l’eau",
+            "source": "admin",
+            "removed": [
+                {
+                    "label": "Riz parfumé 1 kg",
+                    "packaging": null,
+                    "quantity": "1.000000",
+                    "amount": "1000"
+                }
+            ],
+            "added": [
+                {
+                    "label": "Eau minérale 1,5 L",
+                    "packaging": null,
+                    "quantity": "3.000000",
+                    "amount": "1500"
+                }
+            ]
+        }
+    ]
+}

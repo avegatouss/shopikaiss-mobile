@@ -209,6 +209,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.editablePriceCapability,
           CaisseV2Client.productCreateCapability,
           CaisseV2Client.productEditCapability,
+          CaisseV2Client.saleEditCapability,
         ],
       ],
     );
@@ -965,6 +966,12 @@ class V2Engine extends CaisseEngine {
             final amount = (p['montant'] as int) + (p['ecart_arrondi'] as int? ?? 0);
             expected.update(p['moyen'] as String, (v) => v + amount, ifAbsent: () => amount);
           }
+        case 'vente_modification':
+          final settlement = content['reglement'] as Map;
+          if (settlement['moyen'] case final String method) {
+            final amount = settlement['sens'] == 'remboursement' ? -(settlement['montant'] as int) : settlement['montant'] as int;
+            expected.update(method, (v) => v + amount, ifAbsent: () => amount);
+          }
         case 'retour':
           expected.update(cash, (v) => v - (content['montant'] as int), ifAbsent: () => -(content['montant'] as int));
         case 'resto_remboursement':
@@ -1047,6 +1054,219 @@ class V2Engine extends CaisseEngine {
 
   @override
   bool get editablePriceSupported => v2.contract21 && _serverOffers(CaisseV2Client.editablePriceCapability);
+
+  // ------------------------------------------------------------------ Modifier un ticket (2.1 lot 11)
+
+  @override
+  bool get saleEditSupported =>
+      v2.contract21 && _serverOffers(CaisseV2Client.saleEditCapability) && (_shopRules?['modification_ticket'] as Map?)?['actif'] == true;
+
+  List<Operator> _editApprovers = const [];
+
+  @override
+  List<Operator> get editApprovers => _editApprovers;
+
+  /// Vente (ou ticket de remplacement) déjà remplacée par une modification de ce terminal.
+  Future<bool> _alreadyEdited(String operationUuid) async {
+    for (final row in await v2.operationRows()) {
+      final operation = row['operation'] as Map;
+      if (operation['type'] != 'vente_modification' || row['etat'] == V2OperationState.rejected) continue;
+      if (((operation['contenu'] as Map)['vente_ref'] as Map)['operation_uuid'] == operationUuid) return true;
+    }
+    return false;
+  }
+
+  /// Retour hors ligne déjà fait sur cette vente.
+  Future<bool> _returned(String operationUuid) async {
+    for (final row in await v2.operationRows()) {
+      final operation = row['operation'] as Map;
+      if (operation['type'] != 'retour' || row['etat'] == V2OperationState.rejected) continue;
+      if (jsonEncode(operation['contenu']).contains(operationUuid)) return true;
+    }
+    return false;
+  }
+
+  @override
+  String? saleEditBlocker(Operator? operator, OfflineOperation sale) {
+    if (!saleEditSupported) return 'Modification de ticket non disponible sur ce terminal.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'vente')) return '${operator.name} n’a pas le droit de vendre.';
+    if (!sale.isSale) return 'Seul un ticket de vente se modifie.';
+    if (sale.status == OperationStatus.refused) return 'Ce ticket a été refusé par le serveur : il ne se modifie pas.';
+    final content = sale.content;
+    if (content['session_uuid'] != _sessionUuid || !sessionOpen) return 'Seul un ticket de la session ouverte se modifie.';
+    final window = (_shopRules?['modification_ticket'] as Map?)?['fenetre'] ?? 'same_day';
+    final fuseau = _shopRules?['fuseau'] as String?;
+    if (window == 'same_day' && PassDay.of(sale.date, fuseau) != PassDay.of(now, fuseau)) return 'Seul un ticket du jour se modifie.';
+    if (content['par_pass'] == true) return 'Un ticket réglé par pass ne se modifie pas.';
+    if (content['commande_restaurant'] == true) return 'Un ticket du restaurant ne se modifie pas ici.';
+    return null;
+  }
+
+  @override
+  Future<String?> saleEditCheck(Operator? operator, OfflineOperation sale) async {
+    final blocker = saleEditBlocker(operator, sale);
+    if (blocker != null) return blocker;
+    if (await _alreadyEdited(sale.uuid)) return 'Ce ticket a déjà été modifié : modifiez le nouveau ticket.';
+    if (await _returned(sale.uuid)) return 'Ce ticket a un retour : il ne se modifie plus.';
+    return null;
+  }
+
+  /// Paiements effectifs d'une vente ou d'un ticket de remplacement : ceux de la vente d'origine, plus ou moins les
+  /// différences réglées par les modifications successives.
+  Future<List<({String code, int amount})>> _paymentsOf(Map operation) async {
+    final content = operation['contenu'] as Map;
+    if (operation['type'] == 'vente') {
+      final byMethod = <String, int>{};
+      for (final p in (content['paiements'] as List).cast<Map>()) {
+        byMethod.update(p['moyen'] as String, (v) => v + (p['montant'] as int), ifAbsent: () => p['montant'] as int);
+      }
+      return [for (final e in byMethod.entries) (code: e.key, amount: e.value)];
+    }
+    final origin = await v2.operation(((content['vente_ref'] as Map)['operation_uuid'] as String?) ?? '');
+    final base = origin == null ? <({String code, int amount})>[] : await _paymentsOf(origin['operation'] as Map);
+    final settlement = content['reglement'] as Map;
+    final method = settlement['moyen'] as String?;
+    if (method == null) return base;
+    final delta = settlement['sens'] == 'remboursement' ? -(settlement['montant'] as int) : settlement['montant'] as int;
+    final out = [for (final p in base) p.code == method ? (code: p.code, amount: p.amount + delta) : p];
+    if (!base.any((p) => p.code == method)) out.add((code: method, amount: delta));
+    return [for (final p in out) if (p.amount != 0) p];
+  }
+
+  int _editPayable(List<CartLine> lines, int globalDiscount, int delivery) {
+    try {
+      return webTotals(
+        lineBases: [for (final l in lines) l.base],
+        lineDiscounts: [for (final l in lines) l.discount],
+        globalDiscount: globalDiscount,
+        vatRate: _vat?.rate ?? '0',
+        vatIncluded: _vat?.included ?? true,
+        delivery: delivery,
+      ).payable;
+    } on WebRuleRefusal catch (e) {
+      throw OfflineRefusal(e.message);
+    }
+  }
+
+  @override
+  SaleEditPreview previewSaleEdit(OfflineOperation sale, List<CartLine> lines) {
+    final content = sale.content;
+    if (content['totaux'] is! Map) throw const OfflineRefusal('Ticket introuvable sur ce terminal.');
+    final methods = [
+      for (final p in (sale.content['paiements'] as List? ?? const []).cast<Map>()) (code: p['moyen'] as String, amount: (p['montant'] as num).toInt()),
+    ];
+    return SaleEditPreview(
+      originalTotal: ((content['totaux'] as Map)['a_payer'] as num).toInt(),
+      newTotal: lines.isEmpty ? 0 : _editPayable(lines, (content['remise_globale'] as int?) ?? 0, (content['livraison'] as int?) ?? 0),
+      methods: methods,
+    );
+  }
+
+  @override
+  Future<OfflineOperation> recordSaleEdit(
+    Operator cashier,
+    OfflineOperation sale,
+    List<CartLine> lines, {
+    required Operator approver,
+    String? method,
+    String? reason,
+    String? operationUuid,
+  }) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) {
+        if ((existing['operation'] as Map)['type'] != 'vente_modification') throw const OfflineRefusal('Identifiant d’opération déjà utilisé.');
+        return _view(existing);
+      }
+    }
+    final s = _requireSelling();
+    final blocker = saleEditBlocker(cashier, sale);
+    if (blocker != null) throw OfflineRefusal(blocker);
+    if (await _alreadyEdited(sale.uuid)) throw const OfflineRefusal('Ce ticket a déjà été modifié : modifiez le nouveau ticket.');
+    if (await _returned(sale.uuid)) throw const OfflineRefusal('Ce ticket a un retour : il ne se modifie plus.');
+    if (!_editApprovers.any((a) => a.id == approver.id)) throw const OfflineRefusal('Ce responsable ne peut pas autoriser une modification de ticket.');
+    if (lines.isEmpty) throw const OfflineRefusal('Le nouveau ticket doit garder au moins un article.');
+    final motif = reason?.trim();
+    if ((motif?.length ?? 0) > 500) throw const OfflineRefusal('Motif trop long (500 caractères au plus).');
+    final origin = ((await v2.operation(sale.uuid))?['operation'] as Map?)?['contenu'] as Map? ?? (throw const OfflineRefusal('Ticket introuvable sur ce terminal.'));
+    final preview = previewSaleEdit(sale, lines);
+    if (preview.newTotal <= 0) throw const OfflineRefusal('Le nouveau ticket ne peut pas être à 0.');
+    String? settlementMethod;
+    if (preview.difference != 0) {
+      final codes = [for (final m in preview.methods) m.code];
+      settlementMethod = method ?? (codes.length == 1 ? codes.single : null);
+      if (settlementMethod == null || !codes.contains(settlementMethod)) {
+        throw const OfflineRefusal('Choisissez le moyen de paiement de la vente d’origine pour régler la différence.');
+      }
+      if (preview.difference < 0 && (preview.methods.firstWhere((m) => m.code == settlementMethod).amount) < -preview.difference) {
+        throw const OfflineRefusal('Le remboursement dépasse ce qui a été payé avec ce moyen : choisissez-en un autre.');
+      }
+    }
+    _requireRight(cashier, 'vente', 'vendre');
+    _checkEnteredPrices(cashier, lines, const SaleExtras());
+    if (lines.any((l) => l.discount > 0)) _requireRight(cashier, 'remise', 'accorder une remise');
+    for (final l in lines) {
+      if (l.discount > enterableLineDiscount(cashier, l.base)) throw OfflineRefusal('Remise sur « ${l.label} » au-delà du plafond de ${cashier.name}.');
+    }
+    final allocation = allocateLots(s, lines);
+    final cart = [for (final l in lines) ..._cartLines(l, allocation[l])];
+    final builder = V2SaleBuilder(products: _products, packagings: _packagings, revisions: _revisions, newUuid: _newUuid);
+    final extras = SaleExtras(globalDiscount: (origin['remise_globale'] as int?) ?? 0, delivery: (origin['livraison'] as int?) ?? 0);
+    final uuid = operationUuid ?? _newUuid();
+    final epoch = _device['epoque'];
+    await rememberTicketModel(uuid);
+    final operation = await _record(uuid, 'vente_modification', cashier, (sequence) {
+      final built = builder.content(
+        numberLocal: 'HL2-$epoch-${sequence.toString().padLeft(6, '0')}',
+        draftUuid: _newUuid(),
+        sessionUuid: origin['session_uuid'] as String,
+        cart: cart,
+        payments: [V2Payment(method: settlementMethod ?? preview.methods.first.code, amount: preview.newTotal)],
+        vat: _vat!,
+        extras: extras,
+        revision21: v2.contract21,
+      );
+      // Variations nettes : ce qui revient en stock (lignes d'origine) moins ce qui part (nouveau ticket).
+      final net = <String, int>{};
+      final keys = <String, (String, String?)>{};
+      void add(Map m, int sign) {
+        final key = '${m['produit_uuid']}|${m['lot_uuid']}';
+        keys[key] = (m['produit_uuid'] as String, m['lot_uuid'] as String?);
+        final variation = m['variation'] as String;
+        net[key] = (net[key] ?? 0) + sign * (variation.startsWith('-') ? -Decimal6.parse(variation.substring(1)) : Decimal6.parse(variation));
+      }
+      for (final m in (origin['mouvements'] as List).cast<Map>()) {
+        add(m, -1);
+      }
+      for (final m in (built['mouvements'] as List).cast<Map>()) {
+        add(m, 1);
+      }
+      return {
+        'vente_ref': {'operation_uuid': sale.uuid, 'vente_uuid': null, 'numero': sale.number},
+        'numero_local': built['numero_local'],
+        'session_uuid': built['session_uuid'],
+        'tva': built['tva'],
+        'lignes': built['lignes'],
+        'remise_globale': built['remise_globale'],
+        'livraison': built['livraison'],
+        'totaux': built['totaux'],
+        'a_payer_origine': preview.originalTotal,
+        'difference': preview.difference,
+        'reglement': {'moyen': settlementMethod, 'sens': preview.direction, 'montant': preview.difference.abs(), 'reference': null},
+        'motif': motif == null || motif.isEmpty ? null : motif,
+        'autorisation': {'approbateur_id': '${approver.id}', 'preuve': 'code_local|${now.toUtc().toIso8601String().substring(0, 19)}Z'},
+        'mouvements': [
+          for (final e in net.entries)
+            if (e.value != 0) {'mouvement_uuid': _newUuid(), 'produit_uuid': keys[e.key]!.$1, 'lot_uuid': keys[e.key]!.$2, 'variation': Decimal6.format(e.value)},
+        ],
+      };
+    }, calculation: v2.contract21 ? '2' : '1');
+    if (allocation.isNotEmpty) await _rebuild();
+    await _afterWrite();
+    return operation;
+  });
 
   // ------------------------------------------------------------------ Catalogue hors connexion (2.1 lot 10)
 
@@ -1982,7 +2202,8 @@ class V2Engine extends CaisseEngine {
     final op = Map<String, dynamic>.from(row['operation'] as Map);
     final content = Map<String, dynamic>.from(op['contenu'] as Map);
     final state = row['etat'] as String;
-    final isSale = op['type'] == 'vente';
+    final isSale = op['type'] == 'vente' || op['type'] == 'vente_modification';
+    final edit = op['type'] == 'vente_modification';
     final ids = isSale
         ? await _idsFor([
             for (final l in (content['lignes'] as List).cast<Map>()) ...[l['produit_uuid'] as String, if (l['conditionnement_uuid'] != null) l['conditionnement_uuid'] as String],
@@ -2001,7 +2222,9 @@ class V2Engine extends CaisseEngine {
                   'remise': l['remise'],
                 },
             ],
-            'paiements': [
+            'paiements': edit
+                ? [for (final p in await _paymentsOf(op)) {'moyen': p.code, 'montant': p.amount, 'recu': null, 'reference': null}]
+                : [
               for (final p in (content['paiements'] as List).cast<Map>()) {
                 'moyen': p['moyen'], 'montant': p['montant'], 'recu': p['recu'], 'reference': p['reference'],
                 if (p.containsKey('monnaie')) 'monnaie': p['monnaie'],
@@ -2017,6 +2240,19 @@ class V2Engine extends CaisseEngine {
             if (content['note'] != null) 'note': content['note'],
             if (content['client_nom'] != null) 'client_nom': content['client_nom'],
             if (content['tarif'] != null) 'tarif': content['tarif'],
+            'session_uuid': content['session_uuid'],
+            if (((content['passages'] as List?) ?? const []).isNotEmpty) 'par_pass': true,
+            if (content['commande'] != null) 'commande_restaurant': true,
+            // Ticket de remplacement (2.1 lot 11) : numéro remplacé, imprimé en tête, et règlement de la différence.
+            if (edit) 'remplace': (content['vente_ref'] as Map)['numero'],
+            if (edit)
+              'modification': {
+                'a_payer_origine': content['a_payer_origine'],
+                'difference': content['difference'],
+                'reglement': content['reglement'],
+                'motif': content['motif'],
+                'approbateur_id': (content['autorisation'] as Map)['approbateur_id'],
+              },
           }
         : {
             ...content,
@@ -2108,11 +2344,15 @@ class V2Engine extends CaisseEngine {
     // Moyen proposé par défaut = premier de l'ordre de la boutique (paiements.moyens_locaux), jamais l'ordre de stockage.
     final rights = <int, List<String>>{};
     final caps = <int, (BigInt?, int?)>{};
+    final editApprovers = <Operator>[];
     final operators = <Map<String, dynamic>>[];
     for (final o in (await v2.entities('operateur')).values) {
       final id = int.tryParse('${o['operateur_id']}');
       if (id == null) continue;
       rights[id] = (o['droits'] as List).cast<String>();
+      if (o['approbateur_modification'] == true && (o['code_autorisation_empreinte'] as String?)?.isNotEmpty == true) {
+        editApprovers.add(Operator({'id': id, 'nom': o['nom'], 'code_autorisation': o['code_autorisation_empreinte']}));
+      }
       if (o['remise_max_pourcent'] != null || o['remise_max_montant'] != null) {
         caps[id] = (o['remise_max_pourcent'] == null ? null : parseMicros(o['remise_max_pourcent'] as String), o['remise_max_montant'] as int?);
       }
@@ -2225,6 +2465,7 @@ class V2Engine extends CaisseEngine {
     _ids = ids;
     _productUuids = {for (final e in products.keys) ids[e]!: e};
     _localStates = localStates;
+    _editApprovers = editApprovers;
     _packagingUuids = {for (final e in packagings.keys) ids[e]!: e};
     _rights = rights;
     _discountCaps = caps;

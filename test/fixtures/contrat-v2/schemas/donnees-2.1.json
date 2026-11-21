@@ -446,6 +446,10 @@
                         "assistant",
                         null
                     ]
+                },
+                "approbateur_modification": {
+                    "const": true,
+                    "description": "Capacité vente.modification (2.1 lot 11) : responsable qui peut autoriser « Modifier le ticket » (manager ou assistant manager qui détient CORRIGER_VENTE et ANNULATION). Son `code_autorisation_empreinte` est alors publié, même sans REMISE. Clé absente pour les autres opérateurs et pour les terminaux sans la capacité."
                 }
             }
         },
@@ -712,6 +716,28 @@
                                 "prix_unique"
                             ],
                             "description": "Capacité lots.vente seulement : règle d’allocation de la boutique, même sens que la caisse web."
+                        },
+                        "modification_ticket": {
+                            "description": "Capacité vente.modification (2.1 lot 11) : option « Modifier un ticket après encaissement » de la boutique (Paramètres › Règles de gestion › Correction des ventes). Absente sans la capacité.",
+                            "type": "object",
+                            "required": [
+                                "actif",
+                                "fenetre"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "actif": {
+                                    "type": "boolean",
+                                    "description": "false : le bouton « Modifier le ticket » n’est pas proposé."
+                                },
+                                "fenetre": {
+                                    "enum": [
+                                        "same_day",
+                                        "open_session"
+                                    ],
+                                    "description": "same_day : le jour même (fuseau de la boutique) ET session de la vente ouverte ; open_session : tant que la session de la vente est ouverte. Jamais une session close."
+                                }
+                            }
                         }
                     }
                 },

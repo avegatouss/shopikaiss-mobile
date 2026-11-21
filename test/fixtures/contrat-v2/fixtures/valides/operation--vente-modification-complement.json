@@ -1,0 +1,94 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000011",
+    "type": "vente_modification",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 43,
+    "cree_le": "2026-11-21T10:40:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "2",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "1e425b2b5ff0395c1dd0fb0f650096fd01d1c14dec61ce2732faf389751a6e3e",
+    "contenu": {
+        "vente_ref": {
+            "operation_uuid": "a0000000-0000-4000-8000-000000000001",
+            "vente_uuid": null,
+            "numero": "HL-001-000042"
+        },
+        "numero_local": "HL-001-000043",
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+        "tva": {
+            "taux": "18.000000",
+            "incluse": true
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "e0000000-0000-4000-8000-000000000011",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "conditionnement_uuid": null,
+                "libelle": "Riz parfumé 1 kg",
+                "quantite": "1.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "1.000000",
+                "prix_unitaire": 1000,
+                "remise": 0,
+                "total": 1000,
+                "revision_prix": "3"
+            },
+            {
+                "ligne_uuid": "e0000000-0000-4000-8000-000000000012",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000002",
+                "conditionnement_uuid": null,
+                "libelle": "Eau minérale 1,5 L",
+                "quantite": "3.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "3.000000",
+                "prix_unitaire": 500,
+                "remise": 0,
+                "total": 1500,
+                "revision_prix": "2"
+            }
+        ],
+        "remise_globale": 0,
+        "livraison": 0,
+        "totaux": {
+            "brut": 2500,
+            "remises": 0,
+            "base_ht": 2119,
+            "tva": 381,
+            "a_payer": 2500
+        },
+        "a_payer_origine": 2000,
+        "difference": 500,
+        "reglement": {
+            "moyen": "especes",
+            "sens": "encaissement",
+            "montant": 500,
+            "reference": null
+        },
+        "motif": "Le client échange un riz contre de l’eau",
+        "autorisation": {
+            "approbateur_id": "9",
+            "preuve": "code_local|2026-11-21T10:39:52Z"
+        },
+        "mouvements": [
+            {
+                "mouvement_uuid": "f0000000-0000-4000-8000-000000000011",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+                "lot_uuid": null,
+                "variation": "1.000000"
+            },
+            {
+                "mouvement_uuid": "f0000000-0000-4000-8000-000000000012",
+                "produit_uuid": "c0000000-0000-4000-8000-000000000002",
+                "lot_uuid": null,
+                "variation": "-3.000000"
+            }
+        ]
+    }
+}

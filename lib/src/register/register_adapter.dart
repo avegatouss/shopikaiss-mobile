@@ -207,6 +207,14 @@ class LocalRegisterAdapter {
         return _setLineDiscount(_text(args, 'line_id', max: 64), _entry(args));
       case 'setLinePrice':
         return _setLinePrice(_text(args, 'line_id', max: 64), args['amount']);
+      case 'startSaleEdit':
+        return _startSaleEdit(_text(args, 'sale_id', max: 36));
+      case 'cancelSaleEdit':
+        return _cancelSaleEdit();
+      case 'prepareSaleEdit':
+        return _prepareSaleEdit();
+      case 'commitSaleEdit':
+        return _commitSaleEdit(args);
       case 'catalogueForm':
         return _catalogueForm();
       case 'createProduct':
@@ -245,6 +253,7 @@ class LocalRegisterAdapter {
         _emit('panier');
         return _view();
       case 'suspendDraft':
+        if (_draft.edit != null) throw const AdapterFailure('modification_en_cours', 'Modification du ticket en cours : validez-la ou abandonnez-la.');
         return _suspend(label: args['label'] as String?);
       case 'resumeShared':
         return _resumeShared(_text(args, 'shared_id', max: 36));
@@ -261,6 +270,7 @@ class LocalRegisterAdapter {
       case 'deleteDraft':
         return _deleteDraft(_text(args, 'draft_id', max: 64));
       case 'preparePayment':
+        if (_draft.edit != null) throw const AdapterFailure('modification_en_cours', 'Modification du ticket en cours : validez-la ou abandonnez-la.');
         return _preparePayment();
       case 'setPayment':
         // Paiement unique (raccourci de setPayments) : montant par défaut = montant à payer.
@@ -363,6 +373,12 @@ class LocalRegisterAdapter {
       'customer': cap(engine.customersSupported ? null : 'Clients non disponibles sur ce terminal.'),
       // Catalogue hors connexion (2.1 lot 10) : capacité accordée et droit du caissier connecté.
       'product_create': cap(engine.productCreateBlocker(_operator)),
+      // Modifier un ticket (2.1 lot 11) : capacité, option de la boutique et droit de vendre ; le ticket se lit par vente.
+      'sale_edit': cap(!engine.saleEditSupported
+          ? 'Modification de ticket non disponible sur ce terminal.'
+          : _operator == null
+          ? 'Identifiez le caissier.'
+          : null),
       'product_edit': cap(engine.productEditBlocker(_operator)),
       'customer_create': cap(_operator != null && engine.canCreateCustomer(_operator!) ? null : 'Création de client non autorisée sur ce terminal.'),
       'discount': {...cap(_discountRefusal()), 'max_percent': rules?.maxLineDiscountPercent ?? 0},
@@ -479,8 +495,17 @@ class LocalRegisterAdapter {
       'revision': _revision,
       'ready': ready,
       'block_reason': reason,
-      'can_pay': payReason == null,
-      'pay_reason': payReason,
+      // Modification d'un ticket en cours (2.1 lot 11) : bandeau, encaissement ordinaire et mise en attente bloqués.
+      'can_pay': payReason == null && _draft.edit == null,
+      'pay_reason': _draft.edit != null ? 'Modification du ticket en cours : validez-la ou abandonnez-la.' : payReason,
+      'sale_edit': _draft.edit == null
+          ? null
+          : {
+              'sale_id': _draft.edit!['vente_id'],
+              'number': _draft.edit!['numero'],
+              'original_total': _draft.edit!['total_origine'],
+              'original_total_label': formatFcfa(((_draft.edit!['total_origine'] as num?) ?? 0).toInt()),
+            },
       'draft_id': _draft.uuid,
       'suspended_count': suspended,
       'store_name': snapshot?.store.name ?? '',
@@ -868,6 +893,128 @@ class LocalRegisterAdapter {
       return _view();
     }
     return result;
+  }
+
+  // ------------------------------------------------------------------ Modifier un ticket (2.1 lot 11)
+
+  Future<OfflineOperation> _editedSale() async {
+    final id = _draft.edit?['vente_id'] as String?;
+    final sale = id == null ? null : await engine.saleStatus(id);
+    if (sale == null) throw const AdapterFailure('aucune_modification', 'Aucune modification de ticket en cours.');
+    return sale;
+  }
+
+  List<CartLine> _editLines() {
+    final snapshot = _snapshot();
+    final lines = [for (final l in _draft.lines) l.materialize(snapshot, _tierOf(_draft))];
+    if (lines.any((l) => l == null)) throw const AdapterFailure('panier_invalide', 'Un article du panier n’est plus au catalogue local : retirez-le.');
+    return lines.cast<CartLine>();
+  }
+
+  /// Les articles du ticket reviennent dans le panier, au prix du catalogue (prix saisi gardé pour un produit coché).
+  Future<Map<String, dynamic>> _startSaleEdit(String saleId) async {
+    if (_draft.edit != null) throw const AdapterFailure('modification_en_cours', 'Une modification de ticket est déjà en cours.');
+    if (_draft.lines.isNotEmpty) throw const AdapterFailure('panier_non_vide', 'Videz ou mettez en attente le panier avant de modifier un ticket.');
+    final sale = await engine.saleStatus(saleId);
+    if (sale == null || !sale.isSale) throw const AdapterFailure('vente_inconnue', 'Vente introuvable sur ce terminal.');
+    final refusal = await engine.saleEditCheck(_operator, sale);
+    if (refusal != null) throw AdapterFailure('modification_refusee', refusal);
+    final snapshot = _snapshot();
+    return _mutate(() {
+      for (final l in (sale.content['lignes'] as List).cast<Map>()) {
+        final productId = l['produit_id'] as int?;
+        final product = productId == null ? null : snapshot.byId(productId);
+        if (product == null) continue;
+        final packagingId = l['conditionnement_id'] as int?;
+        final usual = packagingId == null ? product.price : (product.packaging(packagingId)?.price ?? product.price);
+        final unit = (l['prix_unitaire'] as num).toInt();
+        _draft.lines.add(_DraftLine(
+          id: _newUuid(),
+          productId: product.id,
+          packagingId: packagingId,
+          quantity: parseMicros('${l['quantite']}') ?? BigInt.zero,
+          discount: (l['remise'] as num?)?.toInt() ?? 0,
+          entered: packagingId == null && product.priceEditable && unit != usual ? unit : null,
+        ));
+      }
+      _draft.edit = {'vente_id': sale.uuid, 'numero': sale.number, 'total_origine': sale.total};
+    });
+  }
+
+  Future<Map<String, dynamic>> _cancelSaleEdit() async {
+    if (_draft.edit == null) return _view();
+    await engine.deleteDraft(_draft.uuid);
+    _draft = _Draft(_newUuid());
+    _emit('panier');
+    return _view();
+  }
+
+  Future<Map<String, dynamic>> _prepareSaleEdit() async {
+    final sale = await _editedSale();
+    final SaleEditPreview preview;
+    try {
+      preview = engine.previewSaleEdit(sale, _editLines());
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('modification_refusee', e.message);
+    }
+    final names = {for (final m in _snapshot().methods) m.code: m.name};
+    return {
+      'sale_id': sale.uuid,
+      'number': sale.number,
+      'original_total': preview.originalTotal,
+      'original_total_label': formatFcfa(preview.originalTotal),
+      'new_total': preview.newTotal,
+      'new_total_label': formatFcfa(preview.newTotal),
+      'difference': preview.difference,
+      'difference_label': formatFcfa(preview.difference.abs()),
+      'direction': preview.direction,
+      'direction_label': switch (preview.direction) {
+        'encaissement' => 'Complément à encaisser',
+        'remboursement' => 'À rembourser au client',
+        _ => 'Aucune différence',
+      },
+      'method_choice': preview.methodChoice,
+      'methods': [for (final m in preview.methods) {'code': m.code, 'name': names[m.code] ?? m.code, 'amount': m.amount}],
+    };
+  }
+
+  /// Valide la modification : code responsable (identifie seul le responsable), moyen de la différence, motif.
+  /// Idempotent par `operation_id` : rejoué, il rend le même ticket de remplacement.
+  Future<Map<String, dynamic>> _commitSaleEdit(Map<String, dynamic> args) async {
+    final operationId = _text(args, 'operation_id', max: 36);
+    final already = await engine.saleStatus(operationId);
+    if (already != null && already.isSaleEdit) {
+      if (_draft.edit != null) await _cancelSaleEdit();
+      return _committed(already);
+    }
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.');
+    final sale = await _editedSale();
+    final code = args['approval_code'];
+    if (code is! String || code.isEmpty) throw const AdapterFailure('code_requis', 'Saisissez le code du responsable.');
+    final Operator approver;
+    try {
+      approver = await engine.identifyEditApprover(code);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('code_refuse', e.message);
+    }
+    try {
+      final edited = await engine.recordSaleEdit(
+        operator,
+        sale,
+        _editLines(),
+        approver: approver,
+        method: args['method'] as String?,
+        reason: args['reason'] as String?,
+        operationUuid: operationId,
+      );
+      await engine.deleteDraft(_draft.uuid);
+      _draft = _Draft(_newUuid());
+      _emit('vente');
+      return _committed(edited);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('modification_refusee', e.message);
+    }
   }
 
   // ------------------------------------------------------------------ Catalogue hors connexion (2.1 lot 10)
@@ -1614,6 +1761,8 @@ class LocalRegisterAdapter {
             'status': o.status,
             'server_status': o.serverStatus,
             'server_number': o.serverNumber,
+            'replaces': o.content['remplace'],
+            'edit_reason': await engine.saleEditCheck(_operator, o),
           },
       ],
     };
@@ -1760,7 +1909,11 @@ class _Draft {
       );
     }
     suspended = stored.content['suspendu'] == true;
+    edit = stored.content['modification'] is Map ? Map<String, dynamic>.from(stored.content['modification'] as Map) : null;
   }
+
+  /// Modification d'un ticket en cours (2.1 lot 11) : `vente_id`, `numero`, `total_origine`.
+  Map<String, dynamic>? edit;
 
   final String uuid;
   int revision = 0;
@@ -1799,7 +1952,8 @@ class _Draft {
     ..note = note
     ..customer = customer
     ..sharedCart = sharedCart
-    ..wholesale = wholesale;
+    ..wholesale = wholesale
+    ..edit = edit;
 
   Map<String, dynamic> toJson() => {
     'lignes': [
@@ -1827,6 +1981,7 @@ class _Draft {
       for (final p in payments) {'moyen': p.methodCode, 'montant': p.amount, 'recu': p.received, 'reference': p.reference},
     ],
     if (suspended) 'suspendu': true,
+    if (edit != null) 'modification': edit,
   };
 }
 

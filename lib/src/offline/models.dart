@@ -953,7 +953,11 @@ class OfflineOperation {
   /// demandé APRÈS ce moment reflète l'opération : sa consommation locale est alors couverte.
   DateTime? resolvedAt;
 
-  bool get isSale => type == 'vente';
+  /// Vente au sens des écrans et des tickets : vente ordinaire ou ticket de remplacement (2.1 lot 11).
+  bool get isSale => type == 'vente' || type == 'vente_modification';
+
+  /// Ticket de remplacement d'une vente modifiée après encaissement (2.1 lot 11).
+  bool get isSaleEdit => type == 'vente_modification';
 
   /// Sort définitif côté serveur : plus rien à attendre de la boutique pour cette opération.
   static bool isFinalServerStatus(String? status) => status == 'integree' || status == 'ecartee';
@@ -1000,6 +1004,7 @@ String stripAccents(String text) {
     'î': 'i',
     'ï': 'i',
     'ñ': 'n',
+    '°': 'o',
     'ó': 'o',
     'ò': 'o',
     'ô': 'o',

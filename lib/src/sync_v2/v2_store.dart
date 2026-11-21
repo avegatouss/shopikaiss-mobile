@@ -459,7 +459,7 @@ class V2Store {
           'maj_le': now,
         });
         // Vente : sorties de stock ; retour : entrées, couvertes de la même façon.
-        if (operation['type'] == 'vente' || operation['type'] == 'retour') {
+        if (operation['type'] == 'vente' || operation['type'] == 'retour' || operation['type'] == 'vente_modification') {
           for (final m in ((operation['contenu'] as Map)['mouvements'] as List).cast<Map>()) {
             final lot = m['lot_uuid'] as String?;
             await txn.insert('v2_mouvements', {
