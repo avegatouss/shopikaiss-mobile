@@ -14,6 +14,8 @@ import '../sync_v2/decimal6.dart';
 import '../terminal/terminal_session.dart';
 import '../web/shop_browser_page.dart';
 import '../web/shop_browser_policy.dart';
+import '../windows/platform/receipt_logo.dart';
+import '../windows/platform/receipt_qr.dart';
 import '../windows/presentation/brand_logo.dart';
 import '../windows/presentation/calculator.dart';
 import '../windows/presentation/searchable_choice.dart';
@@ -25,6 +27,7 @@ import 'money.dart';
 import 'pass_sheet.dart';
 import 'payment_dialog.dart';
 import 'pending_operations_page.dart';
+import 'receipt_settings.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
 import 'x_z_report.dart';
@@ -168,6 +171,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Map<int, BigInt> _sold = {};
 
   AppSettings get _look => widget.session.settings;
+
+  /// Retour automatique du curseur au scanner, selon le réglage (F2 et le toucher le placent toujours).
+  void _autoFocusScan() {
+    if (_look.scanAutoFocus) _searchFocus.requestFocus();
+  }
   Color get _brand => Color(_look.brandColor);
   ColorScheme get _palette => ColorScheme.fromSeed(seedColor: _brand);
   bool get _listView => _look.catalogList;
@@ -1337,6 +1345,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _openSettings();
       } else if (choice == 'prix_locaux') {
         _toggleLocalPrices();
+      } else if (choice == 'tickets') {
+        _ticketSettings();
       }
     },
     itemBuilder: (context) => [
@@ -1345,6 +1355,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       const PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
       if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
+      if (_operator != null && _engine.canCloseSession(_operator!)) const PopupMenuItem(value: 'tickets', child: Text('Tickets : logo, QR et exemplaires')),
       if (_canRememberPrices) CheckedPopupMenuItem(value: 'prix_locaux', checked: _localPrices.enabled, child: const Text('Mémoriser les prix saisis')),
       if (_operator != null && _engine.canCloseSession(_operator!))
         PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
@@ -1498,7 +1509,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 child: TextField(
                   controller: _scanInput,
                   focusNode: _searchFocus,
-                  autofocus: true,
+                  autofocus: _look.scanAutoFocus,
                   decoration: InputDecoration(
                     isDense: true,
                     filled: true,
@@ -1768,7 +1779,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     }
     _scanInput.clear();
     setState(() {});
-    _searchFocus.requestFocus();
+    _autoFocusScan();
   }
 
   Future<void> _add(Product product, Packaging? packaging) async {
@@ -1800,7 +1811,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _cart.add(line);
       }
     });
-    _searchFocus.requestFocus();
+    _autoFocusScan();
   }
 
   /// [footer] : total et bouton « Encaisser » sous le panier (la disposition compacte les porte dans sa barre fixe).
@@ -2381,7 +2392,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         ),
       ),
     );
-    _searchFocus.requestFocus();
+    _autoFocusScan();
   }
 
   /// Retour en espèces d'une vente de ce terminal : quantités par ligne, montant calculé, motif obligatoire.
@@ -2566,7 +2577,113 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       duplicate: duplicate,
       model: model,
     );
-    await _printText(text, failure: 'Ticket non imprimé', saved: ' : la vente est bien enregistrée.', compact: model?.compact ?? false);
+    // Logo, QR et « DONT TVA » comme Windows ; les exemplaires du réglage pour le ticket de la vente, un seul pour un duplicata.
+    final settings = await ReceiptSettings.read(_engine);
+    final printed = ReceiptSettings.saleLines(text);
+    final compact = model?.compact ?? false;
+    await _printText(
+      printed,
+      failure: 'Ticket non imprimé',
+      saved: ' : la vente est bien enregistrée.',
+      bytes: settings.saleBytes(printed, paperWidth: width, compact: compact, copies: duplicate ? 1 : null),
+    );
+  }
+
+  /// Réglages des tickets de cette boutique sur ce terminal ; accessibles sans imprimante (aperçu à l'écran sinon).
+  Future<void> _ticketSettings() async {
+    var settings = await ReceiptSettings.read(_engine);
+    final link = TextEditingController(text: settings.link);
+    String? error;
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: const Text('Tickets : logo, QR et exemplaires'),
+          scrollable: true,
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Pour ${_snapshot?.store.name ?? 'cette boutique'} sur ce terminal. Logo gardé en copie locale : rien n’est téléchargé à l’impression.',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              if (settings.logoPng != null) Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Image.memory(settings.logoPng!, height: 70))),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton.icon(
+                    icon: const Icon(Icons.image_outlined),
+                    label: Text(settings.logoPng == null ? 'Importer le logo (PNG ou JPG)' : 'Changer le logo'),
+                    onPressed: () async {
+                      final bytes = await widget.session.channel.pickImage();
+                      if (bytes == null) return;
+                      try {
+                        final png = normalizeReceiptLogo(bytes);
+                        setLocal(() => (settings = settings.copyWith(logoPng: png), error = null));
+                      } on FormatException catch (e) {
+                        setLocal(() => error = e.message);
+                      } catch (_) {
+                        setLocal(() => error = 'Logo illisible. Choisissez une image PNG ou JPG de 2 Mo au plus.');
+                      }
+                    },
+                  ),
+                  if (settings.logoPng != null)
+                    TextButton(onPressed: () => setLocal(() => settings = settings.copyWith(removeLogo: true)), child: const Text('Retirer le logo')),
+                ],
+              ),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: settings.qrEnabled,
+                onChanged: (v) => setLocal(() => settings = settings.copyWith(qrEnabled: v)),
+                title: const Text('QR résumé du ticket'),
+                subtitle: const Text('Numéro, date, caisse et totaux ; aucune donnée client ni référence de paiement.'),
+              ),
+              TextField(
+                controller: link,
+                keyboardType: TextInputType.url,
+                decoration: const InputDecoration(labelText: 'Lien facultatif (site, réseaux)', hintText: 'https://…', helperText: 'Second QR « Retrouvez-nous en ligne ».'),
+              ),
+              const SizedBox(height: 8),
+              DropdownButtonFormField<int>(
+                initialValue: settings.copies,
+                decoration: const InputDecoration(labelText: 'Exemplaires du ticket de vente'),
+                items: [for (var n = 1; n <= 3; n++) DropdownMenuItem(value: n, child: Text('$n'))],
+                onChanged: (v) => setLocal(() => settings = settings.copyWith(copies: v ?? 1)),
+              ),
+              if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: const TextStyle(color: Colors.red))),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            TextButton(
+              onPressed: () {
+                final trial = settings.copyWith(link: link.text.trim());
+                if (!validReceiptLink(trial.link)) return setLocal(() => error = 'Lien invalide : http ou https, sans espace, 350 caractères au plus.');
+                _printTestTicket(trial);
+              },
+              child: const Text('Ticket d’essai'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final next = settings.copyWith(link: link.text.trim());
+                if (!validReceiptLink(next.link)) return setLocal(() => error = 'Lien invalide : http ou https, sans espace, 350 caractères au plus.');
+                await next.write(_engine);
+                if (context.mounted) Navigator.pop(context);
+                _toast('Réglages des tickets enregistrés.');
+              },
+              child: const Text('Enregistrer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Ticket d'essai : aucune vente, avec le logo, les QR et les exemplaires du réglage en cours.
+  Future<void> _printTestTicket(ReceiptSettings settings) {
+    final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
+    const lines = ['SHOPIKAISS - TEST', 'AUCUNE VENTE', 'Impression et coupe du papier', '0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'Derniere ligne : doit rester lisible.'];
+    return _printText(lines, failure: 'Ticket d’essai non imprimé', bytes: settings.saleBytes(lines, paperWidth: width));
   }
 
   Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false, Uint8List? bytes}) async {

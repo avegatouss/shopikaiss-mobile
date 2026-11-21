@@ -152,6 +152,16 @@ class TerminalChannel {
 
   Future<void> clearCrash() => _call('clearCrash');
 
+  /// Image choisie dans le sélecteur du système (logo des tickets), ou null (annulé, illisible, plateforme sans canal).
+  Future<Uint8List?> pickImage() async {
+    if (!supported) return null;
+    try {
+      return await _channel.invokeMethod<Uint8List>('pickImage');
+    } on PlatformException {
+      return null;
+    }
+  }
+
   /// Nœuds `/dev/tty*` candidats : `[{path, writable}]`.
   Future<List<Map<String, dynamic>>> serialPorts() => _list('serialPorts');
 

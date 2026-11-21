@@ -2,6 +2,8 @@ package ci.khoga.shopikaiss.terminal
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.media.AudioManager
 import android.media.ToneGenerator
 import android.os.Build
@@ -36,6 +38,7 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
     }.also { it.start() }
     private val keyboard = KeyboardBlocker(activity).also { it.start() }
     private var toneGenerator: ToneGenerator? = null
+    private var pendingImage: MethodChannel.Result? = null
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -73,6 +76,7 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
                 result.success(BluetoothPrinterDriver.bonded(activity))
             }
             "usbDevices" -> result.success(PrinterManager.usbDevices(activity))
+            "pickImage" -> pickImage(result)
             "lastCrash" -> result.success(CrashLog.read(activity))
             "clearCrash" -> {
                 CrashLog.clear(activity)
@@ -160,7 +164,62 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
         }
     }
 
+    /**
+     * Logo des tickets : sélecteur d'images du système (PNG ou JPG), lu une fois puis gardé par le Dart.
+     * Rend les octets (2 Mo + 1 au plus, le Dart refuse au-delà) ou null si rien n'est choisi.
+     */
+    private fun pickImage(result: MethodChannel.Result) {
+        if (pendingImage != null) {
+            result.success(null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_GET_CONTENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("image/*")
+            .putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/png", "image/jpeg"))
+        pendingImage = result
+        try {
+            activity.startActivityForResult(intent, PICK_IMAGE)
+        } catch (_: ActivityNotFoundException) {
+            pendingImage = null
+            result.success(null)
+        }
+    }
+
+    /** Appelé par [MainActivity.onActivityResult] ; vrai si la réponse est celle du sélecteur de logo. */
+    fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode != PICK_IMAGE) return false
+        val reply = pendingImage ?: return true
+        pendingImage = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            reply.success(null)
+            return true
+        }
+        Thread {
+            val bytes = try {
+                activity.contentResolver.openInputStream(uri)?.use { input ->
+                    val limit = 2 * 1024 * 1024 + 1
+                    val buffer = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(16 * 1024)
+                    while (buffer.size() < limit) {
+                        val n = input.read(chunk, 0, minOf(chunk.size, limit - buffer.size()))
+                        if (n < 0) break
+                        buffer.write(chunk, 0, n)
+                    }
+                    buffer.toByteArray()
+                }
+            } catch (_: Exception) {
+                null
+            }
+            main.post { reply.success(bytes) }
+        }.start()
+        return true
+    }
+
     fun dispose() {
+        pendingImage?.success(null)
+        pendingImage = null
         channel.setMethodCallHandler(null)
         display.stop()
         io.execute { printers.close() }
@@ -172,6 +231,7 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
     companion object {
         const val CHANNEL = "ci.khoga.shopikaiss/terminal"
         private const val REQUEST_BLUETOOTH = 4101
+        private const val PICK_IMAGE = 4102
         private val OK = mapOf("ok" to true)
         private fun failure(error: String) = mapOf("ok" to false, "error" to error)
     }
