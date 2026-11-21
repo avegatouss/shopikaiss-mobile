@@ -908,7 +908,7 @@ class V2Engine extends CaisseEngine {
     final ids = await v2.localIds([for (final l in raw) ...[l['produit_uuid'] as String, if (l['conditionnement_uuid'] != null) l['conditionnement_uuid'] as String]]);
     final lines = <CartLine>[];
     for (final l in raw) {
-      final product = snapshot?.products.where((p) => p.id == ids[l['produit_uuid']]).firstOrNull;
+      final product = snapshot?.byId(ids[l['produit_uuid']] ?? -1);
       final packaging = l['conditionnement_uuid'] == null ? null : product?.packaging(ids[l['conditionnement_uuid']]);
       if (product == null || (l['conditionnement_uuid'] != null && packaging == null)) {
         await client.releaseCart(uuid, '${operator.id}').then<void>((_) {}, onError: (Object _) {});
@@ -2070,7 +2070,7 @@ class V2Engine extends CaisseEngine {
       max: policies['retours.max_montant'] as int? ?? 0,
       days: policies['retours.delai_jours'] as int? ?? 0,
     );
-    final ids = await v2.localIds([...products.keys, ...packagings.keys]);
+    final ids = await v2.localIds([...products.keys, ...packagings.keys, ..._productAliases.keys]);
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
     _shopRules = (shop?['regles'] as Map?)?.cast<String, dynamic>();
@@ -2172,6 +2172,11 @@ class V2Engine extends CaisseEngine {
       'moyens': methods,
       'caissiers': operators,
       'categories': [for (final c in orderedCategories) c['nom']],
+      // Créations rattachées (2.1 lot 10) : l'identifiant local d'un panier en attente mène au produit existant.
+      'alias_produits': {
+        for (final a in _productAliases.entries)
+          if (ids[a.value] != null) '${ids[a.key]}': ids[a.value],
+      },
       // Modèle résolu par le serveur pour ce terminal (capacité ticket.modeles) ; null : disposition d'origine.
       'modele_ticket': (await v2.entities('modele_ticket'))[(await v2.entities('ticket_terminal'))[_device['terminal_uuid']]?['modele_uuid']],
       'produits': [

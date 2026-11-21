@@ -1023,7 +1023,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final lines = <CartLine>[];
     var missing = 0;
     for (final raw in (draft.content['lignes'] as List).cast<Map>()) {
-      final product = snapshot.products.where((p) => p.id == raw['produit_id']).firstOrNull;
+      final product = raw['produit_id'] is int ? snapshot.byId(raw['produit_id'] as int) : null;
       final packagingId = raw['conditionnement_id'] as int?;
       final packaging = packagingId == null ? null : product?.packaging(packagingId);
       if (product == null || (packagingId != null && packaging == null)) {

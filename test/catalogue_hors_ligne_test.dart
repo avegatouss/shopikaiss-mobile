@@ -191,6 +191,11 @@ void main() {
     final awa = named(e, 'Awa');
     final local = await e.createProduct(awa, const NewProduct(name: 'Savon bis', price: 450, barcodes: ['6190000000888']));
     await e.recordSale([CartLine(product: local, quantity: BigInt.from(2000000))], [cash(e, 900)], awa);
+    // Panier en cours avec le produit local : il doit survivre au rattachement.
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    await adapter.execute('addProduct', {'product_id': local.id}, null);
     server.verdict = (op) => op['type'] == 'creation_produit' ? 'a_arbitrer' : 'recue';
     server.reasonFor = (op) => op['type'] == 'creation_produit'
         ? {'code': 'produit.correspondance', 'message': 'Code-barres ou référence déjà utilisés dans la boutique : à arbitrer.', 'details': null}
@@ -215,6 +220,10 @@ void main() {
     expect(e.snapshot!.byCode('6190000000888'), isNull);
     final savon = e.snapshot!.byCode('6190000000011')!.$1;
     expect((await e.soldSinceSnapshot())[savon.id], BigInt.from(2000000), reason: 'vente non couverte écrite sous l’uuid local, comptée sur le Savon');
+    expect(e.snapshot!.byId(local.id)!.id, savon.id, reason: 'l’identifiant local mène au produit existant');
+    final lines = (await adapter.execute('view', {}, null))['lines'] as List;
+    expect((lines.single as Map)['name'], 'Savon', reason: 'la ligne du panier suit le rattachement au lieu de disparaître');
+    await adapter.close();
   });
 
   test('adaptateur : catalogueForm, createProduct, productForEdit, updateProduct, catalogueChanges et local_state de la vue', () async {

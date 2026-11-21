@@ -57,7 +57,14 @@ class Snapshot {
   /// Produit (et conditionnement) d'un code-barres scanné.
   (Product, int?)? byCode(String code) => _byCode[code.trim()];
 
-  Product? byId(int id) => _byId[id];
+  /// Produit d'un identifiant ; un identifiant de produit local rattaché sur le web (2.1 lot 10) mène au produit
+  /// existant, pour qu'un panier en attente garde sa ligne.
+  Product? byId(int id) => _byId[id] ?? _byId[productAliases[id]];
+
+  /// Identifiant local d'une création rattachée → identifiant du produit existant (`alias_produits`).
+  late final Map<int, int> productAliases = {
+    for (final e in ((raw['alias_produits'] as Map?) ?? const {}).entries) int.parse('${e.key}'): (e.value as num).toInt(),
+  };
 
   /// Recherche par nom, référence ou code (insensible aux accents et à la casse) sur tout le catalogue, restreinte à
   /// [category], [brand] et [supplier] si donnés ; [limit] null = tous les résultats.
