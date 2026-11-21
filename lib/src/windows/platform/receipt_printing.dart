@@ -320,7 +320,7 @@ class ReceiptPrinting {
       final batch = BytesBuilder(copy: false);
       for (var i = 0; i < copies; i++) {
         if (useConfiguredCopies && escposBytes == null) {
-          batch.add([...EscPos.init(), EscPos.esc, 0x64, 3]);
+          batch.add([...EscPos.init(), EscPos.esc, 0x64, 2]);
         }
         if (logo != null && escposBytes == null) {
           batch.add(
