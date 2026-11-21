@@ -1,0 +1,31 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000102",
+    "type": "modification_produit",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 51,
+    "cree_le": "2026-11-21T08:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "produit_uuid": "c0000000-0000-4000-8000-000000000001",
+        "revision_base": "7",
+        "champs": {
+            "prix": {
+                "avant": 1000,
+                "apres": 1200
+            },
+            "nom": {
+                "avant": "Gateau",
+                "apres": "Gâteau du jour"
+            }
+        }
+    },
+    "empreinte": "df8d3412124737f34eaeb1a0cbc22c4d87b32cb99282ffa35160f3b1e8ae4732"
+}

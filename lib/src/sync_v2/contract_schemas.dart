@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b, lot 10 catalogue c87b57c1) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -1241,6 +1241,59 @@ const contractV2Schemas = <String, String>{
                                 "numero": {
                                     "type": "integer",
                                     "minimum": 1
+                                }
+                            }
+                        },
+                        "produit_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacités produit.creation / produit.modification (2.1 lot 10) : produit serveur désigné par produit_uuid (lui-même, ou le produit auquel il est rattaché ; l’uuid du terminal reste alors un alias sans limite)."
+                        },
+                        "produit_resolution": {
+                            "type": "object",
+                            "description": "2.1 lot 10 : décision appliquée à une creation_produit ou une modification_produit.",
+                            "required": [
+                                "decision",
+                                "champs_serveur",
+                                "decide_par"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "decision": {
+                                    "enum": [
+                                        "creee",
+                                        "rattachee",
+                                        "creee_distincte",
+                                        "appliquee",
+                                        "sans_effet",
+                                        "arbitree"
+                                    ]
+                                },
+                                "champs_serveur": {
+                                    "type": "array",
+                                    "uniqueItems": true,
+                                    "maxItems": 10,
+                                    "description": "Champs de la modification où la valeur du serveur a été gardée par arbitrage.",
+                                    "items": {
+                                        "enum": [
+                                            "nom",
+                                            "reference",
+                                            "categorie_uuid",
+                                            "prix",
+                                            "prix_gros",
+                                            "gros_quantite_min"
+                                        ]
+                                    }
+                                },
+                                "decide_par": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                                        }
+                                    ],
+                                    "description": "Utilisateur qui a arbitré ; null sans arbitrage."
                                 }
                             }
                         }
@@ -3671,6 +3724,12 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/edition_pre_z"
+        },
+        {
+            "$ref": "#/$defs/creation_produit"
+        },
+        {
+            "$ref": "#/$defs/modification_produit"
         }
     ],
     "$defs": {
@@ -7421,6 +7480,368 @@ const contractV2Schemas = <String, String>{
                     "$ref": "#/$defs/contenu_edition_pre_z"
                 }
             }
+        },
+        "creation_produit": {
+            "description": "Révision 2.1 lot 10 (capacité produit.creation) : fiche produit créée hors connexion, à émettre avant toute vente qui cite produit_uuid.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "creation_produit"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "produit_uuid",
+                        "nom",
+                        "reference",
+                        "codes_barres",
+                        "categorie_uuid",
+                        "prix",
+                        "prix_achat",
+                        "prix_gros",
+                        "gros_quantite_min",
+                        "stock_illimite"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "produit_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "UUID v4 choisi par le terminal : le produit est créé avec cet UUID, ou il devient un alias du produit auquel il est rattaché."
+                        },
+                        "nom": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160
+                        },
+                        "reference": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "minLength": 1,
+                            "maxLength": 80,
+                            "description": "null : aucune, ou référence attribuée par la boutique si elle les numérote automatiquement."
+                        },
+                        "codes_barres": {
+                            "type": "array",
+                            "maxItems": 5,
+                            "uniqueItems": true,
+                            "description": "Le premier est le code principal. Vide : le serveur attribue un code interne, comme le formulaire du web.",
+                            "items": {
+                                "type": "string",
+                                "pattern": "^[!-~]{1,80}$"
+                            }
+                        },
+                        "categorie_uuid": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            ]
+                        },
+                        "prix": {
+                            "$ref": "commun.json#/$defs/montant"
+                        },
+                        "prix_achat": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/montant"
+                                }
+                            ],
+                            "description": "null : coût non saisi, enregistré à 0 (note de l’opération)."
+                        },
+                        "prix_gros": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/montant"
+                                }
+                            ]
+                        },
+                        "gros_quantite_min": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/quantite"
+                                }
+                            ]
+                        },
+                        "stock_illimite": {
+                            "type": "boolean",
+                            "description": "Faux : stock suivi, à 0 à la création (aucun stock initial ; un ajustement reste une opération distincte)."
+                        }
+                    }
+                }
+            }
+        },
+        "modification_produit": {
+            "description": "Révision 2.1 lot 10 (capacité produit.modification) : champs modifiés hors connexion avec leur valeur de base ; un seul champ en conflit met toute l’opération à arbitrer.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "modification_produit"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "produit_uuid",
+                        "revision_base",
+                        "champs"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "produit_uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "revision_base": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/version"
+                                }
+                            ],
+                            "description": "Révision de l’entité produit reçue par /changements ; null pour un produit créé sur ce terminal et pas encore reçu. Informative : le contrôle se fait champ par champ sur « avant »."
+                        },
+                        "champs": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "description": "Seulement les champs modifiés (au moins un), chacun avec la valeur connue du terminal (avant) et la nouvelle (apres).",
+                            "properties": {
+                                "nom": {
+                                    "type": "object",
+                                    "required": [
+                                        "avant",
+                                        "apres"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "avant": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 160
+                                        },
+                                        "apres": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 160
+                                        }
+                                    }
+                                },
+                                "reference": {
+                                    "type": "object",
+                                    "required": [
+                                        "avant",
+                                        "apres"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "avant": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ],
+                                            "minLength": 1,
+                                            "maxLength": 80
+                                        },
+                                        "apres": {
+                                            "type": [
+                                                "string",
+                                                "null"
+                                            ],
+                                            "minLength": 1,
+                                            "maxLength": 80
+                                        }
+                                    }
+                                },
+                                "categorie_uuid": {
+                                    "type": "object",
+                                    "required": [
+                                        "avant",
+                                        "apres"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "avant": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/uuid"
+                                                }
+                                            ]
+                                        },
+                                        "apres": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/uuid"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "prix": {
+                                    "type": "object",
+                                    "required": [
+                                        "avant",
+                                        "apres"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "avant": {
+                                            "$ref": "commun.json#/$defs/montant"
+                                        },
+                                        "apres": {
+                                            "$ref": "commun.json#/$defs/montant"
+                                        }
+                                    }
+                                },
+                                "prix_gros": {
+                                    "type": "object",
+                                    "required": [
+                                        "avant",
+                                        "apres"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "avant": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/montant"
+                                                }
+                                            ]
+                                        },
+                                        "apres": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/montant"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "gros_quantite_min": {
+                                    "type": "object",
+                                    "required": [
+                                        "avant",
+                                        "apres"
+                                    ],
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "avant": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/quantite"
+                                                }
+                                            ]
+                                        },
+                                        "apres": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/quantite"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -7655,6 +8076,59 @@ const contractV2Schemas = <String, String>{
                                 "numero": {
                                     "type": "integer",
                                     "minimum": 1
+                                }
+                            }
+                        },
+                        "produit_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacités produit.creation / produit.modification (2.1 lot 10) : produit serveur désigné par produit_uuid (lui-même, ou le produit auquel il est rattaché ; l’uuid du terminal reste alors un alias sans limite)."
+                        },
+                        "produit_resolution": {
+                            "type": "object",
+                            "description": "2.1 lot 10 : décision appliquée à une creation_produit ou une modification_produit.",
+                            "required": [
+                                "decision",
+                                "champs_serveur",
+                                "decide_par"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "decision": {
+                                    "enum": [
+                                        "creee",
+                                        "rattachee",
+                                        "creee_distincte",
+                                        "appliquee",
+                                        "sans_effet",
+                                        "arbitree"
+                                    ]
+                                },
+                                "champs_serveur": {
+                                    "type": "array",
+                                    "uniqueItems": true,
+                                    "maxItems": 10,
+                                    "description": "Champs de la modification où la valeur du serveur a été gardée par arbitrage.",
+                                    "items": {
+                                        "enum": [
+                                            "nom",
+                                            "reference",
+                                            "categorie_uuid",
+                                            "prix",
+                                            "prix_gros",
+                                            "gros_quantite_min"
+                                        ]
+                                    }
+                                },
+                                "decide_par": {
+                                    "oneOf": [
+                                        {
+                                            "type": "null"
+                                        },
+                                        {
+                                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                                        }
+                                    ],
+                                    "description": "Utilisateur qui a arbitré ; null sans arbitrage."
                                 }
                             }
                         }

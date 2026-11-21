@@ -1,0 +1,13 @@
+{
+    "operation_uuid": "a0000000-0000-4000-8000-000000000102",
+    "etat": "integree",
+    "version_etat": "1",
+    "raison": null,
+    "details": {
+        "produit_resolution": {
+            "decision": "fusionnee",
+            "champs_serveur": [],
+            "decide_par": null
+        }
+    }
+}

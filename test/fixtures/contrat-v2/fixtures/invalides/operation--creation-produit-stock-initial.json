@@ -1,0 +1,32 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000104",
+    "type": "creation_produit",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 53,
+    "cree_le": "2026-11-21T08:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "produit_uuid": "c3000000-0000-4000-8000-000000000001",
+        "nom": "Gâteau du jour",
+        "reference": "GAT-JOUR",
+        "codes_barres": [
+            "6190000000999"
+        ],
+        "categorie_uuid": null,
+        "prix": 1500,
+        "prix_achat": null,
+        "prix_gros": null,
+        "gros_quantite_min": null,
+        "stock_illimite": true,
+        "stock_initial": "5.000000"
+    },
+    "empreinte": "9000c153c0fa117a9fd90bd7c86c564b50413a97272b09f97c0c96da37b192cf"
+}

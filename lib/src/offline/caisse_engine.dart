@@ -8,6 +8,7 @@ import '../passes/pass_rules.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
 import '../restaurant/resto_interface.dart';
+import 'catalogue_edit.dart';
 import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -92,9 +93,12 @@ Map<CartLine, List<LotSegment>> allocateLots(Snapshot s, List<CartLine> lines) {
 }
 
 class OfflineRefusal implements Exception {
-  const OfflineRefusal(this.message);
+  const OfflineRefusal(this.message, {this.code});
 
   final String message;
+
+  /// Code d'erreur stable pour l'adaptateur (ex. `code_deja_utilise`) ; null : refus ordinaire.
+  final String? code;
 
   @override
   String toString() => message;
@@ -252,6 +256,43 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Prix modifiable à la vente (2.1 lot 9) : capacité `prix.modifiable` annoncée et accordée.
   bool get editablePriceSupported => false;
+
+  /// Catalogue hors connexion (2.1 lot 10) : capacités `produit.creation` et `produit.modification` accordées.
+  bool get productCreationSupported => false;
+  bool get productEditSupported => false;
+
+  /// Pourquoi [operator] ne peut pas créer (ou modifier) une fiche, ou null.
+  String? productCreateBlocker(Operator? operator) {
+    if (!productCreationSupported) return 'Création de produit non disponible sur ce terminal.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'produits_creer')) return '${operator.name} n’a pas le droit de créer un produit.';
+    return null;
+  }
+
+  String? productEditBlocker(Operator? operator) {
+    if (!productEditSupported) return 'Modification de produit non disponible sur ce terminal.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'produits_modifier')) return '${operator.name} n’a pas le droit de modifier un produit.';
+    return null;
+  }
+
+  /// Catégories actives proposées dans la fiche produit (uuid, nom).
+  List<({String uuid, String name})> get productCategories => const [];
+
+  /// Champs modifiables d'une fiche du catalogue local, ou null si le produit est inconnu.
+  ProductFields? productFields(int productId) => null;
+
+  /// Crée une fiche sur ce terminal : vendable tout de suite ici, envoyée au serveur avant toute vente qui la cite.
+  Future<Product> createProduct(Operator operator, NewProduct product, {String? operationUuid}) =>
+      throw const OfflineRefusal('Création de produit non disponible sur ce terminal.');
+
+  /// Modifie une fiche : [changes] porte seulement les champs changés (`nom`, `reference`, `categorie_uuid`, `prix`,
+  /// `prix_gros`, `gros_quantite_min`), aux formats du contrat.
+  Future<Product> updateProduct(Operator operator, int productId, Map<String, Object?> changes, {String? operationUuid}) =>
+      throw const OfflineRefusal('Modification de produit non disponible sur ce terminal.');
+
+  /// Créations et modifications de ce terminal, les plus récentes d'abord.
+  Future<List<CatalogueChange>> catalogueChanges() async => const [];
 
   /// Plafond d'un prix saisi, en francs (celui de la caisse web).
   static const maxEnteredPrice = 1000000000;

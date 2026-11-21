@@ -1,0 +1,19 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000101",
+    "etat": "integree",
+    "version_etat": "1795248000000",
+    "raison": null,
+    "vente": null,
+    "mouvements": [],
+    "couverture": {
+        "curseur": null
+    },
+    "details": {
+        "produit_uuid_canonique": "c0000000-0000-4000-8000-000000000002",
+        "produit_resolution": {
+            "decision": "rattachee",
+            "champs_serveur": [],
+            "decide_par": "3"
+        }
+    }
+}

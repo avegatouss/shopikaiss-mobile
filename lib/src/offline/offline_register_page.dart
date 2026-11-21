@@ -27,6 +27,7 @@ import 'money.dart';
 import 'pass_sheet.dart';
 import 'payment_dialog.dart';
 import 'pending_operations_page.dart';
+import 'product_editor.dart';
 import 'receipt_settings.dart';
 import 'ticket.dart';
 import 'web_rules.dart';
@@ -1374,6 +1375,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _toggleLocalPrices();
       } else if (choice == 'tickets') {
         _ticketSettings();
+      } else if (choice == 'produit') {
+        _newProduct();
+      } else if (choice == 'produits_suivi') {
+        showCatalogueChanges(context, _engine);
       }
     },
     itemBuilder: (context) => [
@@ -1383,6 +1388,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
       if (_operator != null && _engine.canCloseSession(_operator!)) const PopupMenuItem(value: 'tickets', child: Text('Tickets : logo, QR et exemplaires')),
+      if (_engine.productCreateBlocker(_operator) == null) const PopupMenuItem(value: 'produit', child: Text('Nouveau produit')),
+      if (_engine.productCreationSupported || _engine.productEditSupported)
+        const PopupMenuItem(value: 'produits_suivi', child: Text('Produits créés ou modifiés ici')),
       if (_canRememberPrices) CheckedPopupMenuItem(value: 'prix_locaux', checked: _localPrices.enabled, child: const Text('Mémoriser les prix saisis')),
       if (_operator != null && _engine.canCloseSession(_operator!))
         PopupMenuItem(value: 'cloture', enabled: _cart.isEmpty, child: const Text('Clôturer la session')),
@@ -1663,6 +1671,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final threshold = product.alertThreshold;
     final low = !product.unlimitedStock && threshold != null && stock <= threshold;
     final labels = [
+      ?productLocalLabel(product.localState),
       if (low) 'Stock faible',
       ?promotion,
       if (product.isNew(_engine.newBadgeDays, now)) 'Nouveau',
@@ -1730,6 +1739,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       ),
       trailing: Text(formatFcfa(_shownPrice(product)), style: const TextStyle(fontWeight: FontWeight.bold)),
       onTap: () => _add(product, null),
+      onLongPress: () => _editProduct(product),
     );
   }
 
@@ -1750,6 +1760,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       color: Color.alphaBlend(_palette.primaryContainer.withValues(alpha: .45), Colors.white),
       child: InkWell(
         onTap: () => _add(product, null),
+        onLongPress: () => _editProduct(product),
         child: Padding(
           padding: const EdgeInsets.all(8),
           child: Column(
@@ -2618,6 +2629,31 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       saved: ' : la vente est bien enregistrée.',
       bytes: settings.saleBytes(printed, paperWidth: width, compact: compact, copies: duplicate ? 1 : null),
     );
+  }
+
+  /// Catalogue hors connexion (2.1 lot 10) : nouvelle fiche, vendable tout de suite ici.
+  Future<void> _newProduct() async {
+    final operator = _operator;
+    if (operator == null) return;
+    final product = await showProductEditor(context, _engine, operator);
+    if (product == null || !mounted) return;
+    setState(() {});
+    _toast('« ${product.name} » créé : vendable sur ce terminal, envoyé au serveur à la prochaine synchronisation.');
+  }
+
+  /// Appui long sur un produit : modifier sa fiche, si le caissier en a le droit.
+  Future<void> _editProduct(Product product) async {
+    final operator = _operator;
+    final blocker = _engine.productEditBlocker(operator);
+    final fields = _engine.productFields(product.id);
+    if (operator == null || blocker != null || fields == null) {
+      if (_engine.productEditSupported && blocker != null) _toast(blocker);
+      return;
+    }
+    final saved = await showProductEditor(context, _engine, operator, existing: fields);
+    if (saved == null || !mounted) return;
+    setState(() {});
+    _toast('Fiche « ${saved.name} » modifiée : envoyée au serveur à la prochaine synchronisation.');
   }
 
   /// Réglages des tickets de cette boutique sur ce terminal ; accessibles sans imprimante (aperçu à l'écran sinon).

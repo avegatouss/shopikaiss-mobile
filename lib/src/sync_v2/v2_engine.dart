@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
+import '../offline/catalogue_edit.dart';
 import '../offline/money.dart';
 import '../passes/pass_rules.dart';
 import '../offline/web_rules.dart';
@@ -206,6 +207,8 @@ class V2Engine extends CaisseEngine {
           if (announceRestaurant) CaisseV2Client.restaurantCapability,
           CaisseV2Client.zLocalCapability,
           CaisseV2Client.editablePriceCapability,
+          CaisseV2Client.productCreateCapability,
+          CaisseV2Client.productEditCapability,
         ],
       ],
     );
@@ -1045,6 +1048,267 @@ class V2Engine extends CaisseEngine {
   @override
   bool get editablePriceSupported => v2.contract21 && _serverOffers(CaisseV2Client.editablePriceCapability);
 
+  // ------------------------------------------------------------------ Catalogue hors connexion (2.1 lot 10)
+
+  @override
+  bool get productCreationSupported => v2.contract21 && _serverOffers(CaisseV2Client.productCreateCapability);
+
+  @override
+  bool get productEditSupported => v2.contract21 && _serverOffers(CaisseV2Client.productEditCapability);
+
+  /// État local par uuid de produit (`cree_local`, `modifie_local`, `conflit`), calculé à la reconstruction.
+  Map<String, String> _localStates = const {};
+  List<({String uuid, String name})> _categoryChoices = const [];
+
+  @override
+  List<({String uuid, String name})> get productCategories => _categoryChoices;
+
+  static const _productOperations = {'creation_produit', 'modification_produit'};
+
+  /// Arbitrages qui sont des conflits à trancher (note A §6) ; les autres `produit.*` sont des refus.
+  static const _conflictCodes = {'produit.correspondance', 'produit.conflit_champs'};
+
+  /// Uuid local d'une création rattachée → produit existant (note A §7), gardés sans limite.
+  Map<String, String> _productAliases = const {};
+
+  static String _arbitrationState(Map? reason) => _conflictCodes.contains(reason?['code']) ? 'conflit' : 'refuse';
+
+  Future<Map<String, dynamic>?> _productResult(String operationUuid) async {
+    final raw = await v2.read('${V2Keys.productResultPrefix}$operationUuid');
+    return raw == null ? null : Map<String, dynamic>.from(jsonDecode(raw) as Map);
+  }
+
+  /// Superpose au catalogue reçu les créations et modifications de ce terminal qui ne sont pas encore publiées :
+  /// création en attente ou à arbitrer (vendable ici), modification en attente (valeurs `apres` affichées). Une création
+  /// rattachée à un autre produit disparaît : le produit du serveur la remplace, les ventes déjà faites restent telles.
+  Future<Map<String, String>> _catalogueOverlay(Map<String, Map<String, dynamic>> products, Map<String, Map<String, dynamic>> barcodes) async {
+    final states = <String, String>{};
+    final aliases = <String, String>{};
+    final rows = (await v2.operationRows()).reversed.where((r) => _productOperations.contains((r['operation'] as Map)['type']));
+    for (final row in rows) {
+      if ((row['operation'] as Map)['type'] == 'creation_produit' && row['etat'] == V2OperationState.integrated) {
+        final local = ((row['operation'] as Map)['contenu'] as Map)['produit_uuid'] as String;
+        final canonical = (await _productResult((row['operation'] as Map)['uuid'] as String))?['produit_uuid_canonique'] as String?;
+        if (canonical != null && canonical != local) aliases[local] = canonical;
+      }
+      final operation = row['operation'] as Map;
+      final content = operation['contenu'] as Map;
+      final uuid = content['produit_uuid'] as String;
+      final state = row['etat'] as String;
+      if (state == V2OperationState.rejected || state == V2OperationState.resolved) continue;
+      final pending = V2OperationState.unsent.contains(state) || state == V2OperationState.received;
+      final integratedAt = state == V2OperationState.integrated ? DateTime.tryParse('${row['maj_le']}') : null;
+      // Intégrée depuis peu : le journal n'a peut-être pas encore publié la fiche ; la version locale reste affichée.
+      final fresh = integratedAt != null && now.difference(integratedAt) < _publicationDelay;
+      if (operation['type'] == 'creation_produit') {
+        if (products.containsKey(uuid)) continue;
+        if (!pending && state != V2OperationState.arbitration && !fresh) continue;
+        if (fresh && ((await _productResult(operation['uuid'] as String))?['produit_uuid_canonique'] ?? uuid) != uuid) continue;
+        products[uuid] = {
+          'nom': content['nom'],
+          'reference': content['reference'],
+          'categorie': null,
+          'categorie_uuid': content['categorie_uuid'],
+          'prix': content['prix'],
+          'prix_gros': content['prix_gros'],
+          'gros_quantite_min': content['gros_quantite_min'],
+          'stock_illimite': content['stock_illimite'],
+          'actif': true,
+          'vente_locale': true,
+          'marque': null,
+          'fournisseur': null,
+          'unite': null,
+          'favori': false,
+          'promotions': const <Map<String, dynamic>>[],
+          'image': null,
+          'seuil_alerte': null,
+          'cree_le': operation['cree_le'],
+        };
+        for (final code in (content['codes_barres'] as List).cast<String>()) {
+          barcodes['local:$uuid:$code'] = {'code': code, 'produit_uuid': uuid, 'conditionnement_uuid': null};
+        }
+        states[uuid] = state == V2OperationState.arbitration ? _arbitrationState(row['raison'] as Map?) : 'cree_local';
+      } else {
+        final target = products[uuid];
+        if (target == null) continue;
+        if (state == V2OperationState.arbitration) {
+          states[uuid] = _arbitrationState(row['raison'] as Map?);
+          continue;
+        }
+        if (!pending && !fresh) continue;
+        products[uuid] = {
+          ...target,
+          for (final f in (content['champs'] as Map).entries) f.key as String: (f.value as Map)['apres'],
+        };
+        states.putIfAbsent(uuid, () => 'modifie_local');
+      }
+    }
+    _productAliases = aliases;
+    return states;
+  }
+
+  @override
+  ProductFields? productFields(int productId) {
+    final uuid = _productUuids[productId];
+    final p = uuid == null ? null : _products[uuid];
+    if (uuid == null || p == null) return null;
+    return ProductFields(
+      productId: productId,
+      uuid: uuid,
+      name: p['nom'] as String,
+      reference: p['reference'] as String?,
+      barcodes: [for (final c in snapshot?.products.where((x) => x.id == productId).firstOrNull?.codes ?? const <ProductCode>[]) if (c.packagingId == null) c.code],
+      categoryUuid: p['categorie_uuid'] as String?,
+      price: (p['prix'] as num).toInt(),
+      wholesalePrice: (p['prix_gros'] as num?)?.toInt(),
+      wholesaleMin: p['gros_quantite_min'] as String?,
+      unlimitedStock: p['stock_illimite'] == true,
+      localState: _localStates[uuid],
+    );
+  }
+
+  void _requireCatalogue(String? blocker) {
+    _requireSelling(allowWithoutSession: true);
+    if (blocker != null) throw OfflineRefusal(blocker);
+  }
+
+  Future<Product> _productAfterWrite(String uuid) async {
+    await _rebuild();
+    await _afterWrite();
+    final id = _ids[uuid];
+    return snapshot!.products.firstWhere((p) => p.id == id);
+  }
+
+  @override
+  Future<Product> createProduct(Operator operator, NewProduct product, {String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) {
+        final operation = existing['operation'] as Map;
+        if (operation['type'] != 'creation_produit') throw const OfflineRefusal('Identifiant d’opération déjà utilisé.');
+        final id = _ids[(operation['contenu'] as Map)['produit_uuid']];
+        final found = snapshot?.products.where((p) => p.id == id).firstOrNull;
+        if (found != null) return found;
+        throw const OfflineRefusal('Produit déjà enregistré, plus au catalogue local.');
+      }
+    }
+    _requireCatalogue(productCreateBlocker(operator));
+    final name = CatalogueValidation.name(product.name);
+    final reference = CatalogueValidation.reference(product.reference);
+    final codes = CatalogueValidation.barcodes(product.barcodes);
+    final price = CatalogueValidation.amount(product.price, 'Prix de vente');
+    final purchase = CatalogueValidation.optionalAmount(product.purchasePrice, 'Prix d’achat');
+    final wholesale = CatalogueValidation.optionalAmount(product.wholesalePrice, 'Prix de gros');
+    final minimum = CatalogueValidation.quantity(product.wholesaleMin);
+    if (wholesale != null && wholesale > price) throw const OfflineRefusal('Le prix de gros ne peut pas dépasser le prix de vente.');
+    final category = product.categoryUuid;
+    if (category != null && !_categoryChoices.any((c) => c.uuid == category)) throw const OfflineRefusal('Catégorie inconnue sur ce terminal.');
+    for (final code in codes) {
+      final used = snapshot?.byCode(code);
+      if (used != null) throw OfflineRefusal('Code-barres « $code » déjà utilisé par « ${used.$1.name} ».', code: CatalogueValidation.codeUsed);
+    }
+    final uuid = _newUuid();
+    await _record(operationUuid ?? _newUuid(), 'creation_produit', operator, (_) => {
+      'produit_uuid': uuid,
+      'nom': name,
+      'reference': reference,
+      'codes_barres': codes,
+      'categorie_uuid': category,
+      'prix': price,
+      'prix_achat': purchase,
+      'prix_gros': wholesale,
+      'gros_quantite_min': minimum,
+      'stock_illimite': product.unlimitedStock,
+    });
+    return _productAfterWrite(uuid);
+  });
+
+  static const _editableFields = {'nom', 'reference', 'categorie_uuid', 'prix', 'prix_gros', 'gros_quantite_min'};
+
+  @override
+  Future<Product> updateProduct(Operator operator, int productId, Map<String, Object?> changes, {String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) {
+        if ((existing['operation'] as Map)['type'] != 'modification_produit') throw const OfflineRefusal('Identifiant d’opération déjà utilisé.');
+        final found = snapshot?.products.where((p) => p.id == productId).firstOrNull;
+        if (found != null) return found;
+        throw const OfflineRefusal('Produit inconnu sur ce terminal.', code: CatalogueValidation.unknownProduct);
+      }
+    }
+    _requireCatalogue(productEditBlocker(operator));
+    final uuid = _productUuids[productId];
+    final current = uuid == null ? null : _products[uuid];
+    if (uuid == null || current == null) throw const OfflineRefusal('Produit inconnu sur ce terminal.', code: CatalogueValidation.unknownProduct);
+    final unknown = changes.keys.where((k) => !_editableFields.contains(k));
+    if (unknown.isNotEmpty) throw OfflineRefusal('Champ non modifiable : ${unknown.join(', ')}.');
+    final next = <String, Object?>{};
+    for (final e in changes.entries) {
+      next[e.key] = switch (e.key) {
+        'nom' => CatalogueValidation.name('${e.value ?? ''}'),
+        'reference' => CatalogueValidation.reference(e.value as String?),
+        'categorie_uuid' => e.value == null || _categoryChoices.any((c) => c.uuid == e.value) ? e.value : throw const OfflineRefusal('Catégorie inconnue sur ce terminal.'),
+        'prix' => CatalogueValidation.amount(e.value as int?, 'Prix de vente'),
+        'prix_gros' => CatalogueValidation.optionalAmount(e.value as int?, 'Prix de gros'),
+        _ => CatalogueValidation.quantity(e.value as String?),
+      };
+    }
+    final wholesale = next.containsKey('prix_gros') ? next['prix_gros'] as int? : (current['prix_gros'] as num?)?.toInt();
+    final price = next.containsKey('prix') ? next['prix'] as int : (current['prix'] as num).toInt();
+    if (wholesale != null && wholesale > price) throw const OfflineRefusal('Le prix de gros ne peut pas dépasser le prix de vente.');
+    final fields = {
+      for (final e in next.entries)
+        if (current[e.key] != e.value) e.key: {'avant': current[e.key], 'apres': e.value},
+    };
+    if (fields.isEmpty) throw const OfflineRefusal('Aucun changement à enregistrer.', code: CatalogueValidation.noChange);
+    final revision = (await v2.revisions('produit'))[uuid];
+    await _record(operationUuid ?? _newUuid(), 'modification_produit', operator, (_) => {
+      'produit_uuid': uuid,
+      'revision_base': revision,
+      'champs': fields,
+    });
+    return _productAfterWrite(uuid);
+  });
+
+  @override
+  Future<List<CatalogueChange>> catalogueChanges() async {
+    final changes = <CatalogueChange>[];
+    for (final row in await v2.operationRows()) {
+      final operation = row['operation'] as Map;
+      if (!_productOperations.contains(operation['type'])) continue;
+      final content = operation['contenu'] as Map;
+      final uuid = content['produit_uuid'] as String;
+      final result = await _productResult(operation['uuid'] as String);
+      final state = row['etat'] as String;
+      final reason = row['raison'] as Map?;
+      final creation = operation['type'] == 'creation_produit';
+      final canonical = result?['produit_uuid_canonique'] as String?;
+      final id = _ids[canonical ?? uuid] ?? _ids[uuid];
+      changes.add(CatalogueChange(
+        operationUuid: operation['uuid'] as String,
+        kind: creation ? 'creation' : 'modification',
+        productUuid: uuid,
+        productId: id != null && (snapshot?.products.any((p) => p.id == id) ?? false) ? id : null,
+        name: creation
+            ? content['nom'] as String
+            : ((content['champs'] as Map)['nom'] as Map?)?['apres'] as String? ?? (_products[uuid]?['nom'] as String? ?? 'Produit'),
+        state: switch (state) {
+          V2OperationState.toSend || V2OperationState.sendUnknown || V2OperationState.received => 'a_synchroniser',
+          V2OperationState.arbitration => _arbitrationState(reason),
+          V2OperationState.rejected || V2OperationState.resolved => 'refuse',
+          _ => creation && canonical != null && canonical != uuid ? 'rattache' : 'integre',
+        },
+        reason: reason?['message'] as String?,
+        canonicalUuid: canonical,
+        decision: (result?['produit_resolution'] as Map?)?['decision'] as String?,
+        createdAt: DateTime.tryParse('${operation['cree_le']}'),
+      ));
+    }
+    return changes;
+  }
+
   @override
   Future<Set<String>> publishedCashCodes() async => {
     for (final m in (await v2.entities('moyen_paiement')).values) if (m['especes'] == true && m['code'] is String) m['code'] as String,
@@ -1674,7 +1938,8 @@ class V2Engine extends CaisseEngine {
   Future<Map<int, BigInt>> soldSinceSnapshot() async {
     final sold = <int, BigInt>{};
     for (final e in (await v2.uncoveredStock()).entries) {
-      final id = _ids[e.key.split(':').first];
+      final key = e.key.split(':').first;
+      final id = _ids[_productAliases[key] ?? key];
       if (id != null) sold[id] = (sold[id] ?? BigInt.zero) - BigInt.from(e.value);
     }
     return sold;
@@ -1797,6 +2062,7 @@ class V2Engine extends CaisseEngine {
     final products = await v2.entities('produit');
     final packagings = await v2.entities('conditionnement');
     final barcodes = await v2.entities('code_barre');
+    final localStates = await _catalogueOverlay(products, barcodes);
     final stock = await v2.entities('stock.projection');
     final policies = {for (final p in (await v2.entities('politique')).values) p['cle_politique'] as String: p['valeur']};
     _returnRules = (
@@ -1814,6 +2080,11 @@ class V2Engine extends CaisseEngine {
     final pointOfSale = _resto?.pointOfSaleUuid;
     _restoInterface = RestoInterface.fromJson(pointOfSale == null ? null : (await v2.entities('restaurant.interface'))['interface:$pointOfSale']);
     final categories = await v2.entities('categorie');
+    _categoryChoices = [
+      for (final c in (categories.entries.where((c) => c.value['actif'] == true).toList()
+        ..sort((a, b) => ((a.value['ordre'] as int?) ?? 0).compareTo((b.value['ordre'] as int?) ?? 0))))
+        (uuid: c.key, name: c.value['nom'] as String),
+    ];
     String? categoryOf(Map<String, dynamic> product) {
       final category = categories[product['categorie_uuid']];
       return category != null && category['actif'] == true ? category['nom'] as String : product['categorie'] as String?;
@@ -1925,6 +2196,7 @@ class V2Engine extends CaisseEngine {
               'stock_illimite': e.value['stock_illimite'],
               'stock': (stock[e.key]?['quantite'] as String?) ?? '0',
               if (e.value['prix_modifiable'] == true) 'prix_modifiable': true,
+              'etat_local': ?localStates[e.key],
               if (e.value['gere_par_lots'] == true) ..._lotView(e.key, e.value, lotsOf[e.key] ?? const [], stock, estimated),
               'conditionnements': [
                 for (final k in packagingsOf[e.key] ?? const <MapEntry<String, Map<String, dynamic>>>[])
@@ -1944,6 +2216,7 @@ class V2Engine extends CaisseEngine {
     _revisions = {...productRevisions, ...packagingRevisions};
     _ids = ids;
     _productUuids = {for (final e in products.keys) ids[e]!: e};
+    _localStates = localStates;
     _packagingUuids = {for (final e in packagings.keys) ids[e]!: e};
     _rights = rights;
     _discountCaps = caps;

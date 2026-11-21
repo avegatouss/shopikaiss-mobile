@@ -945,6 +945,60 @@
             "schema": "donnees-restaurant-1.json#/$defs/restaurant.interface",
             "valide": false,
             "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "valides/operation--creation-produit.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--modification-produit.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--modification-produit-locale.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--creation-produit-stock-initial.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "propriété inconnue"
+        },
+        {
+            "fichier": "invalides/operation--creation-produit-code-barres-espace.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/operation--modification-produit-champ-stock.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "propriété inconnue"
+        },
+        {
+            "fichier": "valides/operations-resultat--creation-produit-rattachee.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-resultat--creation-produit-correspondance.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-2.1--operation-etat-modification-arbitree.json",
+            "schema": "donnees-2.1.json#/$defs/operation_etat",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-2.1--operation-etat-decision-inconnue.json",
+            "schema": "donnees-2.1.json#/$defs/operation_etat",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
         }
     ]
 }

@@ -129,6 +129,11 @@ class CaisseV2Client {
   /// en `prix_vente_modifie`. Accordée seulement avec `contrat.2_1`.
   static const editablePriceCapability = 'prix.modifiable';
 
+  /// Catalogue hors connexion (2.1 lot 10) : opérations `creation_produit` et `modification_produit`, droits
+  /// `produits_creer` et `produits_modifier`. Chacune accordée seulement avec `contrat.2_1`.
+  static const productCreateCapability = 'produit.creation';
+  static const productEditCapability = 'produit.modification';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;
