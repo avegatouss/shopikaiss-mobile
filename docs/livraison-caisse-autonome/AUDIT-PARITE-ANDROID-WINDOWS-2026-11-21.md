@@ -15,6 +15,8 @@ Validation du premier lot : 549 tests locaux réussis, 3 tests natifs réussis, 
 
 Éléments encore nécessaires hors C : terminal de démonstration réservé pour la recette restaurant ; imprimante POS-80 connectée et retour papier ; matériel d'affichage pour la recette physique ; contrats A/B pour le prix manuel et l'autorisation de survente. Les écarts côté Android et les autres contrats serveur de l'inventaire initial restent à leurs responsables. Aucune activation restaurant de TBC n'a été modifiée.
 
+Complément Windows : ouverture de la caisse web externe avec repli `/caisse` sur réponse 404/405 de `/caisse/demarrer`. Sonde HTTPS sans identifiants, sans suivi des redirections, limitée à 3 secondes ; une redirection de connexion ou une erreur réseau conserve la route normale. Une page 404 visible uniquement après authentification dans le navigateur externe ne peut pas être observée par cette sonde. Validation : 30 tests ciblés (route et caisse) réussis.
+
 ## Inventaire initial conservé
 
 ## Périmètre et preuve

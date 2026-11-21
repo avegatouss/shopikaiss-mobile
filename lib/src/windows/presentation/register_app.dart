@@ -342,8 +342,9 @@ class _RegisterState extends State<_Register> {
 
   Future<void> _backOffice({bool cashRegister = false}) async {
     final uri = cashRegister
-        ? caisseStartWebsite(c.webOrigin)
+        ? await resolveCaisseStartWebsite(c.webOrigin)
         : _screen.backOfficeUri ?? caisseWebsite(c.webOrigin, '/accueil');
+    if (!mounted) return;
     if (uri == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
