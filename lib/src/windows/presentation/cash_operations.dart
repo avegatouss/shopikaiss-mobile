@@ -268,7 +268,11 @@ class _CashOperationsState extends State<CashOperationsDialog> {
         setState(() => busy = false);
         await showDialog<void>(
           context: context,
-          builder: (_) => CashDocumentsDialog(host: c.host, originalZ: true),
+          builder: (_) => CashDocumentsDialog(
+            host: c.host,
+            originalZ: true,
+            editionFile: c.closureEditionFile,
+          ),
         );
       }
     } on HostFailure catch (e) {
@@ -420,7 +424,10 @@ class _CashOperationsState extends State<CashOperationsDialog> {
                 ? null
                 : () => showDialog<void>(
                     context: context,
-                    builder: (_) => CashDocumentsDialog(host: c.host),
+                    builder: (_) => CashDocumentsDialog(
+                      host: c.host,
+                      editionFile: c.closureEditionFile,
+                    ),
                   ),
             icon: const Icon(Icons.print),
             label: Text(

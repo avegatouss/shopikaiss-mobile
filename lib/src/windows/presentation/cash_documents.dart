@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
+
+import '../platform/closure_edition_journal.dart';
 
 import 'package:flutter/material.dart';
 
@@ -10,9 +13,11 @@ class CashDocumentsDialog extends StatefulWidget {
     super.key,
     required this.host,
     this.originalZ = false,
+    this.editionFile,
   });
   final WindowsHost host;
   final bool originalZ;
+  final File? editionFile;
   @override
   State<CashDocumentsDialog> createState() => _CashDocumentsState();
 }
@@ -21,17 +26,26 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
   List<Map> documents = [];
   bool busy = true;
   String? message;
+  late final editions = ClosureEditionJournal(
+    widget.host,
+    file: widget.editionFile,
+  );
   String closureKind = 'pre-x';
   String closureVersion = 'detailed';
   bool originalRequested = false;
 
   Future<void> printClosure() async {
-    String? editionId;
     setState(() {
       busy = true;
       message = null;
     });
     try {
+      await editions.load();
+      if (editions.pending != null) {
+        throw StateError(
+          "Édition précédente à vérifier avant une nouvelle impression.",
+        );
+      }
       final unavailable = await ReceiptPrinting.unavailableReason();
       if (unavailable != null) {
         message = unavailable;
@@ -48,33 +62,36 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
                     closureKind == 'z-session'),
           },
         );
-        editionId = result['edition_id'] as String?;
+        final editionId = result['edition_id'] as String?;
+        if (editionId != null) await editions.begin(editionId);
         if (closureKind == 'z-session') originalRequested = true;
         message = await ReceiptPrinting.printLines(
           (result['lines'] as List).cast<String>(),
           escposBytes: base64Decode(result['escpos_base64'] as String),
+          onTransmitted: editionId == null ? null : editions.confirm,
         );
-        await widget.host.call(
-          HostCommand.cashClosureEdition,
-          arguments: {'edition_id': result['edition_id']},
-        );
-        editionId = null;
       }
     } catch (e) {
       message = e is HostFailure
           ? e.message
           : 'Impression à vérifier. Aucune session clôturée par cette action.';
-    } finally {
-      if (editionId != null) {
-        try {
-          await widget.host.call(
-            HostCommand.cashClosureEdition,
-            arguments: {'edition_id': editionId, 'discard': true},
-          );
-        } catch (_) {
-          /* Host restart also releases the bounded cache. */
-        }
+    }
+    if (mounted) setState(() => busy = false);
+  }
+
+  Future<void> resolveEdition(bool transmitted) async {
+    setState(() => busy = true);
+    try {
+      if (transmitted) {
+        await editions.confirm();
+      } else {
+        await editions.discard();
       }
+      message = 'Vérification enregistrée. Aucun ticket renvoyé.';
+    } catch (e) {
+      message = e is HostFailure
+          ? e.message
+          : 'Confirmation à reprendre, sans réimpression.';
     }
     if (mounted) setState(() => busy = false);
   }
@@ -92,6 +109,7 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
       message = null;
     });
     try {
+      await editions.load();
       final result = await widget.host.call(HostCommand.cashDocuments);
       documents = (result['items'] as List).cast<Map>();
     } catch (_) {
@@ -134,6 +152,24 @@ class _CashDocumentsState extends State<CashDocumentsDialog> {
         children: [
           if (busy) const LinearProgressIndicator(),
           if (message != null) Text(message!),
+          if (editions.pending != null)
+            Wrap(
+              spacing: 8,
+              children: [
+                const Text(
+                  'Édition précédente : vérifier le papier et la file Windows.',
+                ),
+                TextButton(
+                  onPressed: busy ? null : () => resolveEdition(true),
+                  child: const Text('Confirmer la transmission'),
+                ),
+                if (editions.pending?['state'] == 'prepared')
+                  TextButton(
+                    onPressed: busy ? null : () => resolveEdition(false),
+                    child: const Text('Confirmer aucun envoi'),
+                  ),
+              ],
+            ),
           Row(
             children: [
               Expanded(

@@ -109,6 +109,7 @@ Future<bool> hasUnresolvedSiteIntent(String directory) async {
     'pending-return-v2.json',
     'pending-close-v2.json',
     'pending-restaurant-v1.json',
+    'pending-closure-edition-v1.json',
   ]) {
     if (await File(p.join(directory, name)).exists()) return true;
   }

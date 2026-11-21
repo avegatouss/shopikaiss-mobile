@@ -370,7 +370,7 @@ class _RestaurantPaymentState extends State<RestaurantPayment> {
                         ),
                       ),
                     const Text(
-                    'Vérifiez les montants et les références avant de confirmer.',
+                      'Vérifiez les montants et les références avant de confirmer.',
                     ),
                   ],
                 ),

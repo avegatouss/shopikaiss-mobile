@@ -166,6 +166,7 @@ class ReceiptPrinting {
     List<String> lines, {
     bool compact = false,
     Uint8List? escposBytes,
+    Future<void> Function()? onTransmitted,
   }) async {
     if (lines.isEmpty || lines.length > 10000) {
       throw const FormatException('Ticket invalide');
@@ -189,6 +190,7 @@ class ReceiptPrinting {
         escposBytes ?? offlineTicketBytes(lines, compact: compact),
       );
       if (outcome == RawPrintOutcome.transmitted) {
+        await onTransmitted?.call();
         return 'Ticket ESC/POS transmis au spouleur. Vérifiez le papier et la coupe.';
       }
       if (!usePdfFallback(outcome, saved['pdf_fallback'] != false)) {
@@ -217,6 +219,7 @@ class ReceiptPrinting {
       format: receipt.format,
       dynamicLayout: false,
     );
+    if (sent) await onTransmitted?.call();
     return sent
         ? '${fallbackUsed ? 'Secours PDF : ' : ''}Ticket transmis au pilote. Vérifiez la sortie papier.'
         : 'Impression annulée ou non confirmée. Vente conservée.';

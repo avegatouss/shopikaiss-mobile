@@ -194,7 +194,7 @@ void main() {
         arguments: {'kind': 'pre-x', 'version': 'detailed'},
       ),
       throwsA(
-        isA<HostFailure>().having((e) => e.code, 'code', 'operator_required'),
+        isA<HostFailure>().having((e) => e.code, 'code', 'caissier_requis'),
       ),
     );
     expect((await store.operations()).length, before);

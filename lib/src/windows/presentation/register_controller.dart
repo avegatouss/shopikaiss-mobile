@@ -51,6 +51,9 @@ class WindowsRegisterController extends ChangeNotifier {
         ? null
         : File('${journal!.file.parent.path}/pending-restaurant-v1.json'),
   );
+  File? get closureEditionFile => journal == null
+      ? null
+      : File('${journal!.file.parent.path}/pending-closure-edition-v1.json');
   Future<void>? _recovery;
   bool _journalBlocked = false;
 
