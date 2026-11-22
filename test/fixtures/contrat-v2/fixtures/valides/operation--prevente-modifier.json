@@ -1,0 +1,40 @@
+{
+    "uuid": "a1500000-0000-4000-8000-000000000103",
+    "type": "prevente_modifier",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 52,
+    "cree_le": "2026-11-22T08:15:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "2",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "d9a37ca8a23fb0e4b34adba23eb25decb10346451cc30fa34b80f81ec0165156",
+    "contenu": {
+        "prevente_uuid": "a1500000-0000-4000-8000-000000000001",
+        "client": {
+            "nom": "Koffi Aya",
+            "telephone": "0707070707",
+            "client_uuid": null
+        },
+        "retrait_prevu": "2026-11-22T13:00:00Z",
+        "lignes": [
+            {
+                "ligne_uuid": "b1500000-0000-4000-8000-000000000001",
+                "produit_uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+                "conditionnement_uuid": null,
+                "libelle": "Garba poisson",
+                "quantite": "2.000000",
+                "prix_unitaire": 1500,
+                "remise": 0,
+                "total": 3000
+            }
+        ],
+        "total": 3000,
+        "note": null
+    }
+}

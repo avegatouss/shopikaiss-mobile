@@ -1,0 +1,43 @@
+{
+    "boutique_uuid": "0b9c6f2e-6a51-4f7e-9d0a-3c1f8e2b7a10",
+    "fuseau": "Africa/Abidjan",
+    "du": "2026-11-15",
+    "au": "2026-11-22",
+    "genere_le": "2026-11-22T10:00:00Z",
+    "page": {
+        "du": "2026-11-15",
+        "au": "2026-11-18",
+        "suite": "2026-11-19"
+    },
+    "sessions": [],
+    "mouvements": [],
+    "totaux_page": {
+        "entree_especes": 0,
+        "sortie_especes": 0,
+        "autres": 0
+    },
+    "totaux_par_moyen": {
+        "ventes_nombre": 3,
+        "ventes_montant": 4000,
+        "credit": 0,
+        "annulations_nombre": 0,
+        "annulations_montant": 0,
+        "moyens": [
+            {
+                "moyen": "Espèces",
+                "encaisse": 3000,
+                "rembourse": 1000,
+                "net": 2000
+            },
+            {
+                "moyen": "Mobile money",
+                "encaisse": 1000,
+                "rembourse": 0,
+                "net": 1000
+            }
+        ],
+        "encaisse": 4000,
+        "rembourse": 1000,
+        "net": 3000
+    }
+}

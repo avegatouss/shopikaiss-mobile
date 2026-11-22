@@ -1,0 +1,77 @@
+{
+    "uuid": "a1500000-0000-4000-8000-000000000104",
+    "type": "vente",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 53,
+    "cree_le": "2026-11-22T08:15:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "2",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "74acdbc0052060bf8d24bfc4a12613be00a294fa8fe355b47e9256b23eec3d7b",
+    "contenu": {
+        "numero_local": "HL-002-000053",
+        "brouillon_uuid": "a1500000-0000-4000-8000-000000000201",
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+        "client_uuid": null,
+        "tva": {
+            "taux": "0.000000",
+            "incluse": true
+        },
+        "lignes": [
+            {
+                "ligne_uuid": "b1500000-0000-4000-8000-000000000011",
+                "produit_uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+                "conditionnement_uuid": null,
+                "libelle": "Garba poisson",
+                "quantite": "2.000000",
+                "coefficient": "1.000000",
+                "quantite_base": "2.000000",
+                "prix_unitaire": 1500,
+                "remise": 0,
+                "total": 3000,
+                "revision_prix": "4"
+            }
+        ],
+        "remise_globale": 0,
+        "livraison": 0,
+        "totaux": {
+            "brut": 3000,
+            "remises": 0,
+            "base_ht": 3000,
+            "tva": 0,
+            "a_payer": 3000
+        },
+        "paiements": [
+            {
+                "tentative_uuid": "a1500000-0000-4000-8000-000000000301",
+                "moyen": "acompte_prevente",
+                "montant": 2000,
+                "recu": null,
+                "reference": null
+            },
+            {
+                "tentative_uuid": "a1500000-0000-4000-8000-000000000302",
+                "moyen": "especes",
+                "montant": 1000,
+                "recu": 1000,
+                "reference": null
+            }
+        ],
+        "mouvements": [
+            {
+                "mouvement_uuid": "a1500000-0000-4000-8000-000000000401",
+                "produit_uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+                "lot_uuid": null,
+                "variation": "-2.000000"
+            }
+        ],
+        "autorisations": [],
+        "prevente_uuid": "a1500000-0000-4000-8000-000000000001"
+    }
+}

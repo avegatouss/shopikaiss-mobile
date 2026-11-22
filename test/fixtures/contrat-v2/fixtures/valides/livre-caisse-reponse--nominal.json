@@ -1,0 +1,169 @@
+{
+    "boutique_uuid": "0b9c6f2e-6a51-4f7e-9d0a-3c1f8e2b7a10",
+    "fuseau": "Africa/Abidjan",
+    "du": "2026-11-15",
+    "au": "2026-11-22",
+    "genere_le": "2026-11-22T10:00:00Z",
+    "page": {
+        "du": "2026-11-15",
+        "au": "2026-11-22",
+        "suite": null
+    },
+    "sessions": [
+        {
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "jour": "2026-11-20",
+            "terminal_uuid": "7e8f9a0b-1c2d-4e3f-8a5b-6c7d8e9f0a1b",
+            "terminal_nom": "Caisse 1",
+            "operateur_id": "12",
+            "operateur_nom": "Awa Koné",
+            "ouverte_le": "2026-11-20T09:00:00Z",
+            "close_le": "2026-11-20T19:02:11Z",
+            "statut": "close",
+            "fond_initial": 5000
+        }
+    ],
+    "mouvements": [
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T09:00:00Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Ouverture de session (fond de caisse)",
+            "moyen": "Espèces",
+            "entree_especes": 5000,
+            "sortie_especes": 0,
+            "autres": 0,
+            "attendu": null,
+            "compte": null,
+            "ecart": null
+        },
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T09:00:00Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Ventes encaissées",
+            "moyen": "Espèces",
+            "entree_especes": 3000,
+            "sortie_especes": 0,
+            "autres": 0,
+            "attendu": null,
+            "compte": null,
+            "ecart": null
+        },
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T09:00:00Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Remboursements de retours et annulations",
+            "moyen": "Espèces",
+            "entree_especes": 0,
+            "sortie_especes": 1000,
+            "autres": 0,
+            "attendu": null,
+            "compte": null,
+            "ecart": null
+        },
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T09:00:00Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Apports de caisse",
+            "moyen": "Espèces",
+            "entree_especes": 2000,
+            "sortie_especes": 0,
+            "autres": 0,
+            "attendu": null,
+            "compte": null,
+            "ecart": null
+        },
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T09:00:00Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Retraits de caisse",
+            "moyen": "Espèces",
+            "entree_especes": 0,
+            "sortie_especes": 700,
+            "autres": 0,
+            "attendu": null,
+            "compte": null,
+            "ecart": null
+        },
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T09:00:00Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Dépenses payées",
+            "moyen": "Espèces",
+            "entree_especes": 0,
+            "sortie_especes": 300,
+            "autres": 0,
+            "attendu": null,
+            "compte": null,
+            "ecart": null
+        },
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T09:00:00Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Ventes encaissées",
+            "moyen": "Mobile money",
+            "entree_especes": 0,
+            "sortie_especes": 0,
+            "autres": 1000,
+            "attendu": null,
+            "compte": null,
+            "ecart": null
+        },
+        {
+            "jour": "2026-11-20",
+            "date": "2026-11-20T19:02:11Z",
+            "session_uuid": "5d2b8a4c-1f3e-4a6b-8c9d-0e1f2a3b4c5d",
+            "terminal": "Caisse 1",
+            "nature": "Clôture (mode V1)",
+            "moyen": "Espèces",
+            "entree_especes": 0,
+            "sortie_especes": 0,
+            "autres": 0,
+            "attendu": 8300,
+            "compte": 8250,
+            "ecart": -50
+        }
+    ],
+    "totaux_page": {
+        "entree_especes": 10000,
+        "sortie_especes": 2000,
+        "autres": 1000
+    },
+    "totaux_par_moyen": {
+        "ventes_nombre": 3,
+        "ventes_montant": 4000,
+        "credit": 0,
+        "annulations_nombre": 0,
+        "annulations_montant": 0,
+        "moyens": [
+            {
+                "moyen": "Espèces",
+                "encaisse": 3000,
+                "rembourse": 1000,
+                "net": 2000
+            },
+            {
+                "moyen": "Mobile money",
+                "encaisse": 1000,
+                "rembourse": 0,
+                "net": 1000
+            }
+        ],
+        "encaisse": 4000,
+        "rembourse": 1000,
+        "net": 3000
+    }
+}

@@ -754,6 +754,20 @@
                                     "description": "Sessions que le terminal peut ouvrir (et clôturer) tant que le serveur ne les a pas intégrées ; au-delà, il demande une connexion avant d'en ouvrir une autre (Paramètres › Caisse hors ligne, 20 par défaut)."
                                 }
                             }
+                        },
+                        "prevente": {
+                            "description": "Capacité prevente.v1 (lot 15) : option « Prévente / réservations » de la boutique (Paramètres › Règles de gestion). Présente seulement option activée ; absente sans la capacité.",
+                            "type": "object",
+                            "required": [
+                                "actif"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "actif": {
+                                    "type": "boolean",
+                                    "description": "false : l’écran Prévente n’est pas proposé."
+                                }
+                            }
                         }
                     }
                 },
@@ -1889,6 +1903,181 @@
                     "items": {
                         "$ref": "commun.json#/$defs/uuid"
                     }
+                }
+            }
+        },
+        "interface_caisse": {
+            "description": "Capacité caisse.interface (2.1 lot 13) : interface de la caisse résolue pour le terminal de clé (son uuid) — réglage propre au terminal s’il existe, sinon celui de la boutique, sinon les défauts (= écran d’avant le lot). Non critique, publiée pour chaque terminal actif de la boutique ; le terminal ne lit que la clé de son propre uuid. Il applique ce qu’il connaît et ignore les éléments dont il ne connaît pas la clé. Aucun prix, aucune taxe, aucun paiement n’en dépend.",
+            "type": "object",
+            "required": [
+                "origine",
+                "verrouille",
+                "elements",
+                "tuile_categorie",
+                "tuile_produit",
+                "police_compacte",
+                "bouton_payer"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "origine": {
+                    "description": "D’où vient le réglage : defaut (rien d’enregistré au web), boutique (réglage de la boutique), terminal (surcharge propre à ce terminal).",
+                    "enum": [
+                        "defaut",
+                        "boutique",
+                        "terminal"
+                    ]
+                },
+                "verrouille": {
+                    "description": "true : le poste applique ce réglage et n’offre pas de réglage local qui le remplace. false : le réglage local du poste, s’il existe, prime.",
+                    "type": "boolean"
+                },
+                "elements": {
+                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs. Une clé inconnue du terminal est ignorée.",
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 30,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "cle",
+                            "visible",
+                            "ordre"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "cle": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,39}$"
+                            },
+                            "visible": {
+                                "type": "boolean"
+                            },
+                            "ordre": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 30
+                            }
+                        }
+                    }
+                },
+                "tuile_categorie": {
+                    "$ref": "#/$defs/taille_interface"
+                },
+                "tuile_produit": {
+                    "$ref": "#/$defs/taille_interface"
+                },
+                "police_compacte": {
+                    "description": "Taille du texte en mode compact (liste ou densité compacte) ; m = taille d’avant le lot.",
+                    "$ref": "#/$defs/taille_interface"
+                },
+                "bouton_payer": {
+                    "description": "Hauteur du bouton Payer ; m = hauteur d’avant le lot.",
+                    "$ref": "#/$defs/taille_interface"
+                }
+            }
+        },
+        "taille_interface": {
+            "description": "Taille relative (2.1 lot 13) : s ≈ 0,85, m = 1 (taille d’avant le lot), l ≈ 1,2, xl ≈ 1,45.",
+            "enum": [
+                "s",
+                "m",
+                "l",
+                "xl"
+            ]
+        },
+        "prevente": {
+            "description": "Capacité prevente.v1 (lot 15) : prévente OUVERTE de la boutique, pour qu’un autre poste la retrouve (code, nom) et la convertisse après synchro. Convertie ou annulée : suppression au journal.",
+            "type": "object",
+            "required": [
+                "code",
+                "statut",
+                "client",
+                "retrait_prevu",
+                "lignes",
+                "total",
+                "acompte",
+                "acompte_moyen",
+                "terminal_origine_uuid",
+                "auteur_operateur_id",
+                "cree_le",
+                "modifie_le",
+                "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9]{6}$"
+                },
+                "statut": {
+                    "enum": [
+                        "ouverte"
+                    ]
+                },
+                "client": {
+                    "$ref": "operation.json#/$defs/client_prevente"
+                },
+                "retrait_prevu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "$ref": "operation.json#/$defs/ligne_prevente"
+                    }
+                },
+                "total": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "acompte": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "acompte_moyen": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/code"
+                        }
+                    ]
+                },
+                "terminal_origine_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "null : prévente créée au web."
+                },
+                "auteur_operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "modifie_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
                 }
             }
         }

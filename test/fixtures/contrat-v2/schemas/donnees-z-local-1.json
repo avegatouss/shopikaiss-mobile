@@ -279,7 +279,39 @@
             }
           }
         },
-        "modifications": { "$ref": "#/$defs/detail_modifications", "description": "Facultatif (2.1 lot 11) : rubrique « Tickets modifiés », présente seulement si au moins un ticket des sessions a été modifié après encaissement." }
+        "modifications": { "$ref": "#/$defs/detail_modifications", "description": "Facultatif (2.1 lot 11) : rubrique « Tickets modifiés », présente seulement si au moins un ticket des sessions a été modifié après encaissement." },
+        "prevente": { "$ref": "#/$defs/detail_prevente", "description": "Facultatif (lot 15, capacité prevente.v1) : rubrique « Prévente », présente seulement si un acompte, un remboursement ou une conversion de prévente touche les sessions." }
+      }
+    },
+    "detail_prevente": {
+      "description": "Rubrique « Prévente » du bloc de détail (lot 15) : argent des préventes, séparé des ventes. Les acomptes reçus et les acomptes remboursés passent par le tiroir (par moyen) ; l’acompte imputé à une vente de conversion est le paiement technique `acompte_prevente` de cette vente, sans entrée d’argent.",
+      "type": "object",
+      "required": ["deposits_count", "deposits", "refunds_count", "refunds", "net", "conversions_count", "conversions_deposits", "cancellations_count", "methods"],
+      "additionalProperties": false,
+      "properties": {
+        "deposits_count": { "type": "integer", "minimum": 0, "description": "Acomptes reçus (préventes créées avec acompte)." },
+        "deposits": { "$ref": "#/$defs/montant_texte" },
+        "refunds_count": { "type": "integer", "minimum": 0 },
+        "refunds": { "$ref": "#/$defs/montant_texte", "description": "Acomptes remboursés (désistements), positif." },
+        "net": { "$ref": "#/$defs/montant_texte", "description": "deposits − refunds : argent de prévente resté au tiroir et aux moyens." },
+        "conversions_count": { "type": "integer", "minimum": 0, "description": "Préventes converties en vente dans les sessions." },
+        "conversions_deposits": { "$ref": "#/$defs/montant_texte", "description": "Acomptes imputés aux ventes de conversion (paiements acompte_prevente)." },
+        "cancellations_count": { "type": "integer", "minimum": 0, "description": "Désistements (avec ou sans remboursement)." },
+        "methods": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["code", "label", "deposits", "refunds"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "label": { "type": "string", "maxLength": 120 },
+              "deposits": { "$ref": "#/$defs/montant_texte" },
+              "refunds": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        }
       }
     },
     "detail_synthese": {

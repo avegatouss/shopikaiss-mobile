@@ -1,0 +1,24 @@
+{
+    "deposits_count": 2,
+    "deposits": "5000",
+    "refunds_count": 1,
+    "refunds": "2000",
+    "net": "3000",
+    "conversions_count": 1,
+    "conversions_deposits": "3000",
+    "cancellations_count": 2,
+    "methods": [
+        {
+            "code": "especes",
+            "label": "Espèces",
+            "deposits": "3000",
+            "refunds": "2000"
+        },
+        {
+            "code": "wave",
+            "label": "Wave",
+            "deposits": "2000",
+            "refunds": "0"
+        }
+    ]
+}

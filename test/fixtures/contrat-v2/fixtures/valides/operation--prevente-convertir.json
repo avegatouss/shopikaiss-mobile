@@ -1,0 +1,22 @@
+{
+    "uuid": "a1500000-0000-4000-8000-000000000105",
+    "type": "prevente_convertir",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 54,
+    "cree_le": "2026-11-22T08:15:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "2",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "e828b388e4b4559e9917b7ef41724f474c1ee489e11431ce59e77945e97e6140",
+    "contenu": {
+        "prevente_uuid": "a1500000-0000-4000-8000-000000000001",
+        "vente_operation_uuid": "a1500000-0000-4000-8000-000000000104",
+        "acompte_impute": 2000
+    }
+}

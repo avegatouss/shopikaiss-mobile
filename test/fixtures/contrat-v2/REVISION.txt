@@ -1,8 +1,8 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commits : 1ba7dc61 + f04d42f1 (2.1 lot 12 « sessions locales séparées », feat/sessions-locales, session.multiple,
-cloture_journee, details.session_serveur et journee), sur 04818bc0 qui réunit le lot 10 (c87b57c1) et le lot 11
-(2c11cfbd) comme la fusion de B : schémas et fixtures recopiés tels quels. 199 fixtures, 15 schémas.
-Précédent : fusion B des lots 10 et 11 (194 fixtures), puis c87b57c1 seul (186 fixtures), puis 4176383b (lot 9).
+Commits : integration/lots-12-15 92bffdb5 (A) : lots 12 (sessions locales, 1ba7dc61 + f04d42f1), 13 (interface
+réglable), 14 (livre de caisse, livre-caisse.json) et 15 (prévente) réunis par A sur 04818bc0 (lots 10 et 11).
+Schémas et fixtures recopiés tels quels. 221 fixtures, 16 schémas.
+Précédent : lot 12 seul (199 fixtures, fe8b15b), fusion B des lots 10 et 11 (194), c87b57c1 (186), 4176383b (lot 9).
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

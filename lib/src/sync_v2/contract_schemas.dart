@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b, lot 10 catalogue c87b57c1, lot 11 modifier un ticket 2c11cfbd, lot 12 sessions locales 1ba7dc61 + f04d42f1) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lots 9 à 11, lots 12 à 15 integration/lots-12-15 92bffdb5) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -978,6 +978,20 @@ const contractV2Schemas = <String, String>{
                                     "minimum": 1,
                                     "maximum": 50,
                                     "description": "Sessions que le terminal peut ouvrir (et clôturer) tant que le serveur ne les a pas intégrées ; au-delà, il demande une connexion avant d'en ouvrir une autre (Paramètres › Caisse hors ligne, 20 par défaut)."
+                                }
+                            }
+                        },
+                        "prevente": {
+                            "description": "Capacité prevente.v1 (lot 15) : option « Prévente / réservations » de la boutique (Paramètres › Règles de gestion). Présente seulement option activée ; absente sans la capacité.",
+                            "type": "object",
+                            "required": [
+                                "actif"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "actif": {
+                                    "type": "boolean",
+                                    "description": "false : l’écran Prévente n’est pas proposé."
                                 }
                             }
                         }
@@ -2115,6 +2129,181 @@ const contractV2Schemas = <String, String>{
                     "items": {
                         "$ref": "commun.json#/$defs/uuid"
                     }
+                }
+            }
+        },
+        "interface_caisse": {
+            "description": "Capacité caisse.interface (2.1 lot 13) : interface de la caisse résolue pour le terminal de clé (son uuid) — réglage propre au terminal s’il existe, sinon celui de la boutique, sinon les défauts (= écran d’avant le lot). Non critique, publiée pour chaque terminal actif de la boutique ; le terminal ne lit que la clé de son propre uuid. Il applique ce qu’il connaît et ignore les éléments dont il ne connaît pas la clé. Aucun prix, aucune taxe, aucun paiement n’en dépend.",
+            "type": "object",
+            "required": [
+                "origine",
+                "verrouille",
+                "elements",
+                "tuile_categorie",
+                "tuile_produit",
+                "police_compacte",
+                "bouton_payer"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "origine": {
+                    "description": "D’où vient le réglage : defaut (rien d’enregistré au web), boutique (réglage de la boutique), terminal (surcharge propre à ce terminal).",
+                    "enum": [
+                        "defaut",
+                        "boutique",
+                        "terminal"
+                    ]
+                },
+                "verrouille": {
+                    "description": "true : le poste applique ce réglage et n’offre pas de réglage local qui le remplace. false : le réglage local du poste, s’il existe, prime.",
+                    "type": "boolean"
+                },
+                "elements": {
+                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs. Une clé inconnue du terminal est ignorée.",
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 30,
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "cle",
+                            "visible",
+                            "ordre"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "cle": {
+                                "type": "string",
+                                "pattern": "^[a-z][a-z0-9_]{0,39}$"
+                            },
+                            "visible": {
+                                "type": "boolean"
+                            },
+                            "ordre": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 30
+                            }
+                        }
+                    }
+                },
+                "tuile_categorie": {
+                    "$ref": "#/$defs/taille_interface"
+                },
+                "tuile_produit": {
+                    "$ref": "#/$defs/taille_interface"
+                },
+                "police_compacte": {
+                    "description": "Taille du texte en mode compact (liste ou densité compacte) ; m = taille d’avant le lot.",
+                    "$ref": "#/$defs/taille_interface"
+                },
+                "bouton_payer": {
+                    "description": "Hauteur du bouton Payer ; m = hauteur d’avant le lot.",
+                    "$ref": "#/$defs/taille_interface"
+                }
+            }
+        },
+        "taille_interface": {
+            "description": "Taille relative (2.1 lot 13) : s ≈ 0,85, m = 1 (taille d’avant le lot), l ≈ 1,2, xl ≈ 1,45.",
+            "enum": [
+                "s",
+                "m",
+                "l",
+                "xl"
+            ]
+        },
+        "prevente": {
+            "description": "Capacité prevente.v1 (lot 15) : prévente OUVERTE de la boutique, pour qu’un autre poste la retrouve (code, nom) et la convertisse après synchro. Convertie ou annulée : suppression au journal.",
+            "type": "object",
+            "required": [
+                "code",
+                "statut",
+                "client",
+                "retrait_prevu",
+                "lignes",
+                "total",
+                "acompte",
+                "acompte_moyen",
+                "terminal_origine_uuid",
+                "auteur_operateur_id",
+                "cree_le",
+                "modifie_le",
+                "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9]{6}$"
+                },
+                "statut": {
+                    "enum": [
+                        "ouverte"
+                    ]
+                },
+                "client": {
+                    "$ref": "operation.json#/$defs/client_prevente"
+                },
+                "retrait_prevu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "$ref": "operation.json#/$defs/ligne_prevente"
+                    }
+                },
+                "total": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "acompte": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "acompte_moyen": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/code"
+                        }
+                    ]
+                },
+                "terminal_origine_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "null : prévente créée au web."
+                },
+                "auteur_operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "modifie_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
                 }
             }
         }
@@ -3268,7 +3457,39 @@ const contractV2Schemas = <String, String>{
             }
           }
         },
-        "modifications": { "$ref": "#/$defs/detail_modifications", "description": "Facultatif (2.1 lot 11) : rubrique « Tickets modifiés », présente seulement si au moins un ticket des sessions a été modifié après encaissement." }
+        "modifications": { "$ref": "#/$defs/detail_modifications", "description": "Facultatif (2.1 lot 11) : rubrique « Tickets modifiés », présente seulement si au moins un ticket des sessions a été modifié après encaissement." },
+        "prevente": { "$ref": "#/$defs/detail_prevente", "description": "Facultatif (lot 15, capacité prevente.v1) : rubrique « Prévente », présente seulement si un acompte, un remboursement ou une conversion de prévente touche les sessions." }
+      }
+    },
+    "detail_prevente": {
+      "description": "Rubrique « Prévente » du bloc de détail (lot 15) : argent des préventes, séparé des ventes. Les acomptes reçus et les acomptes remboursés passent par le tiroir (par moyen) ; l’acompte imputé à une vente de conversion est le paiement technique `acompte_prevente` de cette vente, sans entrée d’argent.",
+      "type": "object",
+      "required": ["deposits_count", "deposits", "refunds_count", "refunds", "net", "conversions_count", "conversions_deposits", "cancellations_count", "methods"],
+      "additionalProperties": false,
+      "properties": {
+        "deposits_count": { "type": "integer", "minimum": 0, "description": "Acomptes reçus (préventes créées avec acompte)." },
+        "deposits": { "$ref": "#/$defs/montant_texte" },
+        "refunds_count": { "type": "integer", "minimum": 0 },
+        "refunds": { "$ref": "#/$defs/montant_texte", "description": "Acomptes remboursés (désistements), positif." },
+        "net": { "$ref": "#/$defs/montant_texte", "description": "deposits − refunds : argent de prévente resté au tiroir et aux moyens." },
+        "conversions_count": { "type": "integer", "minimum": 0, "description": "Préventes converties en vente dans les sessions." },
+        "conversions_deposits": { "$ref": "#/$defs/montant_texte", "description": "Acomptes imputés aux ventes de conversion (paiements acompte_prevente)." },
+        "cancellations_count": { "type": "integer", "minimum": 0, "description": "Désistements (avec ou sans remboursement)." },
+        "methods": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "object",
+            "required": ["code", "label", "deposits", "refunds"],
+            "additionalProperties": false,
+            "properties": {
+              "code": { "type": "string", "minLength": 1, "maxLength": 64 },
+              "label": { "type": "string", "maxLength": 120 },
+              "deposits": { "$ref": "#/$defs/montant_texte" },
+              "refunds": { "$ref": "#/$defs/montant_texte" }
+            }
+          }
+        }
       }
     },
     "detail_synthese": {
@@ -3822,6 +4043,375 @@ const contractV2Schemas = <String, String>{
   }
 }
 ''',
+  'livre-caisse.json': r'''{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "livre-caisse.json",
+    "title": "Capacité livre_caisse.v1 (2.1 lot 14) : livre de caisse de la boutique de l'appareil lu en ligne par un opérateur qui a le droit livre_caisse_voir (GET /livre-caisse?du&au&operateur_id[&suite]). Lecture seule : mêmes lignes que le « Livre de caisse journalier » des rapports web, totaux par moyen du « Livre de caisse » du poste web.",
+    "$defs": {
+        "reponse": {
+            "type": "object",
+            "required": [
+                "boutique_uuid",
+                "fuseau",
+                "du",
+                "au",
+                "genere_le",
+                "page",
+                "sessions",
+                "mouvements",
+                "totaux_page",
+                "totaux_par_moyen"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "boutique_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "fuseau": {
+                    "description": "Fuseau de la boutique qui découpe les journées (identique à boutique.regles.fuseau).",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                },
+                "du": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "au": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "genere_le": {
+                    "$ref": "commun.json#/$defs/horodatage",
+                    "description": "Heure serveur de la lecture : date de la copie gardée sur le poste (effacée 30 jours plus tard)."
+                },
+                "page": {
+                    "$ref": "#/$defs/page"
+                },
+                "sessions": {
+                    "description": "Sessions ouvertes pendant les journées de la page, toutes caisses de la boutique, dans l'ordre d'ouverture.",
+                    "type": "array",
+                    "maxItems": 5000,
+                    "items": {
+                        "$ref": "#/$defs/session"
+                    }
+                },
+                "mouvements": {
+                    "description": "Lignes du livre de caisse web des journées de la page, dans son ordre : par session, ouverture, flux espèces, autres moyens, clôture.",
+                    "type": "array",
+                    "maxItems": 20000,
+                    "items": {
+                        "$ref": "#/$defs/mouvement"
+                    }
+                },
+                "totaux_page": {
+                    "$ref": "#/$defs/totaux_mouvements"
+                },
+                "totaux_par_moyen": {
+                    "$ref": "#/$defs/totaux_par_moyen"
+                }
+            }
+        },
+        "page": {
+            "description": "Journées entières : une page s'arrête après la journée qui porte le total à 1000 mouvements ou plus. suite = jour à redemander (paramètre suite), null à la dernière page.",
+            "type": "object",
+            "required": [
+                "du",
+                "au",
+                "suite"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "du": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "au": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "suite": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ]
+                }
+            }
+        },
+        "session": {
+            "type": "object",
+            "required": [
+                "session_uuid",
+                "jour",
+                "terminal_uuid",
+                "terminal_nom",
+                "operateur_id",
+                "operateur_nom",
+                "ouverte_le",
+                "close_le",
+                "statut",
+                "fond_initial"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Journée d'ouverture au calendrier de la boutique."
+                },
+                "terminal_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "terminal_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "operateur_id": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        }
+                    ]
+                },
+                "operateur_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "ouverte_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "close_le": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "statut": {
+                    "enum": [
+                        "ouverte",
+                        "close"
+                    ]
+                },
+                "fond_initial": {
+                    "$ref": "commun.json#/$defs/montant"
+                }
+            }
+        },
+        "mouvement": {
+            "description": "Une ligne du livre de caisse web (colonnes Date, Session, Caisse, Opération, Moyen, Entrée espèces, Sortie espèces, Autres moyens (signé, hors tiroir), Attendu appliqué, Compté, Écart). Entrées moins sorties d'une session = attendu complet ; attendu, compté et écart ne figurent que sur la ligne de clôture.",
+            "type": "object",
+            "required": [
+                "jour",
+                "date",
+                "session_uuid",
+                "terminal",
+                "nature",
+                "moyen",
+                "entree_especes",
+                "sortie_especes",
+                "autres",
+                "attendu",
+                "compte",
+                "ecart"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Journée du livre web qui porte la ligne (journée d'ouverture de la session)."
+                },
+                "date": {
+                    "$ref": "commun.json#/$defs/horodatage",
+                    "description": "Ouverture de la session, ou heure de la clôture pour la ligne de clôture."
+                },
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "terminal": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "nature": {
+                    "description": "Libellé du web, tel quel (Ouverture de session (fond de caisse), Ventes encaissées, Remboursements de retours et annulations, Apports de caisse, Retraits de caisse, Dépenses payées, Restitutions de dépenses, Règlements clients, Dépôts sur compte client, Retraits de compte client, Paiements fournisseurs, Remboursements fournisseurs reçus, Clôture (mode …), Session ouverte : aucune clôture archivée ; mention « — rectifiée » possible).",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                },
+                "moyen": {
+                    "description": "Nom du moyen (Espèces, Mobile money…), ou « — » pour une session sans clôture.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "entree_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "sortie_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "autres": {
+                    "$ref": "commun.json#/$defs/montant_signe",
+                    "description": "Autres moyens, informatif : positif encaissé, négatif remboursé ; n'entre pas dans le tiroir."
+                },
+                "attendu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    ]
+                },
+                "compte": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    ]
+                },
+                "ecart": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    ]
+                }
+            }
+        },
+        "totaux_mouvements": {
+            "description": "Sommes des colonnes additionnées par le web (entrées, sorties, autres) sur les mouvements de la page. La somme des pages = totaux du livre web de la période.",
+            "type": "object",
+            "required": [
+                "entree_especes",
+                "sortie_especes",
+                "autres"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "entree_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "sortie_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "autres": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                }
+            }
+        },
+        "totaux_par_moyen": {
+            "description": "Livre de caisse du poste web sur toute la période (du..au), tous caissiers, identique à chaque page : ventes au chiffre d'affaires datées de la vente, remboursements et annulations à leur propre date.",
+            "type": "object",
+            "required": [
+                "ventes_nombre",
+                "ventes_montant",
+                "credit",
+                "annulations_nombre",
+                "annulations_montant",
+                "moyens",
+                "encaisse",
+                "rembourse",
+                "net"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "ventes_nombre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "ventes_montant": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "credit": {
+                    "$ref": "commun.json#/$defs/montant_signe",
+                    "description": "Part à crédit des ventes (reste à payer)."
+                },
+                "annulations_nombre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "annulations_montant": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "moyens": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                        "$ref": "#/$defs/moyen"
+                    }
+                },
+                "encaisse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "rembourse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "net": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                }
+            }
+        },
+        "moyen": {
+            "type": "object",
+            "required": [
+                "moyen",
+                "encaisse",
+                "rembourse",
+                "net"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "moyen": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "encaisse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "rembourse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "net": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                }
+            }
+        }
+    }
+}
+''',
   'operation.json': r'''{
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "operation.json",
@@ -3881,6 +4471,18 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/cloture_journee"
+        },
+        {
+            "$ref": "#/$defs/prevente_creer"
+        },
+        {
+            "$ref": "#/$defs/prevente_modifier"
+        },
+        {
+            "$ref": "#/$defs/prevente_convertir"
+        },
+        {
+            "$ref": "#/$defs/prevente_annuler"
         }
     ],
     "$defs": {
@@ -4175,6 +4777,10 @@ const contractV2Schemas = <String, String>{
                 },
                 "commande": {
                     "$ref": "#/$defs/commande_vente"
+                },
+                "prevente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Lot 15 (capacité prevente.v1) : vente qui convertit cette prévente. Elle porte alors un paiement `acompte_prevente` égal à l’acompte (aucun si acompte = 0) ; le reste par les moyens ordinaires. Moyen technique : aucune entrée d’argent au tiroir (l’acompte a été compté à sa réception)."
                 }
             }
         },
@@ -8372,6 +8978,517 @@ const contractV2Schemas = <String, String>{
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_cloture_journee"
+                }
+            }
+        },
+        "ligne_prevente": {
+            "description": "Lot 15 (capacité prevente.v1) : ligne réservée, figée comme une ligne de vente (libellé et prix au moment de la prévente). Indicative jusqu’à la conversion : la vente de conversion porte ses propres lignes.",
+            "type": "object",
+            "required": [
+                "ligne_uuid",
+                "produit_uuid",
+                "conditionnement_uuid",
+                "libelle",
+                "quantite",
+                "prix_unitaire",
+                "remise",
+                "total"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "ligne_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "produit_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "conditionnement_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "libelle": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                },
+                "quantite": {
+                    "$ref": "commun.json#/$defs/quantite"
+                },
+                "prix_unitaire": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "remise": {
+                    "$ref": "commun.json#/$defs/montant"
+                },
+                "total": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "quantite × prix_unitaire − remise, arrondi au franc."
+                }
+            }
+        },
+        "client_prevente": {
+            "description": "Lot 15 : client de la prévente. Le nom suffit ; client_uuid relie une fiche client connue (publiée ou créée sur le terminal).",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "client_uuid"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 40
+                },
+                "client_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                }
+            }
+        },
+        "contenu_prevente_creer": {
+            "description": "Lot 15 : prévente (réservation) créée sur le terminal. L’acompte (0 permis) est de l’argent reçu, compté au tiroir de la session, jamais du chiffre d’affaires avant conversion.",
+            "type": "object",
+            "required": [
+                "prevente_uuid",
+                "code",
+                "client",
+                "retrait_prevu",
+                "lignes",
+                "total",
+                "acompte",
+                "acompte_moyen",
+                "acompte_recu",
+                "acompte_reference",
+                "session_uuid",
+                "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "prevente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "UUID v4 choisi par le terminal : identité de la prévente partout."
+                },
+                "code": {
+                    "type": "string",
+                    "pattern": "^[A-Z0-9]{6}$",
+                    "description": "Code imprimé sur la facture de prévente : 6 caractères, préfixe de 2 caractères propre au terminal (jamais « W », réservé au web) puis 4 caractères (alphabet sans 0, O, 1, I). Unique dans la boutique : un code déjà pris est gardé, noté, et la recherche par code rend les deux."
+                },
+                "client": {
+                    "$ref": "#/$defs/client_prevente"
+                },
+                "retrait_prevu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "$ref": "#/$defs/ligne_prevente"
+                    }
+                },
+                "total": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Σ lignes.total."
+                },
+                "acompte": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Argent laissé par le client, 0 permis, au plus total."
+                },
+                "acompte_moyen": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/code"
+                        }
+                    ],
+                    "description": "Moyen de l’acompte (moyen publié de la boutique) ; null ⇔ acompte = 0."
+                },
+                "acompte_recu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant"
+                        }
+                    ],
+                    "description": "Espèces seulement : somme remise par le client (monnaie = recu − acompte)."
+                },
+                "acompte_reference": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "session_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "Session où l’acompte est encaissé (même règle que la vente) ; null si acompte = 0."
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                }
+            }
+        },
+        "prevente_creer": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "description": "Lot 15 (capacité prevente.v1) : créer une prévente. Sans la capacité : rejet_protocole capacite_absente.",
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "prevente_creer"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_prevente_creer"
+                }
+            }
+        },
+        "contenu_prevente_modifier": {
+            "description": "Lot 15 : prévente ouverte modifiée avant conversion (client, date, lignes, total). L’acompte ne change pas.",
+            "type": "object",
+            "required": [
+                "prevente_uuid",
+                "client",
+                "retrait_prevu",
+                "lignes",
+                "total",
+                "note"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "prevente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "client": {
+                    "$ref": "#/$defs/client_prevente"
+                },
+                "retrait_prevu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "lignes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 100,
+                    "items": {
+                        "$ref": "#/$defs/ligne_prevente"
+                    }
+                },
+                "total": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Σ lignes.total, au moins l’acompte."
+                },
+                "note": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 500
+                }
+            }
+        },
+        "prevente_modifier": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "description": "Lot 15 (capacité prevente.v1) : modifier une prévente ouverte.",
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "prevente_modifier"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_prevente_modifier"
+                }
+            }
+        },
+        "contenu_prevente_convertir": {
+            "description": "Lot 15 : marque de conversion. La conversion elle-même est faite par la vente `vente_operation_uuid`, qui porte `prevente_uuid` et le paiement `acompte_prevente` (= acompte) ; émise juste après cette vente.",
+            "type": "object",
+            "required": [
+                "prevente_uuid",
+                "vente_operation_uuid",
+                "acompte_impute"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "prevente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "vente_operation_uuid": {
+                    "$ref": "commun.json#/$defs/uuid",
+                    "description": "Opération vente de CE terminal qui convertit la prévente."
+                },
+                "acompte_impute": {
+                    "$ref": "commun.json#/$defs/montant",
+                    "description": "Acompte déduit sur la vente (montant du paiement acompte_prevente, 0 sans acompte)."
+                }
+            }
+        },
+        "prevente_convertir": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "description": "Lot 15 (capacité prevente.v1) : prévente convertie en vente.",
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "prevente_convertir"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_prevente_convertir"
+                }
+            }
+        },
+        "contenu_prevente_annuler": {
+            "description": "Lot 15 : désistement du client. Remboursement facultatif de tout ou partie de l’acompte, sur un moyen de la boutique, compté au tiroir de la session.",
+            "type": "object",
+            "required": [
+                "prevente_uuid",
+                "motif",
+                "remboursement",
+                "session_uuid"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "prevente_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "motif": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                },
+                "remboursement": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "type": "object",
+                            "required": [
+                                "moyen",
+                                "montant",
+                                "reference"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "moyen": {
+                                    "$ref": "commun.json#/$defs/code"
+                                },
+                                "montant": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 999999999999,
+                                    "description": "Au plus l’acompte."
+                                },
+                                "reference": {
+                                    "type": [
+                                        "string",
+                                        "null"
+                                    ],
+                                    "maxLength": 120
+                                }
+                            }
+                        }
+                    ],
+                    "description": "null : acompte gardé (ou pas d’acompte)."
+                },
+                "session_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "Session du remboursement ; null sans remboursement."
+                }
+            }
+        },
+        "prevente_annuler": {
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "description": "Lot 15 (capacité prevente.v1) : désistement, remboursement facultatif.",
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "prevente_annuler"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_prevente_annuler"
                 }
             }
         }

@@ -1,0 +1,368 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "livre-caisse.json",
+    "title": "Capacité livre_caisse.v1 (2.1 lot 14) : livre de caisse de la boutique de l'appareil lu en ligne par un opérateur qui a le droit livre_caisse_voir (GET /livre-caisse?du&au&operateur_id[&suite]). Lecture seule : mêmes lignes que le « Livre de caisse journalier » des rapports web, totaux par moyen du « Livre de caisse » du poste web.",
+    "$defs": {
+        "reponse": {
+            "type": "object",
+            "required": [
+                "boutique_uuid",
+                "fuseau",
+                "du",
+                "au",
+                "genere_le",
+                "page",
+                "sessions",
+                "mouvements",
+                "totaux_page",
+                "totaux_par_moyen"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "boutique_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "fuseau": {
+                    "description": "Fuseau de la boutique qui découpe les journées (identique à boutique.regles.fuseau).",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64
+                },
+                "du": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "au": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "genere_le": {
+                    "$ref": "commun.json#/$defs/horodatage",
+                    "description": "Heure serveur de la lecture : date de la copie gardée sur le poste (effacée 30 jours plus tard)."
+                },
+                "page": {
+                    "$ref": "#/$defs/page"
+                },
+                "sessions": {
+                    "description": "Sessions ouvertes pendant les journées de la page, toutes caisses de la boutique, dans l'ordre d'ouverture.",
+                    "type": "array",
+                    "maxItems": 5000,
+                    "items": {
+                        "$ref": "#/$defs/session"
+                    }
+                },
+                "mouvements": {
+                    "description": "Lignes du livre de caisse web des journées de la page, dans son ordre : par session, ouverture, flux espèces, autres moyens, clôture.",
+                    "type": "array",
+                    "maxItems": 20000,
+                    "items": {
+                        "$ref": "#/$defs/mouvement"
+                    }
+                },
+                "totaux_page": {
+                    "$ref": "#/$defs/totaux_mouvements"
+                },
+                "totaux_par_moyen": {
+                    "$ref": "#/$defs/totaux_par_moyen"
+                }
+            }
+        },
+        "page": {
+            "description": "Journées entières : une page s'arrête après la journée qui porte le total à 1000 mouvements ou plus. suite = jour à redemander (paramètre suite), null à la dernière page.",
+            "type": "object",
+            "required": [
+                "du",
+                "au",
+                "suite"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "du": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "au": {
+                    "$ref": "commun.json#/$defs/jour"
+                },
+                "suite": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/jour"
+                        }
+                    ]
+                }
+            }
+        },
+        "session": {
+            "type": "object",
+            "required": [
+                "session_uuid",
+                "jour",
+                "terminal_uuid",
+                "terminal_nom",
+                "operateur_id",
+                "operateur_nom",
+                "ouverte_le",
+                "close_le",
+                "statut",
+                "fond_initial"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Journée d'ouverture au calendrier de la boutique."
+                },
+                "terminal_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ]
+                },
+                "terminal_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "operateur_id": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/identifiant_serveur"
+                        }
+                    ]
+                },
+                "operateur_nom": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "ouverte_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "close_le": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/horodatage"
+                        }
+                    ]
+                },
+                "statut": {
+                    "enum": [
+                        "ouverte",
+                        "close"
+                    ]
+                },
+                "fond_initial": {
+                    "$ref": "commun.json#/$defs/montant"
+                }
+            }
+        },
+        "mouvement": {
+            "description": "Une ligne du livre de caisse web (colonnes Date, Session, Caisse, Opération, Moyen, Entrée espèces, Sortie espèces, Autres moyens (signé, hors tiroir), Attendu appliqué, Compté, Écart). Entrées moins sorties d'une session = attendu complet ; attendu, compté et écart ne figurent que sur la ligne de clôture.",
+            "type": "object",
+            "required": [
+                "jour",
+                "date",
+                "session_uuid",
+                "terminal",
+                "nature",
+                "moyen",
+                "entree_especes",
+                "sortie_especes",
+                "autres",
+                "attendu",
+                "compte",
+                "ecart"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Journée du livre web qui porte la ligne (journée d'ouverture de la session)."
+                },
+                "date": {
+                    "$ref": "commun.json#/$defs/horodatage",
+                    "description": "Ouverture de la session, ou heure de la clôture pour la ligne de clôture."
+                },
+                "session_uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "terminal": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 120
+                },
+                "nature": {
+                    "description": "Libellé du web, tel quel (Ouverture de session (fond de caisse), Ventes encaissées, Remboursements de retours et annulations, Apports de caisse, Retraits de caisse, Dépenses payées, Restitutions de dépenses, Règlements clients, Dépôts sur compte client, Retraits de compte client, Paiements fournisseurs, Remboursements fournisseurs reçus, Clôture (mode …), Session ouverte : aucune clôture archivée ; mention « — rectifiée » possible).",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300
+                },
+                "moyen": {
+                    "description": "Nom du moyen (Espèces, Mobile money…), ou « — » pour une session sans clôture.",
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "entree_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "sortie_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "autres": {
+                    "$ref": "commun.json#/$defs/montant_signe",
+                    "description": "Autres moyens, informatif : positif encaissé, négatif remboursé ; n'entre pas dans le tiroir."
+                },
+                "attendu": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    ]
+                },
+                "compte": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    ]
+                },
+                "ecart": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/montant_signe"
+                        }
+                    ]
+                }
+            }
+        },
+        "totaux_mouvements": {
+            "description": "Sommes des colonnes additionnées par le web (entrées, sorties, autres) sur les mouvements de la page. La somme des pages = totaux du livre web de la période.",
+            "type": "object",
+            "required": [
+                "entree_especes",
+                "sortie_especes",
+                "autres"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "entree_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "sortie_especes": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "autres": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                }
+            }
+        },
+        "totaux_par_moyen": {
+            "description": "Livre de caisse du poste web sur toute la période (du..au), tous caissiers, identique à chaque page : ventes au chiffre d'affaires datées de la vente, remboursements et annulations à leur propre date.",
+            "type": "object",
+            "required": [
+                "ventes_nombre",
+                "ventes_montant",
+                "credit",
+                "annulations_nombre",
+                "annulations_montant",
+                "moyens",
+                "encaisse",
+                "rembourse",
+                "net"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "ventes_nombre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "ventes_montant": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "credit": {
+                    "$ref": "commun.json#/$defs/montant_signe",
+                    "description": "Part à crédit des ventes (reste à payer)."
+                },
+                "annulations_nombre": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "annulations_montant": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "moyens": {
+                    "type": "array",
+                    "maxItems": 100,
+                    "items": {
+                        "$ref": "#/$defs/moyen"
+                    }
+                },
+                "encaisse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "rembourse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "net": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                }
+            }
+        },
+        "moyen": {
+            "type": "object",
+            "required": [
+                "moyen",
+                "encaisse",
+                "rembourse",
+                "net"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "moyen": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                },
+                "encaisse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "rembourse": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "net": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                }
+            }
+        }
+    }
+}

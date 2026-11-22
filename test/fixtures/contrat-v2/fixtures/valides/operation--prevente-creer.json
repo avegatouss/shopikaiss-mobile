@@ -1,0 +1,56 @@
+{
+    "uuid": "a1500000-0000-4000-8000-000000000101",
+    "type": "prevente_creer",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 50,
+    "cree_le": "2026-11-22T08:15:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "2",
+        "curseur_catalogue": "c-000105"
+    },
+    "empreinte": "8cf4f191674f60824cb2cde32d0d1db3e1ba2920179ce4ff3147ea4b68f779b1",
+    "contenu": {
+        "prevente_uuid": "a1500000-0000-4000-8000-000000000001",
+        "code": "T2K7M9",
+        "client": {
+            "nom": "Koffi Aya",
+            "telephone": "0707070707",
+            "client_uuid": null
+        },
+        "retrait_prevu": "2026-11-22T12:30:00Z",
+        "lignes": [
+            {
+                "ligne_uuid": "b1500000-0000-4000-8000-000000000001",
+                "produit_uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
+                "conditionnement_uuid": null,
+                "libelle": "Garba poisson",
+                "quantite": "2.000000",
+                "prix_unitaire": 1500,
+                "remise": 0,
+                "total": 3000
+            },
+            {
+                "ligne_uuid": "b1500000-0000-4000-8000-000000000002",
+                "produit_uuid": "3f2504e0-4f89-41d3-9a0c-0305e82c3302",
+                "conditionnement_uuid": null,
+                "libelle": "Jus de bissap",
+                "quantite": "1.000000",
+                "prix_unitaire": 500,
+                "remise": 0,
+                "total": 500
+            }
+        ],
+        "total": 3500,
+        "acompte": 2000,
+        "acompte_moyen": "especes",
+        "acompte_recu": 5000,
+        "acompte_reference": null,
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000001",
+        "note": "Sans piment"
+    }
+}

@@ -1069,6 +1069,125 @@
             "fichier": "valides/donnees-2.1--operation-etat-attente-cloture-precedente.json",
             "schema": "donnees-2.1.json#/$defs/operation_etat",
             "valide": true
+        },
+        {
+            "fichier": "valides/livre-caisse-reponse--nominal.json",
+            "schema": "livre-caisse.json#/$defs/reponse",
+            "valide": true
+        },
+        {
+            "fichier": "valides/livre-caisse-reponse--page-avec-suite.json",
+            "schema": "livre-caisse.json#/$defs/reponse",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/livre-caisse-reponse--statut-inconnu.json",
+            "schema": "livre-caisse.json#/$defs/reponse",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "invalides/livre-caisse-reponse--page-sans-suite.json",
+            "schema": "livre-caisse.json#/$defs/reponse",
+            "valide": false,
+            "erreur_attendue": "obligatoire"
+        },
+        {
+            "fichier": "valides/donnees--interface-caisse-defauts.json",
+            "schema": "donnees-2.1.json#/$defs/interface_caisse",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees--interface-caisse-terminal-verrouille.json",
+            "schema": "donnees-2.1.json#/$defs/interface_caisse",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees--interface-caisse-taille-inconnue.json",
+            "schema": "donnees-2.1.json#/$defs/interface_caisse",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "invalides/donnees--interface-caisse-element-sans-visible.json",
+            "schema": "donnees-2.1.json#/$defs/interface_caisse",
+            "valide": false,
+            "erreur_attendue": "visible : obligatoire"
+        },
+        {
+            "fichier": "invalides/donnees--interface-caisse-cle-inconnue.json",
+            "schema": "donnees-2.1.json#/$defs/interface_caisse",
+            "valide": false,
+            "erreur_attendue": "couleur : propriété inconnue"
+        },
+        {
+            "fichier": "valides/operation--prevente-creer.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--prevente-creer-sans-acompte.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--prevente-modifier.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--vente-conversion-prevente.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--prevente-convertir.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--prevente-annuler-remboursement.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--prevente-annuler-sans-remboursement.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--prevente-creer-code-minuscules.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "format invalide"
+        },
+        {
+            "fichier": "invalides/operation--prevente-annuler-motif-vide.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "au moins 1"
+        },
+        {
+            "fichier": "invalides/operation--prevente-annuler-remboursement-nul.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "exactement une variante"
+        },
+        {
+            "fichier": "valides/donnees-2.1--prevente.json",
+            "schema": "donnees-2.1.json#/$defs/prevente",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-2.1--prevente-statut-convertie.json",
+            "schema": "donnees-2.1.json#/$defs/prevente",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "valides/donnees-z-local--prevente.json",
+            "schema": "donnees-z-local-1.json#/$defs/detail_prevente",
+            "valide": true
         }
     ]
 }

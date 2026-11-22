@@ -1,0 +1,40 @@
+{
+    "origine": "defaut",
+    "verrouille": false,
+    "elements": [
+        {
+            "cle": "scanner",
+            "visible": true,
+            "ordre": 1
+        },
+        {
+            "cle": "recherche",
+            "visible": true,
+            "ordre": 2
+        },
+        {
+            "cle": "favoris",
+            "visible": true,
+            "ordre": 3
+        },
+        {
+            "cle": "categories",
+            "visible": true,
+            "ordre": 4
+        },
+        {
+            "cle": "marques",
+            "visible": true,
+            "ordre": 5
+        },
+        {
+            "cle": "fournisseurs",
+            "visible": true,
+            "ordre": 6
+        }
+    ],
+    "tuile_categorie": "m",
+    "tuile_produit": "m",
+    "police_compacte": "m",
+    "bouton_payer": "m"
+}
