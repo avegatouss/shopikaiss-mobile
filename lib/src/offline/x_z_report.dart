@@ -73,6 +73,22 @@ class ClosureSession {
   /// Tickets modifiés sur ce terminal (2.1 lot 11) : `{operation, original}` (opérations brutes).
   final List<Map> modifications = [];
 
+  /// Transferts de fin de journée vers les espèces (2.1 lot 16, `transfert_especes`) : opérations brutes.
+  final List<Map> transfers = [];
+
+  /// Montant transféré vers les espèces, par moyen d'origine.
+  Map<String, int> get transferredByMethod {
+    final out = <String, int>{};
+    for (final t in transfers) {
+      for (final l in (((t['contenu'] as Map)['lignes'] as List?) ?? const []).cast<Map>()) {
+        out.update('${l['moyen']}', (v) => v + _int(l['montant']), ifAbsent: () => _int(l['montant']));
+      }
+    }
+    return out;
+  }
+
+  int get transferredToCash => transferredByMethod.values.fold(0, (a, b) => a + b);
+
   /// Tickets modifiés en ligne dans la session (`z.session.modifications`), forme `detail_modification`.
   final List<Map> onlineModifications = [];
 
@@ -244,6 +260,11 @@ List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSess
             methods.update('${p['moyen']}', (v) => v + _int(p['montant']), ifAbsent: () => _int(p['montant']));
           }
         }
+      case 'transfert_especes':
+        final uuid = content['session_uuid'] as String?;
+        if (current == null || current.closed || (uuid != null && current.uuid != null && current.uuid != uuid)) current = start(uuid: uuid);
+        current.uuid ??= uuid;
+        current.transfers.add(o);
       case 'cloture_session':
         final uuid = content['session_uuid'] as String?;
         if (current == null || current.closed || (uuid != null && current.uuid != null && current.uuid != uuid)) current = start(uuid: uuid);
@@ -722,7 +743,7 @@ class ZContext {
     return sum + back.fold<int>(0, (t, p) => t + _int(p['montant']));
   });
   final refunds = local + online;
-  final expected = s.float == null ? null : s.float! + salesCash - refunds;
+  final expected = s.float == null ? null : s.float! + salesCash - refunds + s.transferredToCash;
   final counted = (s.closure?['contenu'] as Map?)?['compte'] as int?;
   return (float: s.float, salesCash: salesCash, refunds: refunds, expected: expected, counted: counted, difference: counted == null || expected == null ? null : counted - expected);
 }
@@ -744,9 +765,15 @@ List<Map<String, dynamic>> _methodControl(List<ClosureSession> sessions, ZContex
       theoretical.putIfAbsent(code, () => 0);
       counted[code] = (counted[code] ?? 0) + _int(c['montant']);
     }
+    s.transferredByMethod.forEach((code, amount) => theoretical[code] = (theoretical[code] ?? 0) - amount);
   }
   final names = context.methodNames;
+  final moved = <String, int>{};
+  for (final s in sessions) {
+    s.transferredByMethod.forEach((code, amount) => moved[code] = (moved[code] ?? 0) + amount);
+  }
   return [
+    for (final e in moved.entries) zMoney('${names[e.key] ?? e.key} → espèces', -e.value),
     for (final e in theoretical.entries) ...[
       zMoney('${names[e.key] ?? e.key} théorique', e.value),
       if (counted[e.key] case final c?) ...[zMoney('${names[e.key] ?? e.key} constaté', c), zMoney('${names[e.key] ?? e.key} écart', c - e.value, bold: true, sign: true)],
@@ -776,6 +803,7 @@ Map<String, dynamic> sessionZModel(ClosureFacts facts, ClosureSession session, Z
   final cash = _cash(session, context);
   final lines = <Map<String, dynamic>>[_moneyOrDash('Fond initial', cash.float), zMoney('Ventes espèces', cash.salesCash)];
   if (cash.refunds != 0) lines.add(zMoney('Remboursements', -cash.refunds));
+  if (session.transferredToCash != 0) lines.add(zMoney('Transferts vers les espèces', session.transferredToCash));
   if (!blind) lines.add(_moneyOrDash('Théorique', cash.expected, bold: true));
   if (cash.counted != null) {
     lines.add(zMoney('Compté', cash.counted!, bold: true));
@@ -879,6 +907,7 @@ List<Map<String, dynamic>> terminalDayTotals(List<ClosureSession> sessions, ZCon
       theoretical.putIfAbsent(code, () => 0);
       counted[code] = (counted[code] ?? 0) + _int(c['montant']);
     }
+    s.transferredByMethod.forEach((code, amount) => theoretical[code] = (theoretical[code] ?? 0) - amount);
   }
   return [for (final e in theoretical.entries) {'moyen': e.key, 'theorique': e.value, 'compte': counted[e.key]}];
 }

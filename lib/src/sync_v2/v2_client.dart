@@ -145,6 +145,10 @@ class CaisseV2Client {
   /// Prévente / réservations (2.1 lot 15) : opérations `prevente_*`, type `prevente`, règle `boutique.regles.prevente`.
   static const preSaleCapability = 'prevente.v1';
 
+  /// Transfert de fin de journée des mobile money vers les espèces (lot 16) : opération `transfert_especes`, règle
+  /// `boutique.regles.transfert_especes`, droit `transfert_especes`. Accordée seulement avec `contrat.2_1`.
+  static const cashTransferCapability = 'transfert.especes';
+
   /// Livre de caisse sur le poste (2.1 lot 14) : `GET /livre-caisse`, droit `livre_caisse_voir`. Accordée seulement avec
   /// `contrat.2_1`.
   static const cashBookCapability = 'livre_caisse.v1';

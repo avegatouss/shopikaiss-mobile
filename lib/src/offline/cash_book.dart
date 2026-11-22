@@ -248,10 +248,19 @@ CashBook buildLocalCashBook(
     for (final e in back.entries.where((e) => !cashCodes.contains(e.key))) {
       if (e.value != 0) rows.add(row('Remboursements de retours et annulations', names[e.key] ?? e.key, others: -e.value));
     }
+    // Transferts de fin de journée (lot 16) : sortie du moyen, entrée des espèces.
+    for (final t in s.transfers) {
+      final at = DateTime.tryParse('${t['cree_le']}');
+      for (final l in ((((t['contenu'] as Map)['lignes']) as List?) ?? const []).cast<Map>()) {
+        final name = names['${l['moyen']}'] ?? '${l['moyen']}';
+        rows.add(row('Transfert vers les espèces ($name)', cashName, cashIn: _int(l['montant']), at: at));
+        rows.add(row('Transfert vers les espèces', name, others: -_int(l['montant']), at: at));
+      }
+    }
     if (s.closed) {
       final cashSold = sold.entries.where((e) => cashCodes.contains(e.key)).fold(0, (a, e) => a + e.value);
       final cashBack = back.entries.where((e) => cashCodes.contains(e.key)).fold(0, (a, e) => a + e.value);
-      final expected = s.float == null ? null : s.float! + cashSold - cashBack;
+      final expected = s.float == null ? null : s.float! + cashSold - cashBack + s.transferredToCash;
       final counted = (s.closure!['contenu'] as Map)['compte'] as int?;
       rows.add(row('Clôture (poste)', cashName,
           at: s.closedAt, expected: expected, counted: counted, difference: expected == null || counted == null ? null : counted - expected));

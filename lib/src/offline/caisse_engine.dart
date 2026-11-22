@@ -232,6 +232,21 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Interface de la caisse publiée pour ce terminal (2.1 lot 13, `interface_caisse`) ; défauts sans la capacité.
   RegisterInterface get publishedInterface => RegisterInterface.defaults;
 
+  // ------------------------------------------------------------------ Mobile money → espèces (2.1 lot 16)
+
+  /// Règle `boutique.regles.transfert_especes` publiée et capacité `transfert.especes` accordée.
+  bool get cashTransferSupported => false;
+
+  /// Solde de la session ouverte par moyen transférable (encaissé moins remboursé moins déjà transféré), > 0 seulement.
+  Future<List<(String, int)>> cashTransferPreview() async => const [];
+
+  /// Pourquoi [operator] ne peut pas transférer maintenant, ou null.
+  Future<String?> cashTransferBlocker(Operator? operator) async => 'Transfert vers les espèces non disponible sur ce terminal.';
+
+  /// Transfère vers les espèces tout le solde des moyens réglés (une ligne par moyen), hors connexion compris.
+  Future<OfflineOperation> recordCashTransfer(Operator operator, {String? reason, String? operationUuid}) =>
+      throw const OfflineRefusal('Transfert vers les espèces non disponible sur ce terminal.');
+
   // ------------------------------------------------------------------ Livre de caisse (2.1 lot 14)
 
   /// Livre en ligne proposé : capacité `livre_caisse.v1` accordée par le serveur.

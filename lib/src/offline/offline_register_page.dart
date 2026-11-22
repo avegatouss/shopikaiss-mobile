@@ -756,6 +756,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 subtitle: const Text('Duplicata du Z de la dernière session clôturée ici'),
                 onTap: () => Navigator.pop(context, 'duplicata'),
               ),
+              if (_engine.cashTransferSupported)
+                ListTile(
+                  leading: const Icon(Icons.currency_exchange),
+                  title: const Text('Mobile money → espèces'),
+                  subtitle: const Text('Fin de journée : tout le solde mobile money rejoint les espèces'),
+                  enabled: _engine.sessionOpen,
+                  onTap: () => Navigator.pop(context, 'transfert'),
+                ),
               if (_engine.multipleSessionsSupported) ...[
                 ListTile(
                   leading: const Icon(Icons.event_available_outlined),
@@ -789,12 +797,94 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         }
       case 'duplicata_jour':
         await _reprintDay();
+      case 'transfert':
+        await _cashTransfer();
       case 'sessions':
         await showLocalSessions(context, _engine);
     }
   }
 
   // ------------------------------------------------------------------ Journée de caisse du poste (2.1 lot 12)
+
+  /// Mobile money → espèces (lot 16) : tableau des moyens, total qui rejoint les espèces, motif facultatif ; puis un
+  /// ticket de transfert.
+  Future<void> _cashTransfer() async {
+    final operator = _operator;
+    if (operator == null) return;
+    final blocker = await _engine.cashTransferBlocker(operator);
+    if (!mounted) return;
+    if (blocker != null) return _refuse(blocker, title: 'Transfert impossible');
+    final lines = await _engine.cashTransferPreview();
+    if (!mounted) return;
+    final names = {for (final m in _snapshot?.methods ?? const <PaymentMethodInfo>[]) m.code: m.name};
+    final total = lines.fold<int>(0, (s, l) => s + l.$2);
+    final reason = TextEditingController();
+    final operationUuid = const Uuid().v4();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.currency_exchange),
+        title: const Text('Mobile money → espèces'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text('Tout le solde de ces moyens, pour cette session, rejoint les espèces du tiroir. Les cartes ne sont pas concernées.'),
+              const SizedBox(height: 12),
+              for (final (code, amount) in lines)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [Expanded(child: Text(names[code] ?? code)), Text(formatFcfa(amount), style: const TextStyle(fontWeight: FontWeight.w600))]),
+                ),
+              const Divider(),
+              Row(
+                children: [
+                  const Expanded(child: Text('Rejoint les espèces', style: TextStyle(fontWeight: FontWeight.bold))),
+                  Text(formatFcfa(total), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Color(0xFF2E7D32))),
+                ],
+              ),
+              const SizedBox(height: 8),
+              TextField(controller: reason, maxLength: 500, decoration: const InputDecoration(labelText: 'Motif (facultatif)')),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(minimumSize: const Size(0, 48)),
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text('Transférer tout vers les espèces'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _engine.recordCashTransfer(operator, reason: reason.text, operationUuid: operationUuid);
+    } on OfflineRefusal catch (e) {
+      return _refuse(e.message, title: 'Transfert impossible');
+    }
+    if (!mounted) return;
+    setState(() {});
+    _toast('${formatFcfa(total)} rejoignent les espèces.');
+    final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
+    final columns = width >= 80 ? 48 : 32;
+    String row(String left, String right) => '$left${' ' * (columns - left.length - right.length).clamp(1, columns)}$right';
+    final store = _snapshot?.store;
+    await _printText([
+      if (store != null) store.name,
+      'TRANSFERT VERS LES ESPÈCES',
+      zDate(DateTime.now()),
+      'Caissier : ${operator.name}',
+      '-' * columns,
+      for (final (code, amount) in lines) row(names[code] ?? code, formatFcfa(amount)),
+      '-' * columns,
+      row('Rejoint les espèces', formatFcfa(total)),
+      if (reason.text.trim().isNotEmpty) 'Motif : ${reason.text.trim()}',
+    ], failure: 'Ticket de transfert non imprimé');
+  }
 
   /// « Synchroniser maintenant » de l'indicateur : envoi immédiat, sans quitter la caisse locale.
   Future<void> _syncNow() => _tryOnline(automatic: true);

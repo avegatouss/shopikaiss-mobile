@@ -246,6 +246,7 @@ String operationLabel(OfflineOperation o) => switch (o.type) {
   'cloture_session' => 'Clôture de session',
   'cloture_journee' => 'Z de journée ${o.content['jour'] is String ? formatDayFr(o.content['jour'] as String) : ''}'.trim(),
   'retour' => 'Retour',
+  'transfert_especes' => 'Mobile money → espèces',
   _ => o.type.replaceAll('_', ' '),
 };
 

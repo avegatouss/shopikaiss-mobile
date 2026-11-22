@@ -60,6 +60,9 @@ class AdapterFailure implements Exception {
 /// (Z de journée du terminal, identifiant d'opération facultatif ; puis closureDocument kind `z-jour-terminal`),
 /// syncStatus (état, compte à rebours) ; status porte `sync` et les capacités `open_session` (plafond) et `close_day`.
 ///
+/// Mobile money → espèces (lot 16) : cashTransferPreview (lignes {method, name, amount}, total, reason si impossible),
+/// commitCashTransfer {reason} avec un identifiant d'opération (idempotent). Capacité `cash_transfer`.
+///
 /// Livre de caisse (2.1 lot 14) : cashBook {from, to} (livre local du poste, sans réseau ; un caissier sans
 /// `livre_caisse_voir` ne voit que ses sessions), cashBookOnline {from, to} (gérants, réseau, 30 jours au plus, copie
 /// gardée), cashBookCached (dernière copie en ligne ou null). Capacité `cash_book_online`.
@@ -169,6 +172,10 @@ class LocalRegisterAdapter {
         return engine.syncStatus.toJson(engine.now);
       case 'localSessions':
         return _localSessions();
+      case 'cashTransferPreview':
+        return _cashTransferPreview();
+      case 'commitCashTransfer':
+        return _commitCashTransfer(args, operationId);
       case 'cashBook':
         return _cashBook(args, online: false);
       case 'cashBookOnline':
@@ -395,6 +402,7 @@ class LocalRegisterAdapter {
               ? opening
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
       'close_day': cap(dayClosing),
+      'cash_transfer': {...cap(await engine.cashTransferBlocker(_operator)), 'available': engine.cashTransferSupported},
       'cash_book_online': cap(!engine.onlineCashBookSupported
           ? 'Livre de caisse en ligne non disponible sur ce terminal.'
           : _operator == null
@@ -869,6 +877,37 @@ class LocalRegisterAdapter {
     'today': engine.today,
     'sessions': [for (final s in (await engine.localSessions()).reversed) s.toJson()],
   };
+
+  /// Mobile money → espèces (lot 16) : ce qui partirait vers les espèces, moyen par moyen.
+  Future<Map<String, dynamic>> _cashTransferPreview() async {
+    final names = {for (final m in engine.snapshot?.methods ?? const <PaymentMethodInfo>[]) m.code: m.name};
+    final lines = await engine.cashTransferPreview();
+    return {
+      'available': engine.cashTransferSupported,
+      'reason': await engine.cashTransferBlocker(_operator),
+      'lines': [for (final (code, amount) in lines) {'method': code, 'name': names[code] ?? code, 'amount': amount, 'amount_label': formatFcfa(amount)}],
+      'total': lines.fold<int>(0, (s, l) => s + l.$2),
+      'total_label': formatFcfa(lines.fold<int>(0, (s, l) => s + l.$2)),
+    };
+  }
+
+  Future<Map<String, dynamic>> _commitCashTransfer(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.');
+    try {
+      final done = await engine.recordCashTransfer(operator, reason: args['reason'] as String?, operationUuid: _requireOperationId(operationId));
+      _emit('session');
+      final lines = (done.content['lignes'] as List).cast<Map>();
+      return {
+        'operation_id': done.uuid,
+        'lines': [for (final l in lines) {'method': l['moyen'], 'amount': l['montant']}],
+        'total': lines.fold<int>(0, (s, l) => s + (l['montant'] as int)),
+        'server_status': done.serverStatus,
+      };
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('transfert_refuse', e.message);
+    }
+  }
 
   /// Livre de caisse (2.1 lot 14) : local (file du poste) ou en ligne (gérants, copie gardée 30 jours).
   Future<Map<String, dynamic>> _cashBook(Map<String, dynamic> args, {required bool online}) async {

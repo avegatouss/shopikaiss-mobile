@@ -214,6 +214,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.multipleSessionsCapability,
           CaisseV2Client.cashBookCapability,
           CaisseV2Client.interfaceCapability,
+          CaisseV2Client.cashTransferCapability,
         ],
       ],
     );
@@ -958,7 +959,9 @@ class V2Engine extends CaisseEngine {
       saleExtrasSupported && sessionOpen && _serverOffers(CaisseV2Client.sessionCloseCapability) && hasRight(operator, 'caisse_cloturer');
 
   /// Attendu de la session d'après les opérations du terminal, par moyen de paiement ; null si son ouverture n'y figure pas.
-  Future<Map<String, int>?> _expectedCounts() async {
+  /// [partial] : session ouverte en ligne (aucune ouverture dans la file) : les montants des moyens autres que les
+  /// espèces restent justes (ils partent de 0) ; utilisé par le transfert vers les espèces (lot 16).
+  Future<Map<String, int>?> _expectedCounts({bool partial = false}) async {
     final expected = <String, int>{};
     final cash = (await v2.entities('moyen_paiement')).values.where((m) => m['especes'] == true).map((m) => m['code'] as String).firstOrNull ?? 'especes';
     for (final row in await v2.operationRows()) {
@@ -989,14 +992,20 @@ class V2Engine extends CaisseEngine {
             back[p['moyen'] as String] = back[p['moyen'] as String]! + (p['montant'] as int);
           }
           back.forEach((method, amount) => expected.update(method, (v) => v - amount, ifAbsent: () => -amount));
+        case 'transfert_especes':
+          for (final l in (content['lignes'] as List).cast<Map>()) {
+            final amount = l['montant'] as int;
+            expected.update(l['moyen'] as String, (v) => v - amount, ifAbsent: () => -amount);
+            expected.update(cash, (v) => v + amount, ifAbsent: () => amount);
+          }
         case 'ouverture_session':
           expected.update(cash, (v) => v + (content['fond'] as int), ifAbsent: () => content['fond'] as int);
           return expected;
         case 'cloture_session':
-          return null;
+          return partial ? expected : null;
       }
     }
-    return null;
+    return partial ? expected : null;
   }
 
   @override
@@ -1085,6 +1094,55 @@ class V2Engine extends CaisseEngine {
 
   /// Uuid du terminal appairé (lu avant la reconstruction de [_device]).
   String? get _deviceTerminal => _device['terminal_uuid'] as String?;
+
+  // ------------------------------------------------------------------ Mobile money → espèces (lot 16)
+
+  Map? get _transferRule => _shopRules?['transfert_especes'] as Map?;
+
+  @override
+  bool get cashTransferSupported => v2.contract21 && _serverOffers(CaisseV2Client.cashTransferCapability) && _transferRule?['actif'] == true;
+
+  @override
+  Future<List<(String, int)>> cashTransferPreview() async {
+    if (!cashTransferSupported || !sessionOpen) return const [];
+    final cashCodes = {for (final m in snapshot?.methods ?? const <PaymentMethodInfo>[]) if (m.isCash) m.code};
+    final expected = await _expectedCounts(partial: true) ?? const <String, int>{};
+    return [
+      for (final code in ((_transferRule?['moyens'] as List?) ?? const []).cast<String>())
+        if (!cashCodes.contains(code) && (expected[code] ?? 0) > 0) (code, expected[code]!),
+    ];
+  }
+
+  @override
+  Future<String?> cashTransferBlocker(Operator? operator) async {
+    if (!cashTransferSupported) return 'Transfert vers les espèces non disponible sur ce terminal.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'transfert_especes')) return '${operator.name} n’a pas le droit de transférer vers les espèces.';
+    if (!sessionOpen || _sessionUuid == null) return 'Aucune session de caisse ouverte sur ce terminal.';
+    if ((await cashTransferPreview()).isEmpty) return 'Aucun solde mobile money à transférer.';
+    return null;
+  }
+
+  @override
+  Future<OfflineOperation> recordCashTransfer(Operator operator, {String? reason, String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) return _view(existing);
+    }
+    if (await cashTransferBlocker(operator) case final refusal?) throw OfflineRefusal(refusal);
+    final remark = reason?.trim() ?? '';
+    if (remark.length > 500) throw const OfflineRefusal('Motif trop long (500 caractères au plus).');
+    final lines = await cashTransferPreview();
+    final operation = await _record(operationUuid ?? _newUuid(), 'transfert_especes', operator, (_) => {
+      'session_uuid': _sessionUuid!,
+      'lignes': [for (final (code, amount) in lines) {'moyen': code, 'montant': amount}],
+      'motif': remark.isEmpty ? null : remark,
+    });
+    await _rebuild();
+    await _afterWrite();
+    return operation;
+  });
 
   @override
   bool get onlineCashBookSupported => v2.contract21 && _serverOffers(CaisseV2Client.cashBookCapability);
