@@ -215,6 +215,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.cashBookCapability,
           CaisseV2Client.interfaceCapability,
           CaisseV2Client.cashTransferCapability,
+          CaisseV2Client.preSaleCapability,
         ],
       ],
     );
@@ -969,8 +970,17 @@ class V2Engine extends CaisseEngine {
       final operation = row['operation'] as Map;
       final content = operation['contenu'] as Map;
       switch (operation['type']) {
+        case 'prevente_creer':
+          if ((content['acompte'] as int) > 0 && content['acompte_moyen'] is String) {
+            expected.update(content['acompte_moyen'] as String, (v) => v + (content['acompte'] as int), ifAbsent: () => content['acompte'] as int);
+          }
+        case 'prevente_annuler':
+          if (content['remboursement'] case final Map refund) {
+            expected.update(refund['moyen'] as String, (v) => v - (refund['montant'] as int), ifAbsent: () => -(refund['montant'] as int));
+          }
         case 'vente':
           for (final p in (content['paiements'] as List).cast<Map>()) {
+            if (p['moyen'] == preSaleDepositMethod) continue; // acompte déjà compté à sa réception
             final amount = (p['montant'] as int) + (p['ecart_arrondi'] as int? ?? 0);
             expected.update(p['moyen'] as String, (v) => v + amount, ifAbsent: () => amount);
           }
@@ -1094,6 +1104,238 @@ class V2Engine extends CaisseEngine {
 
   /// Uuid du terminal appairé (lu avant la reconstruction de [_device]).
   String? get _deviceTerminal => _device['terminal_uuid'] as String?;
+
+  // ------------------------------------------------------------------ Prévente / réservations (lot 15)
+
+  @override
+  bool get preSaleSupported => v2.contract21 && _serverOffers(CaisseV2Client.preSaleCapability) && (_shopRules?['prevente'] as Map?)?['actif'] == true;
+
+  @override
+  String? preSaleBlocker(Operator? operator) {
+    if (!preSaleSupported) return 'Prévente non disponible sur ce terminal.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'prevente')) return '${operator.name} n’a pas le droit de faire une prévente.';
+    return null;
+  }
+
+  @override
+  Future<List<PreSale>> preSales({String query = '', bool openOnly = false}) => serialized(() => _preSalesLocked(query: query, openOnly: openOnly));
+
+  /// Préventes du poste depuis sa file (création, modification, retrait, désistement), puis celles publiées par la
+  /// boutique qu'il ne connaît pas (web, autres postes). Une prévente du poste intégrée puis retirée de la
+  /// publication a été retirée ou annulée ailleurs : elle n'est plus ouverte.
+  Future<List<PreSale>> _preSalesLocked({String query = '', bool openOnly = false}) async {
+    final own = <String, PreSale>{};
+    final created = <String, Map>{};
+    for (final row in (await v2.operationRows()).reversed) {
+      if (row['etat'] == V2OperationState.rejected) continue;
+      final operation = row['operation'] as Map;
+      final c = operation['contenu'] as Map;
+      switch (operation['type']) {
+        case 'prevente_creer':
+          final client = c['client'] as Map;
+          own[c['prevente_uuid'] as String] = PreSale(
+            uuid: c['prevente_uuid'] as String,
+            code: c['code'] as String,
+            customerName: client['nom'] as String,
+            customerPhone: client['telephone'] as String?,
+            customerUuid: client['client_uuid'] as String?,
+            pickupAt: DateTime.tryParse('${c['retrait_prevu']}'),
+            lines: [for (final l in (c['lignes'] as List).cast<Map>()) PreSaleLine.fromJson(l)],
+            total: c['total'] as int,
+            deposit: c['acompte'] as int,
+            depositMethod: c['acompte_moyen'] as String?,
+            note: c['note'] as String?,
+            createdAt: DateTime.tryParse('${operation['cree_le']}'),
+            serverState: row['etat'] as String,
+            serverMessage: (row['raison'] as Map?)?['message'] as String?,
+          );
+          created[c['prevente_uuid'] as String] = row;
+        case 'prevente_modifier':
+          final p = own[c['prevente_uuid']];
+          if (p == null) continue;
+          final client = c['client'] as Map;
+          p
+            ..customerName = client['nom'] as String
+            ..customerPhone = client['telephone'] as String?
+            ..customerUuid = client['client_uuid'] as String?
+            ..pickupAt = DateTime.tryParse('${c['retrait_prevu']}')
+            ..lines = [for (final l in (c['lignes'] as List).cast<Map>()) PreSaleLine.fromJson(l)]
+            ..total = c['total'] as int
+            ..note = c['note'] as String?;
+        case 'prevente_convertir':
+          own[c['prevente_uuid']]?.status = 'retiree';
+        case 'prevente_annuler':
+          final p = own[c['prevente_uuid']];
+          if (p == null) continue;
+          p.status = 'desistee';
+          if (c['remboursement'] case final Map refund) {
+            p.refunded += refund['montant'] as int;
+            p.deposit -= refund['montant'] as int;
+          }
+      }
+    }
+    final published = await v2.entities('prevente');
+    final list = <PreSale>[];
+    for (final p in own.values) {
+      // Retirée ou annulée ailleurs : la boutique ne la publie plus (après la fenêtre de publication).
+      final row = created[p.uuid]!;
+      final integratedAt = row['etat'] == V2OperationState.integrated ? DateTime.tryParse('${row['maj_le']}') : null;
+      if (p.open && !published.containsKey(p.uuid) && integratedAt != null && now.difference(integratedAt) > _publicationDelay) p.status = 'close_ailleurs';
+      list.add(p);
+    }
+    for (final e in published.entries) {
+      if (own.containsKey(e.key) || e.value['statut'] != 'ouverte') continue;
+      final d = e.value;
+      final client = d['client'] as Map;
+      list.add(PreSale(
+        uuid: e.key,
+        code: d['code'] as String,
+        customerName: client['nom'] as String,
+        customerPhone: client['telephone'] as String?,
+        customerUuid: client['client_uuid'] as String?,
+        pickupAt: DateTime.tryParse('${d['retrait_prevu']}'),
+        lines: [for (final l in (d['lignes'] as List).cast<Map>()) PreSaleLine.fromJson(l)],
+        total: d['total'] as int,
+        deposit: d['acompte'] as int,
+        depositMethod: d['acompte_moyen'] as String?,
+        note: d['note'] as String?,
+        createdAt: DateTime.tryParse('${d['cree_le']}'),
+        local: false,
+      ));
+    }
+    // Retirées ici mais encore publiées (conversion pas encore intégrée) : déjà fermées localement.
+    final q = query.trim().toLowerCase();
+    final digits = q.replaceAll(RegExp(r'\D'), '');
+    final out = [
+      for (final p in list)
+        if ((!openOnly || p.open) &&
+            (q.isEmpty || p.code.toLowerCase().contains(q) || p.customerName.toLowerCase().contains(q) || (digits.length >= 3 && (p.customerPhone ?? '').replaceAll(RegExp(r'\D'), '').contains(digits))))
+          p,
+    ]..sort((a, b) => (b.createdAt ?? DateTime(2000)).compareTo(a.createdAt ?? DateTime(2000)));
+    return out;
+  }
+
+  @override
+  List<CartLine> preSaleCart(PreSale preSale) {
+    final s = snapshot;
+    if (s == null) return const [];
+    final ids = {for (final e in _productUuids.entries) e.value: e.key};
+    final packs = {for (final e in _packagingUuids.entries) e.value: e.key};
+    return [
+      for (final l in preSale.lines)
+        if (ids[l.productUuid] case final id? when s.byId(id) != null)
+          CartLine(
+            product: s.byId(id)!,
+            packaging: l.packagingUuid == null ? null : s.byId(id)!.packaging(packs[l.packagingUuid] ?? -1),
+            quantity: BigInt.from(Decimal6.parse(l.quantity)),
+          ),
+    ];
+  }
+
+  @override
+  Future<PreSale> createPreSale(
+    Operator operator, {
+    required String customerName,
+    String? customerPhone,
+    String? customerUuid,
+    DateTime? pickupAt,
+    required List<CartLine> lines,
+    int deposit = 0,
+    PaymentMethodInfo? depositMethod,
+    int? received,
+    String? reference,
+    String? note,
+    String? operationUuid,
+  }) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) {
+        final uuid = ((existing['operation'] as Map)['contenu'] as Map)['prevente_uuid'];
+        return (await _preSalesLocked()).firstWhere((p) => p.uuid == uuid);
+      }
+    }
+    if (preSaleBlocker(operator) case final refusal?) throw OfflineRefusal(refusal);
+    final name = customerName.trim();
+    if (name.isEmpty || name.length > 160) throw const OfflineRefusal('Indiquez le nom du client (160 caractères au plus).');
+    final phone = customerPhone?.trim();
+    if ((phone?.length ?? 0) > 40) throw const OfflineRefusal('Téléphone trop long.');
+    if (lines.isEmpty) throw const OfflineRefusal('Ajoutez au moins un article à la prévente.');
+    if (lines.length > 100) throw const OfflineRefusal('Au plus 100 articles par prévente.');
+    final remark = note?.trim() ?? '';
+    if (remark.length > 500) throw const OfflineRefusal('Note trop longue (500 caractères au plus).');
+    final items = <Map<String, dynamic>>[];
+    for (final l in lines) {
+      final product = _productUuids[l.product.id] ?? (throw OfflineRefusal('« ${l.product.name} » n’est plus au catalogue local.'));
+      final pack = l.packaging == null ? null : (_packagingUuids[l.packaging!.id] ?? (throw OfflineRefusal('Conditionnement de « ${l.label} » retiré.')));
+      items.add({
+        'ligne_uuid': _newUuid(),
+        'produit_uuid': product,
+        'conditionnement_uuid': pack,
+        'libelle': l.label.length > 200 ? l.label.substring(0, 200) : l.label,
+        'quantite': Decimal6.format(l.quantity.toInt()),
+        'prix_unitaire': l.unitPrice,
+        'remise': l.discount,
+        'total': l.base - l.discount,
+      });
+    }
+    final total = items.fold<int>(0, (s, l) => s + (l['total'] as int));
+    if (deposit < 0 || deposit > total) throw OfflineRefusal('L’acompte va de 0 à ${formatFcfa(total)}.');
+    if (deposit > 0) {
+      if (depositMethod == null) throw const OfflineRefusal('Choisissez le moyen de l’acompte.');
+      if (!(snapshot?.methods.any((m) => m.code == depositMethod.code) ?? false)) throw OfflineRefusal('« ${depositMethod.name} » n’est pas un moyen de cette caisse.');
+      if (!sessionOpen || _sessionUuid == null) throw const OfflineRefusal('Ouvrez la session de caisse pour encaisser un acompte.');
+      if (depositMethod.isCash && (received ?? deposit) < deposit) throw const OfflineRefusal('Le montant reçu est inférieur à l’acompte.');
+      if (depositMethod.referenceMode == 'obligatoire' && (reference ?? '').trim().isEmpty) throw OfflineRefusal('Référence obligatoire pour « ${depositMethod.name} ».');
+    }
+    final known = {for (final p in await _preSalesLocked()) p.code};
+    final code = newPreSaleCode(preSalePrefix('${_device['uuid']}'), known);
+    final uuid = _newUuid();
+    await _record(operationUuid ?? _newUuid(), 'prevente_creer', operator, (_) => {
+      'prevente_uuid': uuid,
+      'code': code,
+      'client': {'nom': name, 'telephone': phone == null || phone.isEmpty ? null : phone, 'client_uuid': customerUuid},
+      'retrait_prevu': pickupAt == null ? null : '${pickupAt.toUtc().toIso8601String().substring(0, 19)}Z',
+      'lignes': items,
+      'total': total,
+      'acompte': deposit,
+      'acompte_moyen': deposit > 0 ? depositMethod!.code : null,
+      'acompte_recu': deposit > 0 && depositMethod!.isCash ? (received ?? deposit) : null,
+      'acompte_reference': deposit > 0 && !depositMethod!.isCash && (reference ?? '').trim().isNotEmpty ? reference!.trim() : null,
+      'session_uuid': deposit > 0 ? _sessionUuid : null,
+      'note': remark.isEmpty ? null : remark,
+    });
+    await _afterWrite();
+    return (await _preSalesLocked()).firstWhere((p) => p.uuid == uuid);
+  });
+
+  @override
+  Future<PreSale> cancelPreSale(Operator operator, String uuid, {required String reason, PaymentMethodInfo? refundMethod, int refund = 0, String? reference, String? operationUuid}) =>
+      serialized(() async {
+        if (operationUuid != null) {
+          if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+          if (await v2.operation(operationUuid) != null) return (await _preSalesLocked()).firstWhere((p) => p.uuid == uuid);
+        }
+        if (preSaleBlocker(operator) case final refusal?) throw OfflineRefusal(refusal);
+        final p = (await _preSalesLocked()).where((x) => x.uuid == uuid).firstOrNull ?? (throw const OfflineRefusal('Prévente introuvable sur ce poste.'));
+        if (!p.open) throw OfflineRefusal(p.status == 'retiree' ? 'Prévente ${p.code} déjà retirée.' : 'Prévente ${p.code} déjà fermée.');
+        final motive = reason.trim();
+        if (motive.isEmpty || motive.length > 500) throw const OfflineRefusal('Indiquez le motif du désistement (500 caractères au plus).');
+        if (refund < 0 || refund > p.deposit) throw OfflineRefusal('Le remboursement va de 0 à ${formatFcfa(p.deposit)}.');
+        if (refund > 0) {
+          if (refundMethod == null) throw const OfflineRefusal('Choisissez le moyen du remboursement.');
+          if (!sessionOpen || _sessionUuid == null) throw const OfflineRefusal('Ouvrez la session de caisse pour rembourser.');
+        }
+        await _record(operationUuid ?? _newUuid(), 'prevente_annuler', operator, (_) => {
+          'prevente_uuid': uuid,
+          'motif': motive,
+          'remboursement': refund > 0 ? {'moyen': refundMethod!.code, 'montant': refund, 'reference': (reference ?? '').trim().isEmpty ? null : reference!.trim()} : null,
+          'session_uuid': refund > 0 ? _sessionUuid : null,
+        });
+        await _afterWrite();
+        return (await _preSalesLocked()).firstWhere((x) => x.uuid == uuid);
+      });
 
   // ------------------------------------------------------------------ Mobile money → espèces (lot 16)
 
@@ -2319,6 +2561,20 @@ class V2Engine extends CaisseEngine {
         }
         final s = _requireSelling();
         if (!extras.isEmpty && !saleExtrasSupported) throw const OfflineRefusal('Remise globale, livraison et note : disponibles avec le contrat 2.1.');
+        // Prévente retirée (lot 15) : ouverte ici, acompte restant déduit par le paiement technique `acompte_prevente`.
+        final preSale = extras.preSale;
+        if (preSale != null) {
+          if (!preSaleSupported) throw const OfflineRefusal('Prévente non disponible sur ce terminal.');
+          final current = (await _preSalesLocked()).where((p) => p.uuid == preSale.uuid).firstOrNull;
+          if (current == null) throw const OfflineRefusal('Prévente introuvable sur ce poste : synchronisez puis réessayez.');
+          if (!current.open) throw OfflineRefusal(current.status == 'retiree' ? 'Prévente ${current.code} déjà retirée.' : 'Prévente ${current.code} annulée : elle ne se retire plus.');
+          if (current.deposit != preSale.deposit) throw const OfflineRefusal('Acompte de la prévente modifié : rechargez-la.');
+          payments = [
+            if (preSale.deposit > 0 && !payments.any((p) => p.method.code == preSaleDepositMethod))
+              CartPayment(method: PaymentMethodInfo({'code': preSaleDepositMethod, 'nom': 'Acompte prévente', 'especes': false, 'reference': 'aucune'}), amount: preSale.deposit),
+            ...payments,
+          ];
+        }
         var passages = const <Map<String, dynamic>>[];
         if (extras.passes.isNotEmpty) {
           if (payments.isNotEmpty) throw const OfflineRefusal('Une vente payée par pass ne prend aucun autre moyen de paiement.');
@@ -2415,6 +2671,14 @@ class V2Engine extends CaisseEngine {
           calculation: revision21 ? '2' : '1',
         );
         if (extras.sharedCart == _heldCart?.$1) _heldCart = null;
+        if (preSale != null) {
+          // Émise juste après la vente de conversion (note A §3).
+          await _record(_newUuid(), 'prevente_convertir', operator, (_) => {
+            'prevente_uuid': preSale.uuid,
+            'vente_operation_uuid': uuid,
+            'acompte_impute': preSale.deposit,
+          });
+        }
         // Reste par lot : la vente suivante ne doit pas puiser dans ce qui vient de partir.
         if (allocation.isNotEmpty) await _rebuild();
         await _afterWrite();

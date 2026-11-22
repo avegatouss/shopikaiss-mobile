@@ -1,3 +1,4 @@
+import 'pre_sale.dart';
 import 'money.dart';
 import 'web_rules.dart';
 
@@ -626,7 +627,11 @@ class SaleExtras {
     this.wholesale = false,
     this.passes = const [],
     this.order,
+    this.preSale,
   });
+
+  /// Prévente convertie par cette vente (2.1 lot 15) : `prevente_uuid` et paiement `acompte_prevente` de l'acompte.
+  final PreSaleUse? preSale;
 
   final int globalDiscount;
   final DiscountEntry? globalEntry;
@@ -660,7 +665,8 @@ class SaleExtras {
       sharedCart == null &&
       !wholesale &&
       passes.isEmpty &&
-      order == null;
+      order == null &&
+      preSale == null;
 }
 
 /// Règlement complet d'une commande restaurant par une vente : chaque ligne du panier règle une ligne de la commande.

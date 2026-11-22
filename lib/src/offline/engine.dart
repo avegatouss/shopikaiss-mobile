@@ -13,6 +13,7 @@ import 'store.dart';
 export 'caisse_engine.dart';
 export 'cash_book.dart';
 export 'local_sessions.dart';
+export 'pre_sale.dart';
 export 'register_interface.dart';
 
 /// Caisse hors ligne de ce terminal (ADR-421) : appairage, référentiel, règles, file d'opérations et synchronisation.

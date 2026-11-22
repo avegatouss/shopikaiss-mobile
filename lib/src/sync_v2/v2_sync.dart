@@ -96,7 +96,10 @@ class V2Sync {
           // `interface1` : première annonce de `caisse.interface` (2.1 lot 13), instantané pour recevoir `interface_caisse`.
           '${contract21 && shared(CaisseV2Client.interfaceCapability) ? '+interface1' : ''}'
           // `transfert1` : première annonce de `transfert.especes` (lot 16), instantané pour recevoir la règle et le droit.
-          '${contract21 && shared(CaisseV2Client.cashTransferCapability) ? '+transfert1' : ''}';
+          '${contract21 && shared(CaisseV2Client.cashTransferCapability) ? '+transfert1' : ''}'
+          // `prevente1` : première annonce de `prevente.v1` (lot 15), instantané pour recevoir la règle, le droit et les
+          // préventes ouvertes publiées.
+          '${contract21 && shared(CaisseV2Client.preSaleCapability) ? '+prevente1' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {

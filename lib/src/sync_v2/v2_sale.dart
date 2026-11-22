@@ -201,6 +201,7 @@ class V2SaleBuilder {
       if (revision21) 'client_nom': extras.customer?.name,
       if (revision21) 'tarif': extras.wholesale ? 'gros' : (cart.any((l) => l.wholesale) ? 'gros_quantite' : 'detail'),
       if (extras.sharedCart != null) 'panier_uuid': extras.sharedCart,
+      if (extras.preSale != null) 'prevente_uuid': extras.preSale!.uuid,
       'mouvements': movements,
       'autorisations': <Map<String, dynamic>>[if (approval != null) approval.toJson()],
       if (passages.isNotEmpty) 'passages': passages,

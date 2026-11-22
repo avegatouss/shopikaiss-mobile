@@ -12,6 +12,7 @@ import 'cash_book.dart';
 import 'catalogue_edit.dart';
 import 'local_sessions.dart';
 import 'models.dart';
+import 'pre_sale.dart';
 import 'register_interface.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -231,6 +232,41 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Interface de la caisse publiée pour ce terminal (2.1 lot 13, `interface_caisse`) ; défauts sans la capacité.
   RegisterInterface get publishedInterface => RegisterInterface.defaults;
+
+  // ------------------------------------------------------------------ Prévente / réservations (2.1 lot 15)
+
+  /// Capacité `prevente.v1` accordée et option de la boutique (`boutique.regles.prevente.actif`).
+  bool get preSaleSupported => false;
+
+  /// Pourquoi [operator] ne peut pas utiliser la prévente, ou null.
+  String? preSaleBlocker(Operator? operator) => 'Prévente non disponible sur ce terminal.';
+
+  /// Préventes connues du poste (les siennes et celles publiées par la boutique), la plus récente d'abord ; [query] :
+  /// code, nom ou téléphone ; [openOnly] : ouvertes seulement.
+  Future<List<PreSale>> preSales({String query = '', bool openOnly = false}) async => const [];
+
+  /// Nouvelle prévente : client (nom obligatoire), lignes du panier, acompte facultatif sur un moyen de la boutique.
+  Future<PreSale> createPreSale(
+    Operator operator, {
+    required String customerName,
+    String? customerPhone,
+    String? customerUuid,
+    DateTime? pickupAt,
+    required List<CartLine> lines,
+    int deposit = 0,
+    PaymentMethodInfo? depositMethod,
+    int? received,
+    String? reference,
+    String? note,
+    String? operationUuid,
+  }) => throw const OfflineRefusal('Prévente non disponible sur ce terminal.');
+
+  /// Désistement : motif obligatoire, remboursement facultatif de tout ou partie de l'acompte.
+  Future<PreSale> cancelPreSale(Operator operator, String uuid, {required String reason, PaymentMethodInfo? refundMethod, int refund = 0, String? reference, String? operationUuid}) =>
+      throw const OfflineRefusal('Prévente non disponible sur ce terminal.');
+
+  /// Lignes de la prévente remises au panier pour son retrait (produits encore au catalogue local).
+  List<CartLine> preSaleCart(PreSale preSale) => const [];
 
   // ------------------------------------------------------------------ Mobile money → espèces (2.1 lot 16)
 
@@ -1117,7 +1153,7 @@ abstract class CaisseEngine extends EngineNotifier {
     if (s.rules.maxSaleAmount != null && totals.payable > s.rules.maxSaleAmount!) {
       throw OfflineRefusal('Vente au-dessus du montant maximal hors ligne (${formatFcfa(s.rules.maxSaleAmount!)}).');
     }
-    final allowed = {for (final m in s.methods) m.code, if (extras.passes.isNotEmpty) PassRules.method};
+    final allowed = {for (final m in s.methods) m.code, if (extras.passes.isNotEmpty) PassRules.method, if (extras.preSale != null) preSaleDepositMethod};
     var paid = 0;
     for (final payment in payments) {
       if (!allowed.contains(payment.method.code)) throw OfflineRefusal('« ${payment.method.name} » n’est pas autorisé hors ligne.');

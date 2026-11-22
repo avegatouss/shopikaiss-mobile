@@ -7,6 +7,7 @@
 /// Les colonnes et les libellés sont ceux du « Livre de caisse journalier » des rapports web.
 library;
 
+import 'pre_sale.dart';
 import 'x_z_report.dart';
 
 /// Une ligne du livre (colonnes du web, noms du contrat `livre-caisse.json#/$defs/mouvement`).
@@ -228,6 +229,7 @@ CashBook buildLocalCashBook(
     for (final sale in s.sales) {
       for (final p in (((sale['contenu'] as Map)['paiements'] as List?) ?? const []).cast<Map>()) {
         final code = '${p['moyen']}';
+        if (code == preSaleDepositMethod) continue; // acompte déjà compté à sa réception
         sold[code] = (sold[code] ?? 0) + _int(p['montant']) + _int(p['ecart_arrondi']);
       }
     }
@@ -248,6 +250,17 @@ CashBook buildLocalCashBook(
     for (final e in back.entries.where((e) => !cashCodes.contains(e.key))) {
       if (e.value != 0) rows.add(row('Remboursements de retours et annulations', names[e.key] ?? e.key, others: -e.value));
     }
+    // Prévente (lot 15) : acomptes reçus et remboursés, à part des ventes ; l'acompte déduit d'une vente n'entre pas.
+    s.preSaleDeposits.forEach((code, amount) {
+      rows.add(cashCodes.contains(code)
+          ? row('Acomptes de prévente', names[code] ?? code, cashIn: amount)
+          : row('Acomptes de prévente', names[code] ?? code, others: amount));
+    });
+    s.preSaleRefunds.forEach((code, amount) {
+      rows.add(cashCodes.contains(code)
+          ? row('Acomptes de prévente remboursés', names[code] ?? code, cashOut: amount)
+          : row('Acomptes de prévente remboursés', names[code] ?? code, others: -amount));
+    });
     // Transferts de fin de journée (lot 16) : sortie du moyen, entrée des espèces.
     for (final t in s.transfers) {
       final at = DateTime.tryParse('${t['cree_le']}');
@@ -260,7 +273,8 @@ CashBook buildLocalCashBook(
     if (s.closed) {
       final cashSold = sold.entries.where((e) => cashCodes.contains(e.key)).fold(0, (a, e) => a + e.value);
       final cashBack = back.entries.where((e) => cashCodes.contains(e.key)).fold(0, (a, e) => a + e.value);
-      final expected = s.float == null ? null : s.float! + cashSold - cashBack + s.transferredToCash;
+      int cashOf(Map<String, int> m) => m.entries.where((e) => cashCodes.contains(e.key)).fold(0, (a, e) => a + e.value);
+      final expected = s.float == null ? null : s.float! + cashSold - cashBack + s.transferredToCash + cashOf(s.preSaleDeposits) - cashOf(s.preSaleRefunds);
       final counted = (s.closure!['contenu'] as Map)['compte'] as int?;
       rows.add(row('Clôture (poste)', cashName,
           at: s.closedAt, expected: expected, counted: counted, difference: expected == null || counted == null ? null : counted - expected));

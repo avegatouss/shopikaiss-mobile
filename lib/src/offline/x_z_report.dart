@@ -17,6 +17,7 @@ import 'dart:typed_data';
 import '../printer/escpos.dart';
 import 'models.dart';
 import 'money.dart';
+import 'pre_sale.dart';
 
 /// Types de document (`data-ticket-kind`).
 abstract final class ZKind {
@@ -88,6 +89,12 @@ class ClosureSession {
   }
 
   int get transferredToCash => transferredByMethod.values.fold(0, (a, b) => a + b);
+
+  /// Prévente (lot 15) : acomptes reçus et remboursés dans la session, par moyen (rubrique « Prévente », hors ventes).
+  final Map<String, int> preSaleDeposits = {};
+  final Map<String, int> preSaleRefunds = {};
+  int preSaleDepositsCount = 0;
+  int preSaleRefundsCount = 0;
 
   /// Tickets modifiés en ligne dans la session (`z.session.modifications`), forme `detail_modification`.
   final List<Map> onlineModifications = [];
@@ -259,6 +266,20 @@ List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSess
           for (final p in ((sale['contenu'] as Map)['paiements'] as List? ?? const []).cast<Map>()) {
             methods.update('${p['moyen']}', (v) => v + _int(p['montant']), ifAbsent: () => _int(p['montant']));
           }
+        }
+      case 'prevente_creer' || 'prevente_annuler':
+        final amount = o['type'] == 'prevente_creer' ? _int(content['acompte']) : _int((content['remboursement'] as Map?)?['montant']);
+        if (amount <= 0) continue;
+        final method = o['type'] == 'prevente_creer' ? '${content['acompte_moyen']}' : '${(content['remboursement'] as Map)['moyen']}';
+        final uuid = content['session_uuid'] as String?;
+        if (current == null || current.closed || (uuid != null && current.uuid != null && current.uuid != uuid)) current = start(uuid: uuid);
+        current.uuid ??= uuid;
+        if (o['type'] == 'prevente_creer') {
+          current.preSaleDeposits.update(method, (v) => v + amount, ifAbsent: () => amount);
+          current.preSaleDepositsCount++;
+        } else {
+          current.preSaleRefunds.update(method, (v) => v + amount, ifAbsent: () => amount);
+          current.preSaleRefundsCount++;
         }
       case 'transfert_especes':
         final uuid = content['session_uuid'] as String?;
@@ -718,7 +739,7 @@ class ZContext {
   /// moyen espèces non local reste compté en espèces (réponse 19 de A : le booléen fait foi, pas le texte du code).
   final Set<String> publishedCashCodes;
 
-  Map<String, String> get methodNames => {for (final m in methods) m.code: m.name};
+  Map<String, String> get methodNames => {preSaleDepositMethod: 'Acompte prévente', for (final m in methods) m.code: m.name};
   Set<String> get cashCodes => {for (final m in methods) if (m.isCash) m.code, ...publishedCashCodes};
   String get cashCode => cashCodes.firstOrNull ?? 'especes';
 }
@@ -743,7 +764,9 @@ class ZContext {
     return sum + back.fold<int>(0, (t, p) => t + _int(p['montant']));
   });
   final refunds = local + online;
-  final expected = s.float == null ? null : s.float! + salesCash - refunds + s.transferredToCash;
+  int cashOf(Map<String, int> byMethod) => byMethod.entries.where((e) => cash.contains(e.key)).fold(0, (a, e) => a + e.value);
+  final preSale = cashOf(s.preSaleDeposits) - cashOf(s.preSaleRefunds);
+  final expected = s.float == null ? null : s.float! + salesCash - refunds + s.transferredToCash + preSale;
   final counted = (s.closure?['contenu'] as Map?)?['compte'] as int?;
   return (float: s.float, salesCash: salesCash, refunds: refunds, expected: expected, counted: counted, difference: counted == null || expected == null ? null : counted - expected);
 }
@@ -756,7 +779,7 @@ List<Map<String, dynamic>> _methodControl(List<ClosureSession> sessions, ZContex
     for (final sale in s.sales) {
       for (final p in ((sale['contenu'] as Map)['paiements'] as List? ?? const []).cast<Map>()) {
         final code = '${p['moyen']}';
-        if (context.cashCodes.contains(code) || !_counted(sale)) continue;
+        if (context.cashCodes.contains(code) || code == preSaleDepositMethod || !_counted(sale)) continue;
         theoretical[code] = (theoretical[code] ?? 0) + _int(p['montant']) + _int(p['ecart_arrondi']);
       }
     }
@@ -766,6 +789,12 @@ List<Map<String, dynamic>> _methodControl(List<ClosureSession> sessions, ZContex
       counted[code] = (counted[code] ?? 0) + _int(c['montant']);
     }
     s.transferredByMethod.forEach((code, amount) => theoretical[code] = (theoretical[code] ?? 0) - amount);
+    s.preSaleDeposits.forEach((code, amount) {
+      if (!context.cashCodes.contains(code)) theoretical[code] = (theoretical[code] ?? 0) + amount;
+    });
+    s.preSaleRefunds.forEach((code, amount) {
+      if (!context.cashCodes.contains(code)) theoretical[code] = (theoretical[code] ?? 0) - amount;
+    });
   }
   final names = context.methodNames;
   final moved = <String, int>{};
@@ -804,6 +833,12 @@ Map<String, dynamic> sessionZModel(ClosureFacts facts, ClosureSession session, Z
   final lines = <Map<String, dynamic>>[_moneyOrDash('Fond initial', cash.float), zMoney('Ventes espèces', cash.salesCash)];
   if (cash.refunds != 0) lines.add(zMoney('Remboursements', -cash.refunds));
   if (session.transferredToCash != 0) lines.add(zMoney('Transferts vers les espèces', session.transferredToCash));
+  final cashCodes = context.cashCodes.isEmpty ? {'especes'} : context.cashCodes;
+  final depositsCash = session.preSaleDeposits.entries.where((e) => cashCodes.contains(e.key)).fold(0, (a, e) => a + e.value);
+  final refundsCash = session.preSaleRefunds.entries.where((e) => cashCodes.contains(e.key)).fold(0, (a, e) => a + e.value);
+  // Rubrique Prévente (lot 15) : argent reçu ou rendu, jamais du chiffre d'affaires avant le retrait.
+  if (depositsCash != 0) lines.add(zMoney('Acomptes de prévente reçus (${session.preSaleDepositsCount})', depositsCash));
+  if (refundsCash != 0) lines.add(zMoney('Acomptes de prévente remboursés (${session.preSaleRefundsCount})', -refundsCash));
   if (!blind) lines.add(_moneyOrDash('Théorique', cash.expected, bold: true));
   if (cash.counted != null) {
     lines.add(zMoney('Compté', cash.counted!, bold: true));
@@ -897,7 +932,7 @@ List<Map<String, dynamic>> terminalDayTotals(List<ClosureSession> sessions, ZCon
     for (final sale in s.sales) {
       for (final p in ((sale['contenu'] as Map)['paiements'] as List? ?? const []).cast<Map>()) {
         final code = '${p['moyen']}';
-        if (context.cashCodes.contains(code) || !_counted(sale)) continue;
+        if (context.cashCodes.contains(code) || code == preSaleDepositMethod || !_counted(sale)) continue;
         theoretical[code] = (theoretical[code] ?? 0) + _int(p['montant']) + _int(p['ecart_arrondi']);
         counted.putIfAbsent(code, () => null);
       }
@@ -908,6 +943,12 @@ List<Map<String, dynamic>> terminalDayTotals(List<ClosureSession> sessions, ZCon
       counted[code] = (counted[code] ?? 0) + _int(c['montant']);
     }
     s.transferredByMethod.forEach((code, amount) => theoretical[code] = (theoretical[code] ?? 0) - amount);
+    s.preSaleDeposits.forEach((code, amount) {
+      if (!context.cashCodes.contains(code)) theoretical[code] = (theoretical[code] ?? 0) + amount;
+    });
+    s.preSaleRefunds.forEach((code, amount) {
+      if (!context.cashCodes.contains(code)) theoretical[code] = (theoretical[code] ?? 0) - amount;
+    });
   }
   return [for (final e in theoretical.entries) {'moyen': e.key, 'theorique': e.value, 'compte': counted[e.key]}];
 }
