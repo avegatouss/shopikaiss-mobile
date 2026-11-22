@@ -59,6 +59,11 @@ class FakeV2Server implements V2Transport {
   /// Raison rendue avec un état forcé par [verdict] (`recue` en attente de version, `a_arbitrer` d'un code restaurant).
   Map<String, dynamic>? Function(Map<String, dynamic> op)? reasonFor;
 
+  /// Livre de caisse en ligne (2.1 lot 14) : page rendue pour les paramètres reçus ; refus forcé.
+  Map<String, dynamic>? Function(Map<String, String> query)? cashBookPages;
+  V2Response? cashBookRefusal;
+  Map<String, String>? lastCashBookQuery;
+
   /// Capacités rendues à l'appairage et par `/etat`.
   List<String> capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes'];
 
@@ -213,6 +218,13 @@ class FakeV2Server implements V2Transport {
         final shown = corruptPage ? [...page.take(page.length - 1)] : page;
         return _ok({'instantane_uuid': '99999999-9999-4999-8999-999999999999', 'page': 1, 'entites': shown, 'empreinte': CanonicalJson.sha256Of(page)},
             'instantanes.json#/\$defs/page');
+      case ('GET', '/livre-caisse'):
+        // Livre de caisse en ligne (2.1 lot 14) : pages rendues par [cashBookPages] (suite → page suivante).
+        lastCashBookQuery = uri.queryParameters;
+        if (cashBookRefusal case final refusal?) return refusal;
+        final page = cashBookPages?.call(uri.queryParameters);
+        if (page == null) return _error(403, 'politique_refusee');
+        return _ok(page, 'livre-caisse.json#/\$defs/reponse');
       case ('GET', '/changements'):
         final since = int.parse(uri.queryParameters['curseur']!.substring(2));
         if (since < prunedThrough) return _error(410, 'curseur_expire');

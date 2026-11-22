@@ -60,6 +60,10 @@ class AdapterFailure implements Exception {
 /// (Z de journée du terminal, identifiant d'opération facultatif ; puis closureDocument kind `z-jour-terminal`),
 /// syncStatus (état, compte à rebours) ; status porte `sync` et les capacités `open_session` (plafond) et `close_day`.
 ///
+/// Livre de caisse (2.1 lot 14) : cashBook {from, to} (livre local du poste, sans réseau ; un caissier sans
+/// `livre_caisse_voir` ne voit que ses sessions), cashBookOnline {from, to} (gérants, réseau, 30 jours au plus, copie
+/// gardée), cashBookCached (dernière copie en ligne ou null). Capacité `cash_book_online`.
+///
 /// Clients (contrat 2.1) : searchCustomers {query}, createCustomer {name, phone}, setCustomer {uuid, name} ; uuid absent =
 /// client de passage. La vue donne `customer`.
 ///
@@ -164,6 +168,13 @@ class LocalRegisterAdapter {
         return engine.syncStatus.toJson(engine.now);
       case 'localSessions':
         return _localSessions();
+      case 'cashBook':
+        return _cashBook(args, online: false);
+      case 'cashBookOnline':
+        return _cashBook(args, online: true);
+      case 'cashBookCached':
+        final reader = _operator ?? (throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.'));
+        return {'book': (await engine.cachedCashBook(reader))?.toJson()};
       case 'closeDay':
         return _closeDay(operationId);
       case 'pair':
@@ -381,6 +392,13 @@ class LocalRegisterAdapter {
               ? opening
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
       'close_day': cap(dayClosing),
+      'cash_book_online': cap(!engine.onlineCashBookSupported
+          ? 'Livre de caisse en ligne non disponible sur ce terminal.'
+          : _operator == null
+          ? 'Identifiez le caissier.'
+          : engine.canReadOnlineCashBook(_operator!)
+          ? null
+          : 'Livre en ligne réservé aux gérants.', network: true),
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
       'close_session': cap(_operator == null ? 'Identifiez le caissier.' : (engine.canCloseSession(_operator!) ? null : 'Clôture non autorisée sur ce terminal.')),
@@ -848,6 +866,22 @@ class LocalRegisterAdapter {
     'today': engine.today,
     'sessions': [for (final s in (await engine.localSessions()).reversed) s.toJson()],
   };
+
+  /// Livre de caisse (2.1 lot 14) : local (file du poste) ou en ligne (gérants, copie gardée 30 jours).
+  Future<Map<String, dynamic>> _cashBook(Map<String, dynamic> args, {required bool online}) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.');
+    final from = _text(args, 'from', max: 10), to = _text(args, 'to', max: 10);
+    final day = RegExp(r'^\d{4}-\d{2}-\d{2}$');
+    if (!day.hasMatch(from) || !day.hasMatch(to)) throw const AdapterFailure('argument_invalide', 'Dates attendues au format AAAA-MM-JJ.');
+    try {
+      final book = online ? await engine.fetchCashBook(operator, from: from, to: to) : await engine.localCashBook(operator, from: from, to: to);
+      if (book == null) throw const AdapterFailure('livre_absent', 'Livre de caisse indisponible sur ce terminal.');
+      return {'book': book.toJson(), 'today': engine.today};
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('livre_refuse', e.message);
+    }
+  }
 
   /// Z de journée du terminal (2.1 lot 12) : idempotent par identifiant d'opération ; le document s'obtient ensuite par
   /// closureDocument {kind: z-jour-terminal}.

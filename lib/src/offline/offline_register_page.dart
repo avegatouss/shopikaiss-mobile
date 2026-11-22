@@ -20,6 +20,7 @@ import '../windows/presentation/brand_logo.dart';
 import '../windows/presentation/calculator.dart';
 import '../windows/presentation/searchable_choice.dart';
 import 'customer_display.dart';
+import 'cash_book_page.dart';
 import 'catalogue_edit.dart';
 import 'engine.dart';
 import 'local_prices.dart';
@@ -1409,6 +1410,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           if (operator != null)
             action(operator.name, Icons.person_outline, _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true) ? () => setState(() => _operator = null) : null),
           action('Ventes récentes', Icons.history, _openJournal),
+          if (operator != null) action('Livre de caisse', Icons.menu_book_outlined, _openCashBook),
           action('Reçu', Icons.receipt_long_outlined, _openJournal),
           action(_note == null ? 'Note' : 'Note ✓', Icons.note_alt_outlined, extras ? _editNote : null),
           if (_tier.cart || (wholesale != null && wholesale.manual && operator != null && _engine.hasRight(operator, wholesale.right)))
@@ -1457,6 +1459,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     onSelected: (choice) {
       if (choice == 'journal') {
         _openJournal();
+      } else if (choice == 'livre') {
+        _openCashBook();
       } else if (choice == 'caissier') {
         setState(() => _operator = null);
       } else if (choice == 'cloture') {
@@ -1484,6 +1488,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     itemBuilder: (context) => [
       if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
       const PopupMenuItem(value: 'journal', child: Text('Ventes et retours')),
+      if (_operator != null) const PopupMenuItem(value: 'livre', child: Text('Livre de caisse')),
       const PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
       if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
@@ -2677,6 +2682,13 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     ), failure: 'Bon non imprimé');
   }
 
+  /// Livre de caisse (2.1 lot 14) : livre du poste, et de la boutique pour un gérant.
+  void _openCashBook() {
+    final operator = _operator;
+    if (operator == null) return _toast('Identifiez le caissier.');
+    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => CashBookPage(engine: _engine, operator: operator)));
+  }
+
   void _openJournal() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -3238,7 +3250,26 @@ class _SessionOpeningState extends State<_SessionOpening> {
     _refresh();
   }
 
+  /// La caisse se reconstruit à chaque synchronisation : plafond et Z de journée relus (sessions intégrées entre-temps).
+  @override
+  void didUpdateWidget(covariant _SessionOpening oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _refresh();
+  }
+
+  bool _refreshing = false;
+
   Future<void> _refresh() async {
+    if (_refreshing) return;
+    _refreshing = true;
+    try {
+      await _read();
+    } finally {
+      _refreshing = false;
+    }
+  }
+
+  Future<void> _read() async {
     final engine = widget.engine;
     final blocker = await engine.sessionOpeningBlocker();
     final day = await engine.businessDay();

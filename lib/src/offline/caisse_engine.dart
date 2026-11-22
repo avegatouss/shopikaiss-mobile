@@ -8,6 +8,7 @@ import '../passes/pass_rules.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
 import '../restaurant/resto_interface.dart';
+import 'cash_book.dart';
 import 'catalogue_edit.dart';
 import 'local_sessions.dart';
 import 'models.dart';
@@ -222,7 +223,38 @@ abstract class CaisseEngine extends EngineNotifier {
   Future<String> businessDay() async => PassDay.of(now, null);
 
   /// Jour civil de la boutique aujourd'hui (`AAAA-MM-JJ`).
-  String get today => PassDay.of(now, null);
+  String get today => dayOf(now);
+
+  /// Jour civil de la boutique d'un instant (`AAAA-MM-JJ`, fuseau publié quand il est connu).
+  String dayOf(DateTime date) => PassDay.of(date, null);
+
+  // ------------------------------------------------------------------ Livre de caisse (2.1 lot 14)
+
+  /// Livre en ligne proposé : capacité `livre_caisse.v1` accordée par le serveur.
+  bool get onlineCashBookSupported => false;
+
+  /// [operator] peut-il lire le livre en ligne (droit publié `livre_caisse_voir`, gérants) ?
+  bool canReadOnlineCashBook(Operator operator) => onlineCashBookSupported && hasRight(operator, 'livre_caisse_voir');
+
+  /// Livre local du poste sur `from..to` (jours de la boutique), sans réseau. Un caissier sans `livre_caisse_voir` ne
+  /// voit que les sessions qu'il a ouvertes ; null : file non lisible sur ce terminal.
+  Future<CashBook?> localCashBook(Operator operator, {required String from, required String to}) async {
+    final facts = await closureFacts();
+    final s = snapshot;
+    if (facts == null || s == null) return null;
+    final error = cashBookPeriodError(from, to, today);
+    if (error != null) throw OfflineRefusal(error);
+    return buildLocalCashBook(facts, ZContext.of(s, publishedCashCodes: await publishedCashCodes()), from: from, to: to, dayOf: dayOf,
+        onlyOpener: hasRight(operator, 'livre_caisse_voir') ? null : operator.id);
+  }
+
+  /// Livre en ligne de la boutique (`GET /livre-caisse`, toutes les pages), gardé sur le poste pour une lecture hors
+  /// ligne pendant 30 jours. Lève [OfflineRefusal] avec un message lisible.
+  Future<CashBook> fetchCashBook(Operator operator, {required String from, required String to}) =>
+      throw const OfflineRefusal('Livre de caisse en ligne non disponible sur ce terminal.');
+
+  /// Dernière copie du livre en ligne, si elle a moins de 30 jours et que [operator] a encore le droit ; sinon null.
+  Future<CashBook?> cachedCashBook(Operator operator) async => null;
 
   /// Pourquoi [operator] ne peut pas clôturer la journée maintenant, ou null.
   Future<String?> dayClosureBlocker(Operator? operator) async => 'Clôture de journée non disponible sur ce terminal.';

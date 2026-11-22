@@ -86,6 +86,10 @@ class V2Keys {
   /// Résultat d'une `creation_produit` / `modification_produit` (2.1 lot 10) : `details` du serveur, par opération.
   static const productResultPrefix = 'v2.produit.';
 
+  /// Dernière copie du livre de caisse en ligne (2.1 lot 14) : `{operateur_id, reponse}`, effacée après 30 jours, à la
+  /// révocation et au changement de boutique.
+  static const cashBook = 'v2.livre_caisse';
+
   /// Correspondance ouverture locale → session serveur (`details.session_serveur`, 2.1 lot 12), objet JSON.
   static const serverSessions = 'v2.sessions_serveur';
   static const imageWindow = 'v2.images_plage';
@@ -393,6 +397,13 @@ class V2Store {
   };
 
   /// Nombre d'opérations par (type, état local).
+  /// Dernière opération de [type] hors quarantaine, en (époque, séquence) ; null : aucune.
+  Future<(int, int)?> lastOf(String type) async {
+    final rows = await db.query('v2_operations',
+        columns: ['epoque', 'sequence'], where: 'type = ? AND etat != ?', whereArgs: [type, V2OperationState.rejected], orderBy: 'epoque DESC, sequence DESC', limit: 1);
+    return rows.isEmpty ? null : (rows.first['epoque'] as int, rows.first['sequence'] as int);
+  }
+
   /// Opérations reçues en attente d'une session (raisons `session.*` et `journee.*`, 2.1 lot 12) : pas des refus.
   Future<int> waitingCount() async {
     final rows = await db.rawQuery(

@@ -89,7 +89,10 @@ class V2Sync {
           '${contract21 && shared(CaisseV2Client.saleEditCapability) ? '+ticket1' : ''}'
           // `sessions1` : première annonce de `session.multiple` (2.1 lot 12), instantané pour recevoir
           // `boutique.regles.sessions_locales`.
-          '${contract21 && shared(CaisseV2Client.multipleSessionsCapability) ? '+sessions1' : ''}';
+          '${contract21 && shared(CaisseV2Client.multipleSessionsCapability) ? '+sessions1' : ''}'
+          // `livre1` : première annonce de `livre_caisse.v1` (2.1 lot 14), instantané pour recevoir le droit
+          // `livre_caisse_voir` des opérateurs déjà publiés.
+          '${contract21 && shared(CaisseV2Client.cashBookCapability) ? '+livre1' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {

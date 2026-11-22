@@ -138,6 +138,10 @@ class CaisseV2Client {
   /// `boutique.regles.modification_ticket`, `operateur.approbateur_modification`. Accordée seulement avec `contrat.2_1`.
   static const saleEditCapability = 'vente.modification';
 
+  /// Livre de caisse sur le poste (2.1 lot 14) : `GET /livre-caisse`, droit `livre_caisse_voir`. Accordée seulement avec
+  /// `contrat.2_1`.
+  static const cashBookCapability = 'livre_caisse.v1';
+
   /// Sessions locales séparées (2.1 lot 12) : ouverture malgré une clôture à arbitrer, plafond
   /// `boutique.regles.sessions_locales`, opération `cloture_journee`. Accordée seulement avec `contrat.2_1`.
   static const multipleSessionsCapability = 'session.multiple';
@@ -260,6 +264,16 @@ class CaisseV2Client {
       }
     }
     return response.body;
+  }
+
+  /// Une page du livre de caisse de la boutique (`livre-caisse.json#/$defs/reponse`). [operatorId] : opérateur connecté,
+  /// PIN vérifié sur le poste et jamais transmis ; [next] : `page.suite` de la page précédente.
+  Future<Map<String, dynamic>> cashBook({required String from, required String to, required String operatorId, String? next}) async {
+    final query = 'du=${Uri.encodeQueryComponent(from)}&au=${Uri.encodeQueryComponent(to)}&operateur_id=${Uri.encodeQueryComponent(operatorId)}'
+        '${next == null ? '' : '&suite=${Uri.encodeQueryComponent(next)}'}';
+    return Map<String, dynamic>.from(
+      await _call('GET', '/livre-caisse?$query', schema: 'livre-caisse.json#/\$defs/reponse', timeout: const Duration(seconds: 20)) as Map,
+    );
   }
 
   /// Vérification d'un pass avant passage (passes.json) : verdict sans réservation. Seul envoi du code en clair.

@@ -184,6 +184,7 @@ class V2Engine extends CaisseEngine {
     if (stored != null && stored != origin && !queued) {
       // Boutique changée, file vide : l'ancien appairage ne vaut plus (la projection est remplacée au prochain).
       await v2.write(V2Keys.token, null);
+      await v2.write(V2Keys.cashBook, null);
     }
     apiBase = apiBaseFor(effective);
     _client = CaisseV2Client(
@@ -211,6 +212,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.productEditCapability,
           CaisseV2Client.saleEditCapability,
           CaisseV2Client.multipleSessionsCapability,
+          CaisseV2Client.cashBookCapability,
         ],
       ],
     );
@@ -263,6 +265,7 @@ class V2Engine extends CaisseEngine {
     _token = null;
     _client?.token = null;
     await v2.write(V2Keys.token, null);
+    await v2.write(V2Keys.cashBook, null);
     snapshot = null;
     notifyListeners();
   }
@@ -362,6 +365,7 @@ class V2Engine extends CaisseEngine {
       _client?.token = null;
       await v2.write(V2Keys.token, null);
       await v2.write(V2Keys.revoked, failure.code);
+      await v2.write(V2Keys.cashBook, null);
     }
   }
 
@@ -1051,6 +1055,9 @@ class V2Engine extends CaisseEngine {
 
   // ------------------------------------------------------------------ Sessions locales séparées (2.1 lot 12)
 
+  int _awaitingSessions = 0;
+  bool _closureSinceDay = false;
+
   /// Ouverture locale → session serveur (`details.session_serveur`), relue à chaque reconstruction.
   Map<String, String> _serverSessions = const {};
 
@@ -1066,7 +1073,77 @@ class V2Engine extends CaisseEngine {
   int get syncIntervalSeconds => ((_state?['delais'] as Map?)?['changements_secondes'] as int?) ?? 60;
 
   @override
-  String get today => PassDay.of(now, _shopRules?['fuseau'] as String?);
+  String dayOf(DateTime date) => PassDay.of(date, _shopRules?['fuseau'] as String?);
+
+  // ------------------------------------------------------------------ Livre de caisse (2.1 lot 14)
+
+  @override
+  bool get onlineCashBookSupported => v2.contract21 && _serverOffers(CaisseV2Client.cashBookCapability);
+
+  /// Au plus 10 pages (une page = des journées entières, coupée vers 1000 mouvements) : au-delà, réponse incomplète.
+  static const _cashBookMaxPages = 10;
+
+  @override
+  Future<CashBook> fetchCashBook(Operator operator, {required String from, required String to}) async {
+    final client = _client;
+    if (!onlineCashBookSupported || client == null || !paired) throw const OfflineRefusal('Livre de caisse en ligne non disponible sur ce terminal.');
+    if (!hasRight(operator, 'livre_caisse_voir')) throw const OfflineRefusal('Livre en ligne réservé aux gérants.');
+    if (cashBookPeriodError(from, to, today, online: true) case final error?) throw OfflineRefusal(error);
+    final pages = <Map<String, dynamic>>[];
+    String? next;
+    try {
+      do {
+        final page = await client.cashBook(from: from, to: to, operatorId: '${operator.id}', next: next);
+        pages.add(page);
+        next = (page['page'] as Map)['suite'] as String?;
+      } while (next != null && pages.length < _cashBookMaxPages);
+    } on V2Failure catch (e) {
+      if (e.kind == V2FailureKind.unauthorized) await _failed(e);
+      final motif = e.details is Map ? (e.details as Map)['motif'] : null;
+      throw OfflineRefusal(switch ((e.kind, motif)) {
+        (V2FailureKind.policy, 'droit_absent') => 'Livre en ligne réservé aux gérants (droit « Voir les rapports »).',
+        (V2FailureKind.policy, _) => 'Le serveur de la boutique ne propose pas le livre de caisse en ligne.',
+        (V2FailureKind.invalid, _) => e.message,
+        (V2FailureKind.throttled, _) => 'Trop de demandes : réessayez dans un instant.',
+        (V2FailureKind.unauthorized, _) => 'Terminal révoqué par la boutique : appairez-le de nouveau.',
+        _ => 'Boutique injoignable : le livre local et la dernière copie en ligne restent consultables.',
+      });
+    }
+    if (next != null) throw const OfflineRefusal('Période trop chargée : choisissez une période plus courte.');
+    final first = pages.first;
+    final merged = <String, dynamic>{
+      ...first,
+      'page': {'du': from, 'au': to, 'suite': null},
+      'sessions': [for (final p in pages) ...(p['sessions'] as List)],
+      'mouvements': [for (final p in pages) ...(p['mouvements'] as List)],
+      'totaux_page': {
+        for (final k in const ['entree_especes', 'sortie_especes', 'autres']) k: pages.fold<int>(0, (s, p) => s + ((p['totaux_page'] as Map)[k] as int)),
+      },
+    };
+    await v2.write(V2Keys.cashBook, jsonEncode({'operateur_id': '${operator.id}', 'reponse': merged}));
+    return CashBook.fromOnline(merged);
+  }
+
+  @override
+  Future<CashBook?> cachedCashBook(Operator operator) async {
+    final raw = await v2.read(V2Keys.cashBook);
+    if (raw == null) return null;
+    final Map stored;
+    try {
+      stored = jsonDecode(raw) as Map;
+    } on FormatException {
+      await v2.write(V2Keys.cashBook, null);
+      return null;
+    }
+    final book = CashBook.fromOnline(stored['reponse'] as Map);
+    final at = book.generatedAt;
+    // Copie de plus de 30 jours : effacée (note A §5).
+    if (at == null || now.difference(at) > const Duration(days: 30)) {
+      await v2.write(V2Keys.cashBook, null);
+      return null;
+    }
+    return canReadOnlineCashBook(operator) ? book : null;
+  }
 
   /// La session serveur [serverSession] a-t-elle une clôture de ce terminal pas encore reflétée ou non intégrée ?
   /// Une clôture désigne sa session par l'uuid local de l'ouverture ou par celui du serveur.
@@ -1142,7 +1219,7 @@ class V2Engine extends CaisseEngine {
       }
       return null;
     }
-    final waiting = (await localSessions()).where((s) => s.closed && s.awaitingServer).length;
+    final waiting = _awaitingSessions;
     if (waiting >= localSessionsMax) return 'Connectez le poste pour synchroniser : $waiting sessions attendent la boutique.';
     return null;
   }
@@ -1163,8 +1240,7 @@ class V2Engine extends CaisseEngine {
     if (operator == null) return 'Identifiez le caissier.';
     if (!hasRight(operator, 'caisse_cloturer')) return '${operator.name} n’a pas le droit de clôturer.';
     if (sessionOpen) return 'Clôturez d’abord la session en cours.';
-    final facts = await closureFacts();
-    if (facts == null || facts.sessionsWithoutDay.isEmpty) return 'Aucune session clôturée depuis le dernier Z de journée.';
+    if (!_closureSinceDay) return 'Aucune session clôturée depuis le dernier Z de journée.';
     return null;
   }
 
@@ -1177,6 +1253,7 @@ class V2Engine extends CaisseEngine {
     }
     if (await dayClosureBlocker(operator) case final refusal?) throw OfflineRefusal(refusal);
     final facts = (await closureFacts())!;
+    if (facts.sessionsWithoutDay.isEmpty) throw const OfflineRefusal('Aucune session clôturée depuis le dernier Z de journée.');
     final context = ZContext.of(snapshot!, publishedCashCodes: await publishedCashCodes());
     final sessions = facts.sessionsWithoutDay;
     final detail = terminalDayDetail(facts, context, sessions);
@@ -2771,6 +2848,12 @@ class V2Engine extends CaisseEngine {
     refusedCount = sum((_, s) => s == V2OperationState.rejected);
     localArbitrationCount = sum((_, s) => s == V2OperationState.arbitration);
     waitingCount = await v2.waitingCount();
+    // Lot 12 : sessions clôturées ici dont la clôture n'est pas réglée avec la boutique (plafond), et clôture
+    // postérieure au dernier Z de journée (Z de journée possible). Comptés ici, une fois par écriture ou synchro.
+    _awaitingSessions = sum((t, s) => t == 'cloture_session' && s != V2OperationState.integrated && s != V2OperationState.resolved && s != V2OperationState.rejected);
+    final lastClosure = await v2.lastOf('cloture_session');
+    final lastDay = await v2.lastOf('cloture_journee');
+    _closureSinceDay = lastClosure != null && (lastDay == null || lastClosure.$1 > lastDay.$1 || (lastClosure.$1 == lastDay.$1 && lastClosure.$2 > lastDay.$2));
   }
 
   Future<void> _contact() async {
