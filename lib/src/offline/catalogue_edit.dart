@@ -20,6 +20,7 @@ class NewProduct {
     this.reference,
     this.barcodes = const [],
     this.categoryUuid,
+    this.supplierUuid,
     required this.price,
     this.purchasePrice,
     this.wholesalePrice,
@@ -31,6 +32,9 @@ class NewProduct {
   final String? reference;
   final List<String> barcodes;
   final String? categoryUuid;
+
+  /// Fournisseur (2.1 lot 18, capacité `referentiels.creation`) : uuid serveur ou d'une création du poste.
+  final String? supplierUuid;
   final int price;
   final int? purchasePrice;
   final int? wholesalePrice;
@@ -49,6 +53,7 @@ class ProductFields {
     required this.reference,
     required this.barcodes,
     required this.categoryUuid,
+    this.supplierUuid,
     required this.price,
     required this.wholesalePrice,
     required this.wholesaleMin,
@@ -62,6 +67,7 @@ class ProductFields {
   final String? reference;
   final List<String> barcodes;
   final String? categoryUuid;
+  final String? supplierUuid;
   final int price;
   final int? wholesalePrice;
 
@@ -69,6 +75,20 @@ class ProductFields {
   final String? wholesaleMin;
   final bool unlimitedStock;
   final String? localState;
+}
+
+/// Catégorie ou fournisseur proposé dans la fiche produit (2.1 lot 18) : publié par le serveur, ou créé sur ce poste et pas
+/// encore reconnu (`local` : `a_synchroniser`, ou `a_verifier` quand le serveur l'a mis en arbitrage).
+class ReferenceChoice {
+  const ReferenceChoice({required this.uuid, required this.name, this.phone, this.local});
+
+  final String uuid;
+  final String name;
+  final String? phone;
+  final String? local;
+
+  /// Forme d'avant le lot 18 gardée pour une fiche publiée (`uuid`, `name`) ; `phone` et `local_state` seulement s'ils existent.
+  Map<String, dynamic> toJson() => {'uuid': uuid, 'name': name, 'phone': ?phone, 'local_state': ?local};
 }
 
 /// Aperçu d'une modification de ticket (2.1 lot 11).
@@ -140,6 +160,21 @@ class CatalogueValidation {
   static const codeUsed = 'code_deja_utilise';
   static const unknownProduct = 'produit_inconnu';
   static const noChange = 'aucun_changement';
+
+  /// Nom d'une catégorie ou d'un fournisseur (1 à 160 caractères).
+  static String referenceName(String value, String label) {
+    final text = value.trim();
+    if (text.isEmpty || text.length > CatalogueLimits.name) throw OfflineRefusal('Indiquez le nom $label (160 caractères au plus).');
+    return text;
+  }
+
+  /// Téléphone facultatif d'un fournisseur (40 caractères au plus) ; vide → null.
+  static String? phone(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    if (text.length > 40) throw const OfflineRefusal('Téléphone trop long (40 caractères au plus).');
+    return text;
+  }
 
   static String name(String value) {
     final text = value.trim();

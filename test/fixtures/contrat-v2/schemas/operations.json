@@ -267,7 +267,8 @@
                                             "categorie_uuid",
                                             "prix",
                                             "prix_gros",
-                                            "gros_quantite_min"
+                                            "gros_quantite_min",
+                                            "fournisseur_uuid"
                                         ]
                                     }
                                 },
@@ -316,6 +317,31 @@
                                 },
                                 "ecart": {
                                     "type": "integer"
+                                }
+                            }
+                        },
+                        "categorie_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : catégorie du serveur désignée par l’uuid du poste (créée, ou existante du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "fournisseur_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur du serveur désigné par l’uuid du poste (créé, ou existant du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "referentiel_resolution": {
+                            "type": "object",
+                            "description": "2.1 lot 18 : décision appliquée à une creation_categorie ou creation_fournisseur.",
+                            "required": [
+                                "decision"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "decision": {
+                                    "enum": [
+                                        "creee",
+                                        "rattachee"
+                                    ],
+                                    "description": "creee : fiche créée au serveur ; rattachee : fiche du même nom déjà présente, rien n’a été créé."
                                 }
                             }
                         }

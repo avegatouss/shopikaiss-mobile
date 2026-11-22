@@ -247,6 +247,13 @@ String operationLabel(OfflineOperation o) => switch (o.type) {
   'cloture_journee' => 'Z de journée ${o.content['jour'] is String ? formatDayFr(o.content['jour'] as String) : ''}'.trim(),
   'retour' => 'Retour',
   'transfert_especes' => 'Mobile money → espèces',
+  'creation_produit' => 'Produit créé · ${o.content['nom'] ?? ''}',
+  'modification_produit' => 'Produit modifié',
+  'creation_categorie' => 'Catégorie créée · ${o.content['nom'] ?? ''}',
+  'creation_fournisseur' => 'Fournisseur créé · ${o.content['nom'] ?? ''}',
+  'prevente_creer' => 'Prévente ${o.content['code'] ?? ''}'.trim(),
+  'prevente_annuler' => 'Désistement de prévente',
+  'prevente_convertir' => 'Retrait de prévente',
   _ => o.type.replaceAll('_', ' '),
 };
 

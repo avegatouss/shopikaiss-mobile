@@ -485,6 +485,17 @@ const contractV2Schemas = <String, String>{
                     "type": "boolean",
                     "const": true,
                     "description": "Capacité prix.modifiable seulement (2.1 lot 9) : présent, et toujours true, quand le prix se saisit à la vente (case « Prix modifiable à la vente ») ; absent sinon. Le prix se saisit à l'unité de base, hors conditionnement et hors coffret, par un opérateur qui a le droit prix_vente_modifier ; il devient le prix_unitaire de la ligne."
+                },
+                "fournisseur_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "Capacité referentiels.creation seulement (2.1 lot 18) : fournisseur du produit (entité fournisseur). Présent seulement quand le produit a un fournisseur ; absent (ou null) : aucun."
                 }
             }
         },
@@ -1383,7 +1394,8 @@ const contractV2Schemas = <String, String>{
                                             "categorie_uuid",
                                             "prix",
                                             "prix_gros",
-                                            "gros_quantite_min"
+                                            "gros_quantite_min",
+                                            "fournisseur_uuid"
                                         ]
                                     }
                                 },
@@ -1433,6 +1445,31 @@ const contractV2Schemas = <String, String>{
                                 "ecart": {
                                     "type": "integer",
                                     "description": "Somme des écarts (terminal − serveur) sur les théoriques par moyen ; 0 si le Z du terminal concorde."
+                                }
+                            }
+                        },
+                        "categorie_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : catégorie du serveur désignée par l’uuid du poste (créée, ou existante du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "fournisseur_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur du serveur désigné par l’uuid du poste (créé, ou existant du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "referentiel_resolution": {
+                            "type": "object",
+                            "description": "2.1 lot 18 : décision appliquée à une creation_categorie ou creation_fournisseur.",
+                            "required": [
+                                "decision"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "decision": {
+                                    "enum": [
+                                        "creee",
+                                        "rattachee"
+                                    ],
+                                    "description": "creee : fiche créée au serveur ; rattachee : fiche du même nom déjà présente, rien n’a été créé."
                                 }
                             }
                         }
@@ -2351,6 +2388,33 @@ const contractV2Schemas = <String, String>{
                         "null"
                     ],
                     "maxLength": 500
+                }
+            }
+        },
+        "fournisseur": {
+            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur de la boutique (liste des fournisseurs du web), actif ou non, pour le choix de la fiche produit. Non critique.",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 40
+                },
+                "actif": {
+                    "type": "boolean"
                 }
             }
         },
@@ -4572,6 +4636,12 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/transfert_especes"
+        },
+        {
+            "$ref": "#/$defs/creation_categorie"
+        },
+        {
+            "$ref": "#/$defs/creation_fournisseur"
         }
     ],
     "$defs": {
@@ -8419,7 +8489,8 @@ const contractV2Schemas = <String, String>{
                                 {
                                     "$ref": "commun.json#/$defs/uuid"
                                 }
-                            ]
+                            ],
+                            "description": "Uuid serveur, ou (capacité referentiels.creation) uuid d’une creation_categorie du poste émise AVANT : résolu par alias."
                         },
                         "prix": {
                             "$ref": "commun.json#/$defs/montant"
@@ -8458,6 +8529,17 @@ const contractV2Schemas = <String, String>{
                         "stock_illimite": {
                             "type": "boolean",
                             "description": "Faux : stock suivi, à 0 à la création (aucun stock initial ; un ajustement reste une opération distincte)."
+                        },
+                        "fournisseur_uuid": {
+                            "oneOf": [
+                                {
+                                    "type": "null"
+                                },
+                                {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            ],
+                            "description": "Capacité referentiels.creation seulement (2.1 lot 18) : fournisseur du produit, uuid serveur ou uuid d’une creation_fournisseur du poste émise AVANT (alias). Facultatif ; présent sans la capacité : rejet_protocole capacite_absente."
                         }
                     }
                 }
@@ -8678,6 +8760,37 @@ const contractV2Schemas = <String, String>{
                                                 },
                                                 {
                                                     "$ref": "commun.json#/$defs/quantite"
+                                                }
+                                            ]
+                                        }
+                                    }
+                                },
+                                "fournisseur_uuid": {
+                                    "type": "object",
+                                    "required": [
+                                        "avant",
+                                        "apres"
+                                    ],
+                                    "additionalProperties": false,
+                                    "description": "Capacité referentiels.creation seulement (2.1 lot 18). Uuid serveur ou alias d’une creation_fournisseur du poste ; présent sans la capacité : rejet_protocole capacite_absente.",
+                                    "properties": {
+                                        "avant": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/uuid"
+                                                }
+                                            ]
+                                        },
+                                        "apres": {
+                                            "oneOf": [
+                                                {
+                                                    "type": "null"
+                                                },
+                                                {
+                                                    "$ref": "commun.json#/$defs/uuid"
                                                 }
                                             ]
                                         }
@@ -9665,6 +9778,139 @@ const contractV2Schemas = <String, String>{
                     }
                 }
             }
+        },
+        "creation_categorie": {
+            "description": "Capacité referentiels.creation (2.1 lot 18) : catégorie créée depuis la fiche produit du poste, à émettre AVANT toute opération produit qui cite categorie_uuid. Le serveur garde son uuid (details.categorie_uuid_canonique) ; celui du poste devient un alias. Droit CATEGORIES_CREER absent : a_arbitrer referentiel.droit_absent.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "creation_categorie"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "categorie_uuid",
+                        "nom"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "categorie_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "UUID v4 choisi par le poste ; devient un alias de la catégorie du serveur."
+                        },
+                        "nom": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "description": "Nom saisi. Même nom (sans casse) déjà présent au serveur : rattachement automatique, rien n’est créé."
+                        }
+                    }
+                }
+            }
+        },
+        "creation_fournisseur": {
+            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur créé depuis la fiche produit du poste, à émettre AVANT toute opération produit qui cite fournisseur_uuid. Le serveur garde son uuid (details.fournisseur_uuid_canonique) ; celui du poste devient un alias. Droit FOURNISSEURS_CREER absent : a_arbitrer referentiel.droit_absent.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "creation_fournisseur"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "fournisseur_uuid",
+                        "nom",
+                        "telephone"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "fournisseur_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "UUID v4 choisi par le poste ; devient un alias du fournisseur du serveur."
+                        },
+                        "nom": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 160,
+                            "description": "Nom saisi. Même nom (sans casse) déjà présent au serveur : rattachement automatique, rien n’est créé."
+                        },
+                        "telephone": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "minLength": 1,
+                            "maxLength": 40
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -9938,7 +10184,8 @@ const contractV2Schemas = <String, String>{
                                             "categorie_uuid",
                                             "prix",
                                             "prix_gros",
-                                            "gros_quantite_min"
+                                            "gros_quantite_min",
+                                            "fournisseur_uuid"
                                         ]
                                     }
                                 },
@@ -9987,6 +10234,31 @@ const contractV2Schemas = <String, String>{
                                 },
                                 "ecart": {
                                     "type": "integer"
+                                }
+                            }
+                        },
+                        "categorie_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : catégorie du serveur désignée par l’uuid du poste (créée, ou existante du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "fournisseur_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur du serveur désigné par l’uuid du poste (créé, ou existant du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "referentiel_resolution": {
+                            "type": "object",
+                            "description": "2.1 lot 18 : décision appliquée à une creation_categorie ou creation_fournisseur.",
+                            "required": [
+                                "decision"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "decision": {
+                                    "enum": [
+                                        "creee",
+                                        "rattachee"
+                                    ],
+                                    "description": "creee : fiche créée au serveur ; rattachee : fiche du même nom déjà présente, rien n’a été créé."
                                 }
                             }
                         }

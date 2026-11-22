@@ -1,0 +1,21 @@
+{
+    "nom": "Savon de Marseille",
+    "reference": "SAV-001",
+    "categorie": "Droguerie",
+    "prix": 750,
+    "stock_illimite": true,
+    "actif": true,
+    "vente_locale": true,
+    "categorie_uuid": "c0000000-0000-4000-8000-000000000181",
+    "marque": null,
+    "fournisseur": "Grossiste Adjamé",
+    "unite": null,
+    "prix_gros": null,
+    "gros_quantite_min": null,
+    "seuil_alerte": null,
+    "cree_le": "2026-11-23T09:05:00Z",
+    "favori": false,
+    "promotions": [],
+    "image": null,
+    "fournisseur_uuid": "c0000000-0000-4000-8000-000000000182"
+}

@@ -1,0 +1,27 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000184",
+    "type": "modification_produit",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 63,
+    "cree_le": "2026-11-23T09:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "produit_uuid": "c3000000-0000-4000-8000-000000000001",
+        "revision_base": "3",
+        "champs": {
+            "fournisseur_uuid": {
+                "avant": null,
+                "apres": "f0000000-0000-4000-8000-000000000018"
+            }
+        }
+    },
+    "empreinte": "d66d2b56ab0a945e3e9c5b205535d9014902580cca8e7bef6aed567faf42fa6d"
+}

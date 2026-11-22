@@ -1,0 +1,21 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000186",
+    "type": "creation_fournisseur",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 65,
+    "cree_le": "2026-11-23T09:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "fournisseur_uuid": "f0000000-0000-4000-8000-000000000019",
+        "nom": "Grossiste Treichville"
+    },
+    "empreinte": "e451992ce9d9b12040af5b636b837dabfae08a51f9aa4da30bc83e35b83708e8"
+}

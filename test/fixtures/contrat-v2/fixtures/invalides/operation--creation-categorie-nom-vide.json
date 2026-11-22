@@ -1,0 +1,21 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000185",
+    "type": "creation_categorie",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 64,
+    "cree_le": "2026-11-23T09:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "categorie_uuid": "ca700000-0000-4000-8000-000000000019",
+        "nom": ""
+    },
+    "empreinte": "ef1001ed856e1bb8b2ae3d1ce1434485fa2448647dfe2172db5742ec15b5d180"
+}

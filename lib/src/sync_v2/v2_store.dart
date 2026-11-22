@@ -128,6 +128,7 @@ const knownV2Types21 = {
   'categorie', 'client', 'panier', 'lot', 'modele_ticket', 'ticket_terminal', 'pass_reglages', 'pass_evenement', 'pass', //
   'interface_caisse', // 2.1 lot 13
   'prevente', // 2.1 lot 15
+  'fournisseur', // 2.1 lot 18
 };
 
 /// Types de la révision restaurant-1 (donnees-restaurant-1.json, lots R-1 à R-3), connus quand `restaurant.v1` est
@@ -474,7 +475,7 @@ class V2Store {
   ];
 
   /// Opérations du catalogue gardées par une remise une fois intégrées : le serveur garde les produits.
-  static const _catalogueTypes = {'creation_produit', 'modification_produit'};
+  static const _catalogueTypes = {'creation_produit', 'modification_produit', 'creation_categorie', 'creation_fournisseur'};
 
   /// Remise à zéro de la boutique, en UNE transaction : les opérations du terminal datées (`cree_le`) d'avant [at] — même
   /// critère que le serveur, qui les refuse — sont effacées avec leurs mouvements de stock, paniers consommés, Z rendus,
@@ -647,7 +648,13 @@ class V2Store {
     if (z != null) await write('${V2Keys.zPrefix}$uuid', jsonEncode(z), txn);
     final zRestaurant = (r['details'] as Map?)?['z_restaurant'];
     if (zRestaurant != null) await write('${V2Keys.zRestaurantPrefix}$uuid', jsonEncode(zRestaurant), txn);
-    final product = r['details'] is Map ? {for (final k in const ['produit_uuid_canonique', 'produit_resolution']) if ((r['details'] as Map)[k] != null) k: (r['details'] as Map)[k]} : const {};
+    // Résultat d'une opération du catalogue (lot 10) ou d'un référentiel (lot 18 : uuid canonique, décision).
+    final product = r['details'] is Map
+        ? {
+            for (final k in const ['produit_uuid_canonique', 'produit_resolution', 'categorie_uuid_canonique', 'fournisseur_uuid_canonique', 'referentiel_resolution'])
+              if ((r['details'] as Map)[k] != null) k: (r['details'] as Map)[k],
+          }
+        : const {};
     if (product.isNotEmpty) await write('${V2Keys.productResultPrefix}$uuid', jsonEncode(product), txn);
     if (((r['details'] as Map?)?['session_serveur'] as Map?)?['session_uuid'] case final String server) {
       final known = Map<String, dynamic>.from(jsonDecode(await read(V2Keys.serverSessions, txn) ?? '{}') as Map);

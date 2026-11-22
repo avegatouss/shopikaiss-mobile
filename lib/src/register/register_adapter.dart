@@ -61,6 +61,12 @@ class AdapterFailure implements Exception {
 /// (Z de journée du terminal, identifiant d'opération facultatif ; puis closureDocument kind `z-jour-terminal`),
 /// syncStatus (état, compte à rebours) ; status porte `sync` et les capacités `open_session` (plafond) et `close_day`.
 ///
+/// Référentiels (2.1 lot 18, capacité `referentiels.creation`) : catalogueForm rend aussi `references_supported`,
+/// `suppliers` [{uuid, name, phone, local_state}], `categories` avec `local_state`, `create_category` et `create_supplier`
+/// {allowed, reason} ; createCategory {name, operation_id} et createSupplier {name, phone, operation_id} → {uuid, name,
+/// phone, local_state} (même nom déjà proposé : celui-ci, rien de créé) ; createProduct et updateProduct acceptent
+/// `supplier_uuid` ; productForEdit le rend.
+///
 /// Remise à zéro (2.1 lot 17) : faite par le moteur à la synchronisation (rien à appeler). `status.shop_reset` =
 /// {supported, notice, uuid, at, erased_count} ; `notice` (texte) à montrer UNE fois, puis acknowledgeShopReset {} (le
 /// panier en cours qui retirait une prévente ou corrigeait un ticket effacés est vidé). shopResetOperations {} → {uuid, at,
@@ -278,6 +284,10 @@ class LocalRegisterAdapter {
         return _catalogueForm();
       case 'createProduct':
         return _createProduct(args);
+      case 'createCategory':
+        return _createReference(args, supplier: false);
+      case 'createSupplier':
+        return _createReference(args, supplier: true);
       case 'productForEdit':
         return _productForEdit(_int(args, 'product_id'));
       case 'updateProduct':
@@ -1337,7 +1347,12 @@ class LocalRegisterAdapter {
   Map<String, dynamic> _catalogueForm() => {
     'create': {'allowed': engine.productCreateBlocker(_operator) == null, 'reason': engine.productCreateBlocker(_operator)},
     'edit': {'allowed': engine.productEditBlocker(_operator) == null, 'reason': engine.productEditBlocker(_operator)},
-    'categories': [for (final c in engine.productCategories) {'uuid': c.uuid, 'name': c.name}],
+    'categories': [for (final c in engine.categoryChoices) c.toJson()],
+    // Lot 18 : fournisseurs et création de référentiels (absents du serveur : liste vide, création refusée).
+    'references_supported': engine.referencesSupported,
+    'suppliers': [for (final s in engine.supplierChoices) s.toJson()],
+    'create_category': {'allowed': engine.categoryCreateBlocker(_operator) == null, 'reason': engine.categoryCreateBlocker(_operator)},
+    'create_supplier': {'allowed': engine.supplierCreateBlocker(_operator) == null, 'reason': engine.supplierCreateBlocker(_operator)},
     'limits': {
       'name': CatalogueLimits.name,
       'reference': CatalogueLimits.reference,
@@ -1382,6 +1397,7 @@ class LocalRegisterAdapter {
           reference: _optionalString(args, 'reference'),
           barcodes: barcodes.cast<String>(),
           categoryUuid: _optionalString(args, 'category_uuid'),
+          supplierUuid: _optionalString(args, 'supplier_uuid'),
           price: args['price'] as int,
           purchasePrice: _optionalInt(args, 'purchase_price'),
           wholesalePrice: _optionalInt(args, 'wholesale_price'),
@@ -1392,6 +1408,23 @@ class LocalRegisterAdapter {
       );
       _emit('catalogue');
       return {'product_id': product.id, 'product_uuid': engine.productFields(product.id)?.uuid, 'local_state': 'a_synchroniser'};
+    } on OfflineRefusal catch (e) {
+      throw _catalogueFailure(e);
+    }
+  }
+
+  /// Nouvelle catégorie ou nouveau fournisseur (lot 18), utilisable tout de suite dans la fiche produit.
+  Future<Map<String, dynamic>> _createReference(Map<String, dynamic> args, {required bool supplier}) async {
+    final blocker = supplier ? engine.supplierCreateBlocker(_operator) : engine.categoryCreateBlocker(_operator);
+    if (blocker != null) throw AdapterFailure('referentiel_refuse', blocker);
+    final name = _optionalString(args, 'name') ?? '';
+    final operationId = _optionalString(args, 'operation_id');
+    try {
+      final created = supplier
+          ? await engine.createSupplier(_operator!, name, phone: _optionalString(args, 'phone'), operationUuid: operationId)
+          : await engine.createCategory(_operator!, name, operationUuid: operationId);
+      _emit('catalogue');
+      return created.toJson();
     } on OfflineRefusal catch (e) {
       throw _catalogueFailure(e);
     }
@@ -1408,6 +1441,7 @@ class LocalRegisterAdapter {
       'reference': fields.reference,
       'barcodes': fields.barcodes,
       'category_uuid': fields.categoryUuid,
+      'supplier_uuid': fields.supplierUuid,
       'price': fields.price,
       'wholesale_price': fields.wholesalePrice,
       'wholesale_min': fields.wholesaleMin,
@@ -1423,6 +1457,7 @@ class LocalRegisterAdapter {
     'name': 'nom',
     'reference': 'reference',
     'category_uuid': 'categorie_uuid',
+    'supplier_uuid': 'fournisseur_uuid',
     'price': 'prix',
     'wholesale_price': 'prix_gros',
     'wholesale_min': 'gros_quantite_min',

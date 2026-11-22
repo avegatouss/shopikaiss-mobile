@@ -259,6 +259,17 @@
                     "type": "boolean",
                     "const": true,
                     "description": "Capacité prix.modifiable seulement (2.1 lot 9) : présent, et toujours true, quand le prix se saisit à la vente (case « Prix modifiable à la vente ») ; absent sinon. Le prix se saisit à l'unité de base, hors conditionnement et hors coffret, par un opérateur qui a le droit prix_vente_modifier ; il devient le prix_unitaire de la ligne."
+                },
+                "fournisseur_uuid": {
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "commun.json#/$defs/uuid"
+                        }
+                    ],
+                    "description": "Capacité referentiels.creation seulement (2.1 lot 18) : fournisseur du produit (entité fournisseur). Présent seulement quand le produit a un fournisseur ; absent (ou null) : aucun."
                 }
             }
         },
@@ -1157,7 +1168,8 @@
                                             "categorie_uuid",
                                             "prix",
                                             "prix_gros",
-                                            "gros_quantite_min"
+                                            "gros_quantite_min",
+                                            "fournisseur_uuid"
                                         ]
                                     }
                                 },
@@ -1207,6 +1219,31 @@
                                 "ecart": {
                                     "type": "integer",
                                     "description": "Somme des écarts (terminal − serveur) sur les théoriques par moyen ; 0 si le Z du terminal concorde."
+                                }
+                            }
+                        },
+                        "categorie_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : catégorie du serveur désignée par l’uuid du poste (créée, ou existante du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "fournisseur_uuid_canonique": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur du serveur désigné par l’uuid du poste (créé, ou existant du même nom). Le poste remplace partout son uuid local par celui-ci."
+                        },
+                        "referentiel_resolution": {
+                            "type": "object",
+                            "description": "2.1 lot 18 : décision appliquée à une creation_categorie ou creation_fournisseur.",
+                            "required": [
+                                "decision"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "decision": {
+                                    "enum": [
+                                        "creee",
+                                        "rattachee"
+                                    ],
+                                    "description": "creee : fiche créée au serveur ; rattachee : fiche du même nom déjà présente, rien n’a été créé."
                                 }
                             }
                         }
@@ -2125,6 +2162,33 @@
                         "null"
                     ],
                     "maxLength": 500
+                }
+            }
+        },
+        "fournisseur": {
+            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur de la boutique (liste des fournisseurs du web), actif ou non, pour le choix de la fiche produit. Non critique.",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 40
+                },
+                "actif": {
+                    "type": "boolean"
                 }
             }
         },

@@ -1,0 +1,30 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000187",
+    "type": "creation_produit",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 66,
+    "cree_le": "2026-11-23T09:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "fournisseur_uuid": "Grossiste Adjamé",
+        "produit_uuid": "c3000000-0000-4000-8000-000000000018",
+        "nom": "Savon de Marseille",
+        "reference": null,
+        "codes_barres": [],
+        "categorie_uuid": "ca700000-0000-4000-8000-000000000018",
+        "prix": 750,
+        "prix_achat": 400,
+        "prix_gros": null,
+        "gros_quantite_min": null,
+        "stock_illimite": true
+    },
+    "empreinte": "13b51121a39baec3f7647e078058217cffb877159b098d9ab55b5ec240ee161d"
+}

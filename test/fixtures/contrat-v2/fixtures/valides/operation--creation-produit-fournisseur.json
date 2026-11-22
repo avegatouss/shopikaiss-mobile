@@ -1,0 +1,30 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000183",
+    "type": "creation_produit",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 62,
+    "cree_le": "2026-11-23T09:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "produit_uuid": "c3000000-0000-4000-8000-000000000018",
+        "nom": "Savon de Marseille",
+        "reference": null,
+        "codes_barres": [],
+        "categorie_uuid": "ca700000-0000-4000-8000-000000000018",
+        "prix": 750,
+        "prix_achat": 400,
+        "prix_gros": null,
+        "gros_quantite_min": null,
+        "stock_illimite": true,
+        "fournisseur_uuid": "f0000000-0000-4000-8000-000000000018"
+    },
+    "empreinte": "b9ecb160e0979016231bf341e08acc2f79e91038d6f8370ee8eb60e6ff2721d9"
+}

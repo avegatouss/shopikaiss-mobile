@@ -34,6 +34,7 @@ class _ProductEditorState extends State<_ProductEditor> {
     text: widget.existing?.wholesaleMin == null ? '' : Decimal6.label(Decimal6.parse(widget.existing!.wholesaleMin!)),
   );
   late String? _category = widget.existing?.categoryUuid;
+  late String? _supplier = widget.existing?.supplierUuid;
   String? _error;
   bool _saving = false;
 
@@ -64,6 +65,7 @@ class _ProductEditorState extends State<_ProductEditor> {
           if (_name.text.trim() != e.name) 'nom': _name.text,
           if ((_reference.text.trim().isEmpty ? null : _reference.text.trim()) != e.reference) 'reference': _reference.text,
           if (_category != e.categoryUuid) 'categorie_uuid': _category,
+          if (_supplier != e.supplierUuid) 'fournisseur_uuid': _supplier,
           if (price != e.price) 'prix': price,
           if (_amount(_wholesale) != e.wholesalePrice) 'prix_gros': _amount(_wholesale),
           if (minimum != e.wholesaleMin) 'gros_quantite_min': _minimum.text,
@@ -77,6 +79,7 @@ class _ProductEditorState extends State<_ProductEditor> {
           'nom': e.name,
           'reference': e.reference,
           'categorie_uuid': e.categoryUuid,
+          'fournisseur_uuid': e.supplierUuid,
           'prix': e.price,
           'prix_gros': e.wholesalePrice,
           'gros_quantite_min': e.wholesaleMin,
@@ -95,6 +98,7 @@ class _ProductEditorState extends State<_ProductEditor> {
             reference: _reference.text,
             barcodes: _barcodes.text.split(RegExp(r'[\s,;]+')),
             categoryUuid: _category,
+            supplierUuid: _supplier,
             price: price,
             purchasePrice: _amount(_purchase),
             wholesalePrice: _amount(_wholesale),
@@ -109,9 +113,93 @@ class _ProductEditorState extends State<_ProductEditor> {
     }
   }
 
+  /// « + Nouvelle catégorie » / « + Nouveau fournisseur » (2.1 lot 18) : créé sur ce poste, choisi aussitôt dans la fiche.
+  Future<void> _newReference({required bool supplier}) async {
+    final name = TextEditingController();
+    final phone = TextEditingController();
+    String? error;
+    final created = await showDialog<ReferenceChoice>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setLocal) => AlertDialog(
+          title: Text(supplier ? 'Nouveau fournisseur' : 'Nouvelle catégorie'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(controller: name, autofocus: true, maxLength: CatalogueLimits.name, decoration: const InputDecoration(labelText: 'Nom *')),
+              if (supplier) TextField(controller: phone, maxLength: 40, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Téléphone')),
+              Text('Utilisable tout de suite sur ce poste ; envoyé au serveur à la prochaine synchronisation. Un nom déjà connu de la boutique est repris.',
+                  style: const TextStyle(fontSize: 12, color: Colors.black54)),
+              if (error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(error!, style: const TextStyle(color: Colors.red))),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Annuler')),
+            FilledButton(
+              onPressed: () async {
+                try {
+                  final choice = supplier
+                      ? await widget.engine.createSupplier(widget.operator, name.text, phone: phone.text)
+                      : await widget.engine.createCategory(widget.operator, name.text);
+                  if (context.mounted) Navigator.pop(context, choice);
+                } on OfflineRefusal catch (e) {
+                  setLocal(() => error = e.message);
+                }
+              },
+              child: const Text('Créer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    name.dispose();
+    phone.dispose();
+    if (created == null || !mounted) return;
+    setState(() => supplier ? _supplier = created.uuid : _category = created.uuid);
+  }
+
+  /// Liste de choix d'un référentiel, avec « Aucun » et, selon le droit, un bouton de création.
+  Widget _referenceField({
+    required String label,
+    required String none,
+    required List<ReferenceChoice> choices,
+    required String? value,
+    required ValueChanged<String?> onChanged,
+    required bool canCreate,
+    required VoidCallback onCreate,
+    required String createTooltip,
+  }) {
+    final known = value == null || choices.any((c) => c.uuid == value);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: DropdownButtonFormField<String?>(
+            key: ValueKey('$label|$value|${choices.length}'),
+            initialValue: value,
+            isExpanded: true,
+            decoration: InputDecoration(labelText: label),
+            items: [
+              DropdownMenuItem<String?>(value: null, child: Text(none)),
+              for (final c in choices)
+                DropdownMenuItem<String?>(
+                  value: c.uuid,
+                  child: Text(c.local == null ? c.name : '${c.name} · ${c.local == 'a_verifier' ? 'à vérifier au bureau' : 'créé ici'}', overflow: TextOverflow.ellipsis),
+                ),
+              // Valeur liée qui n'est plus proposée (fournisseur inactif) : gardée telle quelle.
+              if (!known) DropdownMenuItem<String?>(value: value, child: const Text('Actuel (inactif)')),
+            ],
+            onChanged: onChanged,
+          ),
+        ),
+        if (canCreate) IconButton(tooltip: createTooltip, icon: const Icon(Icons.add_circle_outline), onPressed: onCreate),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final categories = widget.engine.productCategories;
+    final categories = widget.engine.categoryChoices;
     final digits = [FilteringTextInputFormatter.digitsOnly];
     return AlertDialog(
       title: Text(_editing ? 'Modifier « ${widget.existing!.name} »' : 'Nouveau produit'),
@@ -142,15 +230,28 @@ class _ProductEditorState extends State<_ProductEditor> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text('Codes-barres : ${widget.existing!.barcodes.join(', ')} (non modifiables ici)', style: const TextStyle(fontSize: 12)),
               ),
-            DropdownButtonFormField<String?>(
-              initialValue: categories.any((c) => c.uuid == _category) ? _category : null,
-              decoration: const InputDecoration(labelText: 'Catégorie'),
-              items: [
-                const DropdownMenuItem<String?>(value: null, child: Text('Aucune')),
-                for (final c in categories) DropdownMenuItem<String?>(value: c.uuid, child: Text(c.name)),
-              ],
+            _referenceField(
+              label: 'Catégorie',
+              none: 'Aucune',
+              choices: categories,
+              value: _category,
               onChanged: (v) => setState(() => _category = v),
+              canCreate: widget.engine.categoryCreateBlocker(widget.operator) == null,
+              onCreate: () => _newReference(supplier: false),
+              createTooltip: 'Nouvelle catégorie',
             ),
+            // Fournisseur (2.1 lot 18) : seulement si le serveur le publie et l'enregistre.
+            if (widget.engine.referencesSupported)
+              _referenceField(
+                label: 'Fournisseur',
+                none: 'Aucun',
+                choices: widget.engine.supplierChoices,
+                value: _supplier,
+                onChanged: (v) => setState(() => _supplier = v),
+                canCreate: widget.engine.supplierCreateBlocker(widget.operator) == null,
+                onCreate: () => _newReference(supplier: true),
+                createTooltip: 'Nouveau fournisseur',
+              ),
             TextField(controller: _price, keyboardType: TextInputType.number, inputFormatters: digits, decoration: const InputDecoration(labelText: 'Prix de vente (F) *')),
             if (!_editing)
               TextField(

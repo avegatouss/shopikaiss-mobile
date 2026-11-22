@@ -157,6 +157,11 @@ class CaisseV2Client {
   /// hauteur} ou null), fichier `GET /logos/{uuid}` (JPEG immuable). Accordée seulement avec `contrat.2_1`.
   static const shopLogoCapability = 'boutique.logo';
 
+  /// Référentiels sur le poste (2.1 lot 18) : entité `fournisseur`, `produit.fournisseur_uuid`, droits `categories_creer`
+  /// et `fournisseurs_creer`, opérations `creation_categorie` et `creation_fournisseur`, `fournisseur_uuid` des
+  /// opérations produit. Accordée seulement avec `contrat.2_1`.
+  static const referencesCapability = 'referentiels.creation';
+
   /// Livre de caisse sur le poste (2.1 lot 14) : `GET /livre-caisse`, droit `livre_caisse_voir`. Accordée seulement avec
   /// `contrat.2_1`.
   static const cashBookCapability = 'livre_caisse.v1';

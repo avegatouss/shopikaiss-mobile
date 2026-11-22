@@ -583,6 +583,41 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Catégories actives proposées dans la fiche produit (uuid, nom).
   List<({String uuid, String name})> get productCategories => const [];
 
+  // ------------------------------------------------------------------ Référentiels sur le poste (2.1 lot 18)
+
+  /// Capacité `referentiels.creation` accordée : fournisseur des produits, création de catégorie et de fournisseur.
+  bool get referencesSupported => false;
+
+  /// Catégories proposées (publiées actives + créées ici, pas encore reconnues), avec leur état local.
+  List<ReferenceChoice> get categoryChoices => [for (final c in productCategories) ReferenceChoice(uuid: c.uuid, name: c.name)];
+
+  /// Fournisseurs proposés (publiés actifs + créés ici, pas encore reconnus).
+  List<ReferenceChoice> get supplierChoices => const [];
+
+  /// Pourquoi [operator] ne peut pas créer une catégorie (droit `categories_creer`), ou null.
+  String? categoryCreateBlocker(Operator? operator) {
+    if (!referencesSupported) return 'Création de catégorie non disponible sur ce terminal.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'categories_creer')) return '${operator.name} n’a pas le droit de créer une catégorie.';
+    return null;
+  }
+
+  /// Pourquoi [operator] ne peut pas créer un fournisseur (droit `fournisseurs_creer`), ou null.
+  String? supplierCreateBlocker(Operator? operator) {
+    if (!referencesSupported) return 'Création de fournisseur non disponible sur ce terminal.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'fournisseurs_creer')) return '${operator.name} n’a pas le droit de créer un fournisseur.';
+    return null;
+  }
+
+  /// Crée une catégorie sur ce poste, utilisable tout de suite (même nom déjà proposé : celle-ci est rendue).
+  Future<ReferenceChoice> createCategory(Operator operator, String name, {String? operationUuid}) =>
+      throw const OfflineRefusal('Création de catégorie non disponible sur ce terminal.');
+
+  /// Crée un fournisseur sur ce poste, utilisable tout de suite (même nom déjà proposé : celui-ci est rendu).
+  Future<ReferenceChoice> createSupplier(Operator operator, String name, {String? phone, String? operationUuid}) =>
+      throw const OfflineRefusal('Création de fournisseur non disponible sur ce terminal.');
+
   /// Champs modifiables d'une fiche du catalogue local, ou null si le produit est inconnu.
   ProductFields? productFields(int productId) => null;
 

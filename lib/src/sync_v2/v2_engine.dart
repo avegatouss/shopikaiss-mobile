@@ -220,6 +220,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.preSaleCapability,
           CaisseV2Client.shopResetCapability,
           CaisseV2Client.shopLogoCapability,
+          CaisseV2Client.referencesCapability,
         ],
       ],
     );
@@ -1902,6 +1903,7 @@ class V2Engine extends CaisseEngine {
           'vente_locale': true,
           'marque': null,
           'fournisseur': null,
+          'fournisseur_uuid': content['fournisseur_uuid'],
           'unite': null,
           'favori': false,
           'promotions': const <Map<String, dynamic>>[],
@@ -1932,6 +1934,110 @@ class V2Engine extends CaisseEngine {
     return states;
   }
 
+  // ------------------------------------------------------------------ Référentiels sur le poste (2.1 lot 18)
+
+  static const _referenceOperations = {'creation_categorie': 'categorie_uuid', 'creation_fournisseur': 'fournisseur_uuid'};
+
+  /// Uuid local d'une catégorie ou d'un fournisseur créé ici → uuid du serveur (`details.*_uuid_canonique`).
+  Map<String, String> _referenceAliases = const {};
+
+  /// Fournisseurs proposés (actifs publiés + créations locales pas encore reconnues).
+  List<ReferenceChoice> _supplierChoices = const [];
+  List<ReferenceChoice> _localCategories = const [];
+
+  @override
+  bool get referencesSupported => v2.contract21 && _serverOffers(CaisseV2Client.referencesCapability);
+
+  @override
+  List<ReferenceChoice> get categoryChoices => [
+    for (final c in _categoryChoices) _localCategories.where((l) => l.uuid == c.uuid).firstOrNull ?? ReferenceChoice(uuid: c.uuid, name: c.name),
+  ];
+
+  @override
+  List<ReferenceChoice> get supplierChoices => referencesSupported ? _supplierChoices : const [];
+
+  /// Uuid d'un référentiel tel que le serveur le connaît (alias local résolu).
+  String? _reference(String? uuid) => uuid == null ? null : (_referenceAliases[uuid] ?? uuid);
+
+  /// Superpose aux catégories et fournisseurs publiés les créations de ce poste : en attente ou à arbitrer, la fiche locale
+  /// est proposée sous son uuid ; intégrée, son uuid devient un alias de celui du serveur (la fiche du serveur, peut-être
+  /// écrite autrement s'il l'a rattachée, est affichée dès qu'elle est publiée).
+  Future<void> _referenceOverlay(Map<String, Map<String, dynamic>> categories, Map<String, Map<String, dynamic>> suppliers) async {
+    final aliases = <String, String>{};
+    final localCategories = <ReferenceChoice>[];
+    final localSuppliers = <ReferenceChoice>[];
+    for (final row in (await v2.operationRows()).reversed) {
+      final operation = row['operation'] as Map;
+      final key = _referenceOperations[operation['type']];
+      if (key == null) continue;
+      final content = operation['contenu'] as Map;
+      final uuid = content[key] as String;
+      final state = row['etat'] as String;
+      final supplier = key == 'fournisseur_uuid';
+      final target = supplier ? suppliers : categories;
+      final result = await _productResult(operation['uuid'] as String);
+      final canonical = result?[supplier ? 'fournisseur_uuid_canonique' : 'categorie_uuid_canonique'] as String?;
+      if (state == V2OperationState.integrated && canonical != null) {
+        if (canonical != uuid) aliases[uuid] = canonical;
+        if (target.containsKey(canonical)) continue;
+        // Intégrée, pas encore publiée : la fiche locale tient lieu de celle du serveur, sous l'uuid canonique.
+        target[canonical] = {'nom': content['nom'], 'telephone': content['telephone'], 'actif': true, 'ordre': 1 << 30};
+        continue;
+      }
+      if (state == V2OperationState.rejected || state == V2OperationState.resolved || target.containsKey(uuid)) continue;
+      final local = state == V2OperationState.arbitration ? 'a_verifier' : 'a_synchroniser';
+      target[uuid] = {'nom': content['nom'], 'telephone': content['telephone'], 'actif': true, 'ordre': 1 << 30};
+      final choice = ReferenceChoice(uuid: uuid, name: content['nom'] as String, phone: content['telephone'] as String?, local: local);
+      (supplier ? localSuppliers : localCategories).add(choice);
+    }
+    _referenceAliases = aliases;
+    _localCategories = localCategories;
+    _supplierChoices = [
+      for (final e in suppliers.entries.where((s) => s.value['actif'] == true).toList()
+        ..sort((a, b) => '${a.value['nom']}'.toLowerCase().compareTo('${b.value['nom']}'.toLowerCase())))
+        localSuppliers.where((l) => l.uuid == e.key).firstOrNull ?? ReferenceChoice(uuid: e.key, name: e.value['nom'] as String, phone: e.value['telephone'] as String?),
+    ];
+  }
+
+  @override
+  Future<ReferenceChoice> createCategory(Operator operator, String name, {String? operationUuid}) =>
+      _createReference(operator, 'creation_categorie', name, null, operationUuid, categoryCreateBlocker(operator), () => categoryChoices);
+
+  @override
+  Future<ReferenceChoice> createSupplier(Operator operator, String name, {String? phone, String? operationUuid}) =>
+      _createReference(operator, 'creation_fournisseur', name, phone, operationUuid, supplierCreateBlocker(operator), () => _supplierChoices);
+
+  Future<ReferenceChoice> _createReference(Operator operator, String type, String rawName, String? rawPhone, String? operationUuid, String? blocker,
+      List<ReferenceChoice> Function() choices) => serialized(() async {
+    final key = _referenceOperations[type]!;
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) {
+        final operation = existing['operation'] as Map;
+        if (operation['type'] != type) throw const OfflineRefusal('Identifiant d’opération déjà utilisé.');
+        final uuid = _reference((operation['contenu'] as Map)[key] as String)!;
+        return choices().where((c) => c.uuid == uuid).firstOrNull ??
+            ReferenceChoice(uuid: uuid, name: (operation['contenu'] as Map)['nom'] as String, phone: (operation['contenu'] as Map)['telephone'] as String?);
+      }
+    }
+    _requireCatalogue(blocker);
+    final name = CatalogueValidation.referenceName(rawName, type == 'creation_categorie' ? 'de la catégorie' : 'du fournisseur');
+    final phone = type == 'creation_fournisseur' ? CatalogueValidation.phone(rawPhone) : null;
+    // Même nom déjà proposé (sans casse) : on le reprend, comme le serveur le rattacherait.
+    final same = choices().where((c) => c.name.trim().toLowerCase() == name.toLowerCase()).firstOrNull;
+    if (same != null) return same;
+    final uuid = _newUuid();
+    await _record(operationUuid ?? _newUuid(), type, operator, (_) => {
+      key: uuid,
+      'nom': name,
+      if (type == 'creation_fournisseur') 'telephone': phone,
+    });
+    await _rebuild();
+    await _afterWrite();
+    return choices().firstWhere((c) => c.uuid == uuid);
+  });
+
   @override
   ProductFields? productFields(int productId) {
     final uuid = _productUuids[productId];
@@ -1943,7 +2049,8 @@ class V2Engine extends CaisseEngine {
       name: p['nom'] as String,
       reference: p['reference'] as String?,
       barcodes: [for (final c in snapshot?.products.where((x) => x.id == productId).firstOrNull?.codes ?? const <ProductCode>[]) if (c.packagingId == null) c.code],
-      categoryUuid: p['categorie_uuid'] as String?,
+      categoryUuid: _reference(p['categorie_uuid'] as String?),
+      supplierUuid: _reference(p['fournisseur_uuid'] as String?),
       price: (p['prix'] as num).toInt(),
       wholesalePrice: (p['prix_gros'] as num?)?.toInt(),
       wholesaleMin: p['gros_quantite_min'] as String?,
@@ -1987,8 +2094,11 @@ class V2Engine extends CaisseEngine {
     final wholesale = CatalogueValidation.optionalAmount(product.wholesalePrice, 'Prix de gros');
     final minimum = CatalogueValidation.quantity(product.wholesaleMin);
     if (wholesale != null && wholesale > price) throw const OfflineRefusal('Le prix de gros ne peut pas dépasser le prix de vente.');
-    final category = product.categoryUuid;
+    final category = _reference(product.categoryUuid);
     if (category != null && !_categoryChoices.any((c) => c.uuid == category)) throw const OfflineRefusal('Catégorie inconnue sur ce terminal.');
+    final supplier = _reference(product.supplierUuid);
+    if (supplier != null && !referencesSupported) throw const OfflineRefusal('Fournisseur non disponible sur ce terminal (serveur sans référentiels).');
+    if (supplier != null && !_supplierChoices.any((s) => s.uuid == supplier)) throw const OfflineRefusal('Fournisseur inconnu sur ce terminal.');
     for (final code in codes) {
       final used = snapshot?.byCode(code);
       if (used != null) throw OfflineRefusal('Code-barres « $code » déjà utilisé par « ${used.$1.name} ».', code: CatalogueValidation.codeUsed);
@@ -2000,6 +2110,7 @@ class V2Engine extends CaisseEngine {
       'reference': reference,
       'codes_barres': codes,
       'categorie_uuid': category,
+      'fournisseur_uuid': ?supplier,
       'prix': price,
       'prix_achat': purchase,
       'prix_gros': wholesale,
@@ -2010,6 +2121,7 @@ class V2Engine extends CaisseEngine {
     return _productAfterWrite(uuid);
   });
 
+  /// Champs modifiables ; `fournisseur_uuid` s'y ajoute avec la capacité `referentiels.creation` (lot 18).
   static const _editableFields = {'nom', 'reference', 'categorie_uuid', 'prix', 'prix_gros', 'gros_quantite_min'};
 
   @override
@@ -2028,8 +2140,9 @@ class V2Engine extends CaisseEngine {
     final uuid = _productUuids[productId];
     final current = uuid == null ? null : _products[uuid];
     if (uuid == null || current == null) throw const OfflineRefusal('Produit inconnu sur ce terminal.', code: CatalogueValidation.unknownProduct);
-    final unknown = changes.keys.where((k) => !_editableFields.contains(k));
-    if (expected != null && changes.keys.any((key) => !expected.containsKey(key) || current[key] != expected[key])) {
+    final unknown = changes.keys.where((k) => !_editableFields.contains(k) && !(k == 'fournisseur_uuid' && referencesSupported));
+    Object? seen(String key) => key == 'categorie_uuid' || key == 'fournisseur_uuid' ? _reference(current[key] as String?) : current[key];
+    if (expected != null && changes.keys.any((key) => !expected.containsKey(key) || (seen(key) != expected[key] && current[key] != expected[key]))) {
       throw const OfflineRefusal('La fiche a changé depuis son ouverture. Fermez puis rouvrez-la avant de modifier.', code: 'produit_modifie_depuis_lecture');
     }
     if (unknown.isNotEmpty) throw OfflineRefusal('Champ non modifiable : ${unknown.join(', ')}.');
@@ -2038,7 +2151,15 @@ class V2Engine extends CaisseEngine {
       next[e.key] = switch (e.key) {
         'nom' => CatalogueValidation.name('${e.value ?? ''}'),
         'reference' => CatalogueValidation.reference(e.value as String?),
-        'categorie_uuid' => e.value == null || _categoryChoices.any((c) => c.uuid == e.value) ? e.value : throw const OfflineRefusal('Catégorie inconnue sur ce terminal.'),
+        'categorie_uuid' => switch (_reference(e.value as String?)) {
+            final c? when !_categoryChoices.any((x) => x.uuid == c) && c != _reference(current['categorie_uuid'] as String?) => throw const OfflineRefusal('Catégorie inconnue sur ce terminal.'),
+            final c => c,
+          },
+        // Fournisseur (lot 18) : actif ou créé ici ; un fournisseur inactif déjà lié reste accepté.
+        'fournisseur_uuid' => switch (_reference(e.value as String?)) {
+            final s? when !_supplierChoices.any((x) => x.uuid == s) && s != _reference(current['fournisseur_uuid'] as String?) => throw const OfflineRefusal('Fournisseur inconnu sur ce terminal.'),
+            final s => s,
+          },
         'prix' => CatalogueValidation.amount(e.value as int?, 'Prix de vente'),
         'prix_gros' => CatalogueValidation.optionalAmount(e.value as int?, 'Prix de gros'),
         _ => CatalogueValidation.quantity(e.value as String?),
@@ -2047,9 +2168,11 @@ class V2Engine extends CaisseEngine {
     final wholesale = next.containsKey('prix_gros') ? next['prix_gros'] as int? : (current['prix_gros'] as num?)?.toInt();
     final price = next.containsKey('prix') ? next['prix'] as int : (current['prix'] as num).toInt();
     if (wholesale != null && wholesale > price) throw const OfflineRefusal('Le prix de gros ne peut pas dépasser le prix de vente.');
+    // Valeur connue du terminal : uuid local d'une catégorie ou d'un fournisseur remplacé par l'uuid du serveur (lot 18).
+    Object? known(String key) => key == 'categorie_uuid' || key == 'fournisseur_uuid' ? _reference(current[key] as String?) : current[key];
     final fields = {
       for (final e in next.entries)
-        if (current[e.key] != e.value) e.key: {'avant': current[e.key], 'apres': e.value},
+        if (known(e.key) != e.value) e.key: {'avant': known(e.key), 'apres': e.value},
     };
     if (fields.isEmpty) throw const OfflineRefusal('Aucun changement à enregistrer.', code: CatalogueValidation.noChange);
     final revision = (await v2.revisions('produit'))[uuid];
@@ -2896,7 +3019,15 @@ class V2Engine extends CaisseEngine {
     final products = await v2.entities('produit');
     final packagings = await v2.entities('conditionnement');
     final barcodes = await v2.entities('code_barre');
+    final categories = await v2.entities('categorie');
+    final suppliers = await v2.entities('fournisseur');
+    await _referenceOverlay(categories, suppliers);
     final localStates = await _catalogueOverlay(products, barcodes);
+    // Nom du fournisseur des fiches qui citent un fournisseur par uuid (créé ici, ou changé par une modification locale).
+    for (final entry in products.entries) {
+      final supplier = suppliers[_reference(entry.value['fournisseur_uuid'] as String?)];
+      if (supplier != null && supplier['nom'] != entry.value['fournisseur']) products[entry.key] = {...entry.value, 'fournisseur': supplier['nom']};
+    }
     final stock = await v2.entities('stock.projection');
     final policies = {for (final p in (await v2.entities('politique')).values) p['cle_politique'] as String: p['valeur']};
     _returnRules = (
@@ -2914,19 +3045,18 @@ class V2Engine extends CaisseEngine {
     _resto = await _loadRestaurant();
     final pointOfSale = _resto?.pointOfSaleUuid;
     _restoInterface = RestoInterface.fromJson(pointOfSale == null ? null : (await v2.entities('restaurant.interface'))['interface:$pointOfSale']);
-    final categories = await v2.entities('categorie');
     _categoryChoices = [
       for (final c in (categories.entries.where((c) => c.value['actif'] == true).toList()
         ..sort((a, b) => ((a.value['ordre'] as int?) ?? 0).compareTo((b.value['ordre'] as int?) ?? 0))))
         (uuid: c.key, name: c.value['nom'] as String),
     ];
     String? categoryOf(Map<String, dynamic> product) {
-      final category = categories[product['categorie_uuid']];
+      final category = categories[_reference(product['categorie_uuid'] as String?)];
       return category != null && category['actif'] == true ? category['nom'] as String : product['categorie'] as String?;
     }
 
     // Onglets du web : catégories portant un produit actif de la boutique (une catégorie partagée peut n'en porter qu'ailleurs).
-    final used = {for (final p in products.values) if (p['actif'] == true) p['categorie_uuid']};
+    final used = {for (final p in products.values) if (p['actif'] == true) _reference(p['categorie_uuid'] as String?)};
     final orderedCategories = categories.entries.where((c) => c.value['actif'] == true && used.contains(c.key)).map((c) => c.value).toList()
       ..sort((a, b) => (a['ordre'] as int).compareTo(b['ordre'] as int));
     final localMethods = (policies['paiements.moyens_locaux'] as List?)?.cast<String>() ?? const <String>[];

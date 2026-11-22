@@ -1,0 +1,22 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000182",
+    "type": "creation_fournisseur",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 61,
+    "cree_le": "2026-11-23T09:00:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "fournisseur_uuid": "f0000000-0000-4000-8000-000000000018",
+        "nom": "Grossiste Adjamé",
+        "telephone": "+2250700000018"
+    },
+    "empreinte": "27032bb5663706ba940ac4b73bbdbb0641337c162e34806c1fbb93a2b2c7ea5b"
+}

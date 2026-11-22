@@ -1199,6 +1199,76 @@
             "schema": "operation.json",
             "valide": false,
             "erreur_attendue": "au moins 1 élément(s)"
+        },
+        {
+            "fichier": "valides/operation--creation-categorie.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--creation-fournisseur.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--creation-produit-fournisseur.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operation--modification-produit-fournisseur.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-2.1--fournisseur.json",
+            "schema": "donnees-2.1.json#/$defs/fournisseur",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-2.1--produit-fournisseur.json",
+            "schema": "donnees-2.1.json#/$defs/produit",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-resultat--creation-categorie-rattachee.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/operations-resultat--creation-fournisseur-creee.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--creation-categorie-nom-vide.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "au moins 1"
+        },
+        {
+            "fichier": "invalides/operation--creation-fournisseur-sans-telephone.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "obligatoire"
+        },
+        {
+            "fichier": "invalides/operation--creation-produit-fournisseur-nom.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "exactement une variante"
+        },
+        {
+            "fichier": "invalides/donnees-2.1--fournisseur-sans-actif.json",
+            "schema": "donnees-2.1.json#/$defs/fournisseur",
+            "valide": false,
+            "erreur_attendue": "obligatoire"
+        },
+        {
+            "fichier": "invalides/operations-resultat--referentiel-decision-inconnue.json",
+            "schema": "operations.json#/$defs/resultat",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
         }
     ]
 }
