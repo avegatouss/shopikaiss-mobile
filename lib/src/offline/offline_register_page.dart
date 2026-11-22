@@ -32,6 +32,7 @@ import 'money.dart';
 import 'pass_sheet.dart';
 import 'payment_dialog.dart';
 import 'pending_operations_page.dart';
+import 'pre_sale_page.dart';
 import 'product_editor.dart';
 import 'receipt_settings.dart';
 import 'ticket.dart';
@@ -392,6 +393,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   void _clearCart() {
     _cart.clear();
+    if (_preSaleUse != null) ScaffoldMessenger.maybeOf(context)?.hideCurrentMaterialBanner();
+    _preSaleUse = null;
     _tier.cart = false;
     _globalEntry = null;
     _delivery = 0;
@@ -882,6 +885,92 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       row('Rejoint les espèces', formatFcfa(total)),
       if (reason.text.trim().isNotEmpty) 'Motif : ${reason.text.trim()}',
     ], failure: 'Ticket de transfert non imprimé');
+  }
+
+  // ------------------------------------------------------------------ Prévente (2.1 lot 15)
+
+  /// Prévente retirée par le panier : son acompte est déduit à l'encaissement.
+  PreSaleUse? _preSaleUse;
+
+  void _openPreSales() {
+    final operator = _operator;
+    if (operator == null) return;
+    if (_engine.preSaleBlocker(operator) case final refusal?) return _toast(refusal);
+    Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => PreSalePage(engine: _engine, operator: operator, onWithdraw: _withdrawPreSale, onPrint: _printPreSale),
+    ));
+  }
+
+  /// Le panier devient une prévente : client, acompte facultatif, facture imprimée, panier vidé.
+  Future<void> _createPreSale() async {
+    final operator = _operator;
+    if (operator == null || _cart.isEmpty) return;
+    if (_engine.preSaleBlocker(operator) case final refusal?) return _refuse(refusal, title: 'Prévente impossible');
+    final created = await showCreatePreSale(context, engine: _engine, operator: operator, lines: List.of(_cart), customer: _customer);
+    if (created == null || !mounted) return;
+    await _engine.deleteDraft(_draftUuid);
+    if (!mounted) return;
+    setState(() {
+      _clearCart();
+      _draftUuid = const Uuid().v4();
+    });
+    _toast('Prévente ${created.code} enregistrée.');
+    final settlement = created.deposit > 0 && (_snapshot?.methods.where((m) => m.code == created.depositMethod).firstOrNull?.isCash ?? false);
+    if (widget.session.hasPrinter && settlement) unawaited(widget.session.channel.openDrawer());
+    // Impression automatique de la facture (même réglage que le ticket de vente).
+    final print = _look.ticketMode == 'auto' || await _askYesNo('Facture de prévente', 'Imprimer la facture de la prévente ${created.code} ?');
+    if (print && mounted) await _printPreSale(created);
+  }
+
+  Future<bool> _askYesNo(String title, String message) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Non')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Imprimer')),
+          ],
+        ),
+      ) ??
+      false;
+
+  /// Retrait : lignes de la prévente au panier (modifiables), acompte déduit, mention sur le ticket.
+  void _withdrawPreSale(PreSale p) {
+    if (_cart.isNotEmpty || _editing != null) return _toast('Videz ou mettez en attente le panier avant de retirer une prévente.');
+    final lines = _engine.preSaleCart(p);
+    if (lines.isEmpty) return _toast('Les articles de cette prévente ne sont plus au catalogue local.');
+    setState(() {
+      _cart.addAll(lines);
+      _preSaleUse = PreSaleUse(uuid: p.uuid, code: p.code, deposit: p.deposit);
+      _note = 'Retrait de la prévente ${p.code}${p.deposit > 0 ? ' (acompte de ${formatFcfa(p.deposit)} déduit)' : ''}';
+    });
+    ScaffoldMessenger.of(context)
+      ..hideCurrentMaterialBanner()
+      ..showMaterialBanner(
+        MaterialBanner(
+          backgroundColor: const Color(0xFFE3F2FD),
+          leading: const Icon(Icons.bookmark_outlined),
+          content: Text('Retrait de la prévente ${p.code} · ${p.customerName}${p.deposit > 0 ? ' · acompte ${formatFcfa(p.deposit)} déduit' : ''}. « Payer » encaisse le reste.'),
+          actions: [
+            TextButton(
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+                setState(_clearCart);
+              },
+              child: const Text('Abandonner'),
+            ),
+          ],
+        ),
+      );
+  }
+
+  Future<void> _printPreSale(PreSale p) async {
+    final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
+    final lines = preSaleTicketLines(p,
+        columns: width >= 80 ? 48 : 32, money: formatFcfa, operatorName: _operator?.name, title: p.status == 'desistee' ? 'DÉSISTEMENT DE PRÉVENTE' : 'FACTURE DE PRÉVENTE');
+    await _printText(lines, failure: 'Facture de prévente non imprimée', saved: ' : la prévente est bien enregistrée.', bytes: preSaleTicketBytes(lines), framed: true);
   }
 
   /// « Synchroniser maintenant » de l'indicateur : envoi immédiat, sans quitter la caisse locale.
@@ -1488,6 +1577,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         ),
       ),
       ('ventes_recentes', action('Ventes récentes', Icons.history, _openJournal)),
+      if (_engine.preSaleSupported && operator != null) ...[
+        ('prevente', action('Préventes', Icons.bookmarks_outlined, _openPreSales)),
+        ('prevente_nouvelle', action('Mettre en prévente', Icons.bookmark_add_outlined, _cart.isNotEmpty && _editing == null && _preSaleUse == null ? _createPreSale : null)),
+      ],
       if (operator != null) ('livre_caisse', action('Livre de caisse', Icons.menu_book_outlined, _openCashBook)),
       ('recu', action('Reçu', Icons.receipt_long_outlined, _openJournal)),
       ('note', action(_note == null ? 'Note' : 'Note ✓', Icons.note_alt_outlined, extras ? _editNote : null)),
@@ -2532,10 +2625,16 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final sameBasket = await _engine.sameAsPreviousSale(_cart);
     if (!mounted) return;
     if (sameBasket) _toast(CaisseEngine.sameBasketWarning);
+    // Prévente retirée (lot 15) : l'acompte est déduit ; le moteur ajoute le paiement `acompte_prevente`.
+    final preSale = _preSaleUse;
+    final due = payable - (preSale?.deposit ?? 0);
     // Répartition validée par le moteur avant de fermer la fenêtre : un refus s'affiche sur les lignes saisies.
     String? check(List<CartPayment> payments) {
       try {
-        _engine.checkSale(snapshot, _cart, payments, SaleExtras(globalDiscount: globalDiscount, delivery: _delivery));
+        final deposit = preSale == null || preSale.deposit == 0
+            ? const <CartPayment>[]
+            : [CartPayment(method: PaymentMethodInfo({'code': preSaleDepositMethod, 'nom': 'Acompte prévente', 'especes': false, 'reference': 'aucune'}), amount: preSale.deposit)];
+        _engine.checkSale(snapshot, _cart, [...deposit, ...payments], SaleExtras(globalDiscount: globalDiscount, delivery: _delivery, preSale: preSale));
         return null;
       } on OfflineRefusal catch (e) {
         return e.message;
@@ -2544,7 +2643,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
     OfflinePaymentDialog dialog({bool fullScreen = false}) => OfflinePaymentDialog(
       methods: snapshot.methods,
-      payable: payable,
+      payable: due,
       cashDue: _engine.cashDue,
       fullScreen: fullScreen,
       check: check,
@@ -2555,7 +2654,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     );
     final List<CartPayment>? payments;
     try {
-      payments = passes != null
+      payments = passes != null || (preSale != null && due == 0)
           ? const <CartPayment>[]
           : _compact
           ? await Navigator.of(context).push<List<CartPayment>>(MaterialPageRoute(fullscreenDialog: true, builder: (_) => dialog(fullScreen: true)))
@@ -2580,6 +2679,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           note: _note,
           approval: approval,
           customer: _customer,
+          preSale: preSale,
           sharedCart: _shared?.uuid,
           passes: passes ?? const [],
         ),

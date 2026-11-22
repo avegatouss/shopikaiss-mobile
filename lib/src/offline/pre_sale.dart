@@ -5,7 +5,12 @@
 /// facultatif de l'acompte). Petite caisse isolée : l'acompte n'est pas du chiffre d'affaires avant la conversion.
 library;
 
+import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
+
+import '../printer/escpos.dart';
+import 'models.dart' show stripAccents;
 
 /// Moyen technique de la vente de conversion : l'acompte déjà compté à sa réception, jamais proposé dans un sélecteur.
 const preSaleDepositMethod = 'acompte_prevente';
@@ -199,4 +204,27 @@ List<String> preSaleTicketLines(PreSale p, {required int columns, required Strin
     'Présentez ce code au retrait.',
     'Document de réservation : ce n’est pas un ticket de vente.',
   ];
+}
+
+/// Octets ESC/POS de la facture de prévente : titre en gras, **code en double taille** centré, puis le reste.
+Uint8List preSaleTicketBytes(List<String> lines) {
+  final out = BytesBuilder()..add(EscPos.init());
+  for (var i = 0; i < lines.length; i++) {
+    final text = latin1.encode('${stripAccents(lines[i]).replaceAll(RegExp(r'[^\x20-\x7E]'), '?')}\n');
+    if (i == 0) {
+      out
+        ..add([EscPos.esc, 0x61, 1, EscPos.esc, 0x45, 1])
+        ..add(text)
+        ..add([EscPos.esc, 0x45, 0]);
+    } else if (i == 1) {
+      out
+        ..add([EscPos.gs, 0x21, 0x11, EscPos.esc, 0x45, 1])
+        ..add(text)
+        ..add([EscPos.gs, 0x21, 0x00, EscPos.esc, 0x45, 0, EscPos.esc, 0x61, 0]);
+    } else {
+      out.add(text);
+    }
+  }
+  out.add(EscPos.feedAndCut(3));
+  return out.toBytes();
 }

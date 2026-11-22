@@ -6,6 +6,7 @@ import 'package:shopikaiss_terminal/src/offline/engine.dart';
 import 'package:shopikaiss_terminal/src/offline/models.dart';
 import 'package:shopikaiss_terminal/src/offline/store.dart';
 import 'package:shopikaiss_terminal/src/offline/x_z_report.dart';
+import 'package:shopikaiss_terminal/src/register/register_adapter.dart';
 import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -141,5 +142,37 @@ void main() {
     base = await SqfliteOfflineStore.open(name: p.join(dir.path, 'caisse-2.db'), factory: databaseFactoryFfi);
     final off = await engine();
     expect(off.preSaleSupported, isFalse);
+  });
+
+  test('adaptateur : prévente depuis le panier, facture, retrait par le panier (acompte déduit), vente convertie', () async {
+    serve();
+    final e = await engine();
+    await e.closeSession(awa(e), cash: 0);
+    await e.openSession(0, awa(e));
+    final adapter = LocalRegisterAdapter(e, newUuid: newUuid);
+    await adapter.start();
+    await adapter.execute('login', {'operator_id': 7, 'pin': '1234'}, null);
+    expect((((await adapter.execute('status', {}, null))['capabilities'] as Map)['pre_sale'] as Map)['allowed'], isTrue);
+    await adapter.execute('addProduct', {'product_id': savon(e).id}, null);
+    await adapter.execute('addProduct', {'product_id': savon(e).id}, null);
+    final created = (await adapter.execute('createPreSale', {'customer_name': 'Koffi', 'deposit': 400, 'method': 'especes', 'received': 500}, 'abcdef00-0000-4000-8000-0000000000b1'))['pre_sale'] as Map;
+    expect((created['total'], created['deposit'], created['due']), (1000, 400, 600));
+    expect(((await adapter.execute('view', {}, null))['lines'] as List), isEmpty, reason: 'panier vidé');
+    final ticket = await adapter.execute('preSaleTicket', {'pre_sale_id': created['id'], 'paper_width': 80}, null);
+    expect((ticket['lines'] as List).take(2), ['FACTURE DE PRÉVENTE', 'CODE : ${created['code']}']);
+    expect(ticket['escpos_base64'], isNotEmpty);
+
+    final listed = (await adapter.execute('preSales', {'query': created['code'], 'open_only': true}, null))['pre_sales'] as List;
+    expect(listed.single['id'], created['id']);
+    final view = await adapter.execute('loadPreSale', {'pre_sale_id': created['id']}, null);
+    expect((view['pre_sale'] as Map)['code'], created['code']);
+    expect(((view['totals'] as Map)['payable_label'] as String).replaceAll(RegExp(r'\D'), ''), '600');
+    await adapter.execute('setPayment', {'method': 'especes', 'received': 600}, null);
+    final sold = await adapter.execute('commitSale', {}, 'abcdef00-0000-4000-8000-0000000000b2');
+    expect(sold['state'], 'committed');
+    expect((await e.preSales()).single.status, 'retiree');
+    await expectLater(adapter.execute('loadPreSale', {'pre_sale_id': created['id']}, null),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'prevente_fermee')));
+    await adapter.close();
   });
 }

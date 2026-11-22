@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../offline/catalogue_edit.dart';
 import '../offline/engine.dart';
 import '../offline/local_prices.dart';
+import '../offline/receipt_settings.dart';
 import '../offline/models.dart';
 import '../offline/money.dart';
 import '../offline/ticket.dart';
@@ -59,6 +60,12 @@ class AdapterFailure implements Exception {
 /// Sessions locales (2.1 lot 12, `session.multiple`) : localSessions (liste, plafond, jour d'exploitation), closeDay
 /// (Z de journée du terminal, identifiant d'opération facultatif ; puis closureDocument kind `z-jour-terminal`),
 /// syncStatus (état, compte à rebours) ; status porte `sync` et les capacités `open_session` (plafond) et `close_day`.
+///
+/// Prévente (2.1 lot 15) : preSales {query, open_only}, createPreSale {customer_name, customer_phone, customer_id,
+/// pickup_at, deposit, method, received, reference, note} sur les lignes du panier (identifiant d'opération ; panier vidé),
+/// cancelPreSale {pre_sale_id, reason, refund, method, reference}, loadPreSale {pre_sale_id} (panier vide : les lignes
+/// reviennent, l'acompte est déduit du montant à payer et commitSale convertit la prévente), preSaleTicket
+/// {pre_sale_id, paper_width} (facture : lignes et ESC/POS). Capacité `pre_sale`.
 ///
 /// Mobile money → espèces (lot 16) : cashTransferPreview (lignes {method, name, amount}, total, reason si impossible),
 /// commitCashTransfer {reason} avec un identifiant d'opération (idempotent). Capacité `cash_transfer`.
@@ -172,6 +179,16 @@ class LocalRegisterAdapter {
         return engine.syncStatus.toJson(engine.now);
       case 'localSessions':
         return _localSessions();
+      case 'preSales':
+        return _preSales(args);
+      case 'createPreSale':
+        return _createPreSale(args, operationId);
+      case 'cancelPreSale':
+        return _cancelPreSale(args, operationId);
+      case 'loadPreSale':
+        return _loadPreSale(_text(args, 'pre_sale_id', max: 36));
+      case 'preSaleTicket':
+        return _preSaleTicket(args);
       case 'cashTransferPreview':
         return _cashTransferPreview();
       case 'commitCashTransfer':
@@ -402,6 +419,7 @@ class LocalRegisterAdapter {
               ? opening
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
       'close_day': cap(dayClosing),
+      'pre_sale': cap(engine.preSaleBlocker(_operator)),
       'cash_transfer': {...cap(await engine.cashTransferBlocker(_operator)), 'available': engine.cashTransferSupported},
       'cash_book_online': cap(!engine.onlineCashBookSupported
           ? 'Livre de caisse en ligne non disponible sur ce terminal.'
@@ -508,7 +526,8 @@ class LocalRegisterAdapter {
     final today = now.toIso8601String().substring(0, 10);
     final payments = _draft.payments;
     final payment = payments.firstOrNull;
-    final paymentValid = totals != null && payments.isNotEmpty && _paymentsError(snapshot!, payments, totals.payable) == null;
+    final deposit = _preSaleDeposit;
+    final paymentValid = totals != null && payments.isNotEmpty && _paymentsError(snapshot!, payments, totals.payable - deposit) == null;
     final paid = payments.fold<int>(0, (sum, p) => sum + p.amount);
     final cash = payments.where((p) => p.received != null).firstOrNull;
     final ready = snapshot != null && reason == null;
@@ -575,8 +594,12 @@ class LocalRegisterAdapter {
               'vat_label': formatFcfa(totals.vat, currency),
               'vat_rate': snapshot!.store.vatRate,
               'vat_included': snapshot.store.vatIncluded,
-              'payable_label': formatFcfa(totals.payable, currency),
+              'payable_label': formatFcfa(totals.payable - deposit, currency),
+              // Prévente retirée : total complet, acompte déduit, reste à payer (payable_label).
+              'pre_sale_total_label': deposit == 0 ? '' : formatFcfa(totals.payable, currency),
+              'pre_sale_deposit_label': deposit == 0 ? '' : formatFcfa(deposit, currency),
             },
+      'pre_sale': _draft.preSale,
       // Premier paiement (vue d'un paiement unique) ; reçu et monnaie portent sur la ligne d'espèces.
       'payment': payment == null || totals == null
           ? null
@@ -591,7 +614,7 @@ class LocalRegisterAdapter {
                   ? null
                   : formatFcfa(engine.cashDue(cash.amount) - cash.amount, currency),
               'paid_label': formatFcfa(paid, currency),
-              'remaining_label': formatFcfa(totals.payable - paid, currency),
+              'remaining_label': formatFcfa(totals.payable - deposit - paid, currency),
             },
       'payments': [
         for (final p in payments)
@@ -877,6 +900,95 @@ class LocalRegisterAdapter {
     'today': engine.today,
     'sessions': [for (final s in (await engine.localSessions()).reversed) s.toJson()],
   };
+
+  // ------------------------------------------------------------------ Prévente (2.1 lot 15)
+
+  Future<Map<String, dynamic>> _preSales(Map<String, dynamic> args) async {
+    final query = args['query'] is String ? (args['query'] as String) : '';
+    if (query.length > 100) throw const AdapterFailure('argument_invalide', 'Recherche trop longue.');
+    final list = await engine.preSales(query: query, openOnly: args['open_only'] == true);
+    return {'pre_sales': [for (final p in list.take(200)) p.toJson()], 'reason': engine.preSaleBlocker(_operator)};
+  }
+
+  /// Nouvelle prévente sur les lignes du panier ; le panier est vidé une fois la prévente enregistrée.
+  Future<Map<String, dynamic>> _createPreSale(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator ?? (throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.'));
+    if (_draft.edit != null || _draft.preSale != null) throw const AdapterFailure('panier_occupe', 'Ce panier retire déjà une prévente ou corrige un ticket.');
+    final id = _requireOperationId(operationId);
+    final lines = _editLines();
+    final deposit = args['deposit'] == null ? 0 : _int(args, 'deposit');
+    final methodCode = args['method'] as String?;
+    final method = methodCode == null ? null : _snapshot().methods.where((m) => m.code == methodCode).firstOrNull;
+    if (methodCode != null && method == null) throw const AdapterFailure('moyen_inconnu', 'Moyen de paiement inconnu sur ce terminal.');
+    final pickup = args['pickup_at'] is String ? DateTime.tryParse(args['pickup_at'] as String) : null;
+    try {
+      final created = await engine.createPreSale(
+        operator,
+        customerName: _text(args, 'customer_name', max: 160),
+        customerPhone: args['customer_phone'] as String?,
+        customerUuid: args['customer_id'] as String?,
+        pickupAt: pickup,
+        lines: lines,
+        deposit: deposit,
+        depositMethod: method,
+        received: args['received'] as int?,
+        reference: args['reference'] as String?,
+        note: args['note'] as String?,
+        operationUuid: id,
+      );
+      if (_draft.lines.isNotEmpty) {
+        await engine.deleteDraft(_draft.uuid);
+        _draft = _Draft(_newUuid());
+        _emit('panier');
+      }
+      return {'pre_sale': created.toJson()};
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('prevente_refusee', e.message);
+    }
+  }
+
+  Future<Map<String, dynamic>> _cancelPreSale(Map<String, dynamic> args, String? operationId) async {
+    final operator = _operator ?? (throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.'));
+    final refund = args['refund'] == null ? 0 : _int(args, 'refund');
+    final methodCode = args['method'] as String?;
+    final method = methodCode == null ? null : _snapshot().methods.where((m) => m.code == methodCode).firstOrNull;
+    try {
+      final cancelled = await engine.cancelPreSale(operator, _text(args, 'pre_sale_id', max: 36),
+          reason: _text(args, 'reason', max: 500), refund: refund, refundMethod: method, reference: args['reference'] as String?, operationUuid: _requireOperationId(operationId));
+      _emit('session');
+      return {'pre_sale': cancelled.toJson()};
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('prevente_refusee', e.message);
+    }
+  }
+
+  /// Retrait par le panier : les lignes reviennent (modifiables), l'acompte est déduit ; commitSale convertit.
+  Future<Map<String, dynamic>> _loadPreSale(String id) async {
+    if (engine.preSaleBlocker(_operator) case final refusal?) throw AdapterFailure('prevente_refusee', refusal);
+    if (_draft.lines.isNotEmpty || _draft.edit != null) throw const AdapterFailure('panier_non_vide', 'Videz ou mettez en attente le panier avant de retirer une prévente.');
+    final p = (await engine.preSales()).where((x) => x.uuid == id).firstOrNull ?? (throw const AdapterFailure('prevente_inconnue', 'Prévente introuvable sur ce terminal.'));
+    if (!p.open) throw AdapterFailure('prevente_fermee', 'Prévente ${p.code} déjà retirée ou annulée.');
+    final cart = engine.preSaleCart(p);
+    if (cart.isEmpty) throw const AdapterFailure('prevente_vide', 'Les articles de cette prévente ne sont plus au catalogue local.');
+    return _mutate(() {
+      for (final l in cart) {
+        _draft.lines.add(_DraftLine(id: _newUuid(), productId: l.product.id, packagingId: l.packaging?.id, quantity: l.quantity, discount: 0));
+      }
+      _draft.preSale = {'id': p.uuid, 'code': p.code, 'deposit': p.deposit};
+      _draft.note = 'Retrait de la prévente ${p.code}${p.deposit > 0 ? ' (acompte de ${formatFcfa(p.deposit)} déduit)' : ''}';
+    });
+  }
+
+  Future<Map<String, dynamic>> _preSaleTicket(Map<String, dynamic> args) async {
+    final p = (await engine.preSales()).where((x) => x.uuid == _text(args, 'pre_sale_id', max: 36)).firstOrNull ??
+        (throw const AdapterFailure('prevente_inconnue', 'Prévente introuvable sur ce terminal.'));
+    final (paper, columns) = _closureWidth(args);
+    final lines = preSaleTicketLines(p, columns: columns, money: formatFcfa, operatorName: _operator?.name, title: p.status == 'desistee' ? 'DÉSISTEMENT DE PRÉVENTE' : 'FACTURE DE PRÉVENTE');
+    final frame = storeFrame(engine.snapshot?.store);
+    final body = preSaleTicketBytes(lines);
+    final bytes = (await ReceiptSettings.read(engine)).documentBytes(body, paperWidth: paper, header: frame.header, footer: frame.footer);
+    return {'lines': lines, 'escpos_base64': base64Encode(bytes), 'paper_width': paper, 'columns': columns};
+  }
 
   /// Mobile money → espèces (lot 16) : ce qui partirait vers les espèces, moyen par moyen.
   Future<Map<String, dynamic>> _cashTransferPreview() async {
@@ -1788,6 +1900,9 @@ class LocalRegisterAdapter {
     customer: _draft.customer,
     sharedCart: _draft.sharedCart?.uuid,
     passes: passes,
+    preSale: _draft.preSale == null
+        ? null
+        : PreSaleUse(uuid: _draft.preSale!['id'] as String, code: _draft.preSale!['code'] as String, deposit: _draft.preSale!['deposit'] as int),
   );
 
   /// Pass scanné ou saisi : vérifié par le moteur (en ligne, sinon hors connexion si l'événement l'autorise), puis
@@ -2003,8 +2118,11 @@ class LocalRegisterAdapter {
   int _payable(Snapshot snapshot) {
     final totals = _totalsOf(_draft, snapshot);
     if (totals == null) throw const AdapterFailure('remise_refusee', 'La remise globale dépasse le montant du panier.');
-    return totals.payable;
+    return totals.payable - _preSaleDeposit;
   }
+
+  /// Acompte de la prévente retirée par le panier (lot 15), déduit du montant à payer ; 0 sans prévente.
+  int get _preSaleDeposit => (_draft.preSale?['deposit'] as int?) ?? 0;
 
   static String _requireOperationId(String? id) {
     if (id == null || !RegExp(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$').hasMatch(id)) {
@@ -2076,10 +2194,14 @@ class _Draft {
     }
     suspended = stored.content['suspendu'] == true;
     edit = stored.content['modification'] is Map ? Map<String, dynamic>.from(stored.content['modification'] as Map) : null;
+    preSale = stored.content['prevente'] is Map ? Map<String, dynamic>.from(stored.content['prevente'] as Map) : null;
   }
 
   /// Modification d'un ticket en cours (2.1 lot 11) : `vente_id`, `numero`, `total_origine`.
   Map<String, dynamic>? edit;
+
+  /// Prévente retirée par ce panier (lot 15) : `id`, `code`, `deposit`.
+  Map<String, dynamic>? preSale;
 
   final String uuid;
   int revision = 0;
@@ -2119,7 +2241,8 @@ class _Draft {
     ..customer = customer
     ..sharedCart = sharedCart
     ..wholesale = wholesale
-    ..edit = edit;
+    ..edit = edit
+    ..preSale = preSale;
 
   Map<String, dynamic> toJson() => {
     'lignes': [
@@ -2148,6 +2271,7 @@ class _Draft {
     ],
     if (suspended) 'suspendu': true,
     if (edit != null) 'modification': edit,
+    if (preSale != null) 'prevente': preSale,
   };
 }
 
