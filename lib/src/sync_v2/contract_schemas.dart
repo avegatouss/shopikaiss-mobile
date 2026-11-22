@@ -2243,7 +2243,7 @@ const contractV2Schemas = <String, String>{
                     "type": "boolean"
                 },
                 "elements": {
-                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs ; boutons de la barre : vue, plein_ecran, ventes_recentes, retour, carte_cadeau, coffret, client_rapide, produit_rapide, calculatrice, clavier, quitter ; boutons des postes seulement : recu, note, session, retour_web, back_office. Une clé inconnue du terminal est ignorée.",
+                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs ; boutons de la barre : vue, plein_ecran, ventes_recentes, retour, carte_cadeau, coffret, client_rapide, produit_rapide, calculatrice, clavier, quitter ; boutons des postes seulement : recu, note, session, retour_web, back_office, salle_tables. Une clé inconnue du terminal est ignorée.",
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 30,
@@ -2391,33 +2391,6 @@ const contractV2Schemas = <String, String>{
                 }
             }
         },
-        "fournisseur": {
-            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur de la boutique (liste des fournisseurs du web), actif ou non, pour le choix de la fiche produit. Non critique.",
-            "type": "object",
-            "required": [
-                "nom",
-                "telephone",
-                "actif"
-            ],
-            "additionalProperties": false,
-            "properties": {
-                "nom": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 160
-                },
-                "telephone": {
-                    "type": [
-                        "string",
-                        "null"
-                    ],
-                    "maxLength": 40
-                },
-                "actif": {
-                    "type": "boolean"
-                }
-            }
-        },
         "logo_boutique": {
             "description": "Capacité boutique.logo : logo de la boutique pour les impressions du poste (en tête de chaque document, sans rien au-dessus). Fichier JPEG servi par GET /logos/{uuid}, immuable ; null : pas de logo.",
             "oneOf": [
@@ -2456,6 +2429,33 @@ const contractV2Schemas = <String, String>{
                     }
                 }
             ]
+        },
+        "fournisseur": {
+            "description": "Capacité referentiels.creation (2.1 lot 18) : fournisseur de la boutique (liste des fournisseurs du web), actif ou non, pour le choix de la fiche produit. Non critique.",
+            "type": "object",
+            "required": [
+                "nom",
+                "telephone",
+                "actif"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "nom": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 160
+                },
+                "telephone": {
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "maxLength": 40
+                },
+                "actif": {
+                    "type": "boolean"
+                }
+            }
         }
     }
 }

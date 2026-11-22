@@ -1,9 +1,7 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commits : feat/referentiels-caisse 59866319 (A, lot 18 : creation_categorie, creation_fournisseur, entité fournisseur,
-fournisseur_uuid du produit) sur 4baadf4e (lots 12 à 17). donnees-2.1.json = celui de 59866319 FUSIONNÉ par B avec le logo de
-feat/remise-a-zero efc01465 (boutique.ticket.logo / logo_carre, $defs/logo_boutique), 59866319 ne le portant pas encore ;
-reformaté au passage (indentation 4). Autres schémas et fixtures recopiés tels quels. 236 fixtures, 16 schémas.
-Précédent : efc01465 (logo, eb2d222), 51f0745d (lot 17, 27cd200), 3ba28b1d (223 fixtures, e39dc61), 92bffdb5 (221), 194 (lots 10-11).
+Commit : origin/main 2b548b6d (lots 17 et 18 + logo intégrés par A). Schémas, fixtures et canonicalisation recopiés tels
+quels ; identiques à la fusion B précédente (59866319 + logo efc01465), au texte d'une description près. 236 fixtures, 16 schémas.
+Précédent : 59866319 + efc01465 fusionnés (lot 18, d7e7cc3), efc01465 (logo, eb2d222), 51f0745d (lot 17, 27cd200), 3ba28b1d (223 fixtures, e39dc61), 92bffdb5 (221), 194 (lots 10-11).
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.
