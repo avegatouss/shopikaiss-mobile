@@ -1,0 +1,31 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000416",
+    "type": "transfert_especes",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 57,
+    "cree_le": "2026-11-22T20:45:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "session_uuid": "5e55a0d1-0000-4000-8000-000000000002",
+        "lignes": [
+            {
+                "moyen": "orange_money",
+                "montant": 45000
+            },
+            {
+                "moyen": "wave",
+                "montant": 12500
+            }
+        ],
+        "motif": null
+    },
+    "empreinte": "0032302da062ac2509cc51730e42442b23105e0a2a187f208ab10481b2455e4f"
+}

@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lots 9 à 11, lots 12 à 15 integration/lots-12-15 92bffdb5) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lots 9 à 11, lots 12 à 16 integration/lots-12-15 3ba28b1d) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -992,6 +992,29 @@ const contractV2Schemas = <String, String>{
                                 "actif": {
                                     "type": "boolean",
                                     "description": "false : l’écran Prévente n’est pas proposé."
+                                }
+                            }
+                        },
+                        "transfert_especes": {
+                            "description": "Capacité transfert.especes (lot 16) : présente seulement si la boutique a activé le transfert de fin de journée vers les espèces (Paramètres › Trésorerie). Absente : bouton masqué.",
+                            "type": "object",
+                            "required": [
+                                "actif",
+                                "moyens"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "actif": {
+                                    "const": true
+                                },
+                                "moyens": {
+                                    "type": "array",
+                                    "maxItems": 30,
+                                    "uniqueItems": true,
+                                    "items": {
+                                        "$ref": "commun.json#/$defs/code"
+                                    },
+                                    "description": "Moyens dont tout le solde de la session part vers les espèces (jamais les espèces ; les cartes seulement si la boutique les a cochées)."
                                 }
                             }
                         }
@@ -2159,7 +2182,7 @@ const contractV2Schemas = <String, String>{
                     "type": "boolean"
                 },
                 "elements": {
-                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs. Une clé inconnue du terminal est ignorée.",
+                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs ; boutons de la barre : vue, plein_ecran, ventes_recentes, retour, carte_cadeau, coffret, client_rapide, produit_rapide, calculatrice, clavier, quitter ; boutons des postes seulement : recu, note, session, retour_web, back_office. Une clé inconnue du terminal est ignorée.",
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 30,
@@ -4483,6 +4506,9 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/prevente_annuler"
+        },
+        {
+            "$ref": "#/$defs/transfert_especes"
         }
     ],
     "$defs": {
@@ -9489,6 +9515,91 @@ const contractV2Schemas = <String, String>{
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_prevente_annuler"
+                }
+            }
+        },
+        "transfert_especes": {
+            "description": "Capacité transfert.especes (lot 16, demande TBC) : transfert de fin de journée des mobile money vers les espèces, hors connexion. Un transfert par ligne (ADR-207, ni recette ni dépense) dans la session `session_uuid`. Montants tels que le poste les voit pour SA session (le serveur les applique tels quels). Moyen non réglé (boutique.regles.transfert_especes.moyens) ou droit absent : a_arbitrer. Idempotente par uuid.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "transfert_especes"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "session_uuid",
+                        "lignes",
+                        "motif"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "session_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Session serveur, ou UUID de l'ouverture_session locale."
+                        },
+                        "lignes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 30,
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "moyen",
+                                    "montant"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "moyen": {
+                                        "$ref": "commun.json#/$defs/code"
+                                    },
+                                    "montant": {
+                                        "$ref": "commun.json#/$defs/montant"
+                                    }
+                                }
+                            }
+                        },
+                        "motif": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 500
+                        }
+                    }
                 }
             }
         }

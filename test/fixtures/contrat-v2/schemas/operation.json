@@ -69,6 +69,9 @@
         },
         {
             "$ref": "#/$defs/prevente_annuler"
+        },
+        {
+            "$ref": "#/$defs/transfert_especes"
         }
     ],
     "$defs": {
@@ -5075,6 +5078,91 @@
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_prevente_annuler"
+                }
+            }
+        },
+        "transfert_especes": {
+            "description": "Capacité transfert.especes (lot 16, demande TBC) : transfert de fin de journée des mobile money vers les espèces, hors connexion. Un transfert par ligne (ADR-207, ni recette ni dépense) dans la session `session_uuid`. Montants tels que le poste les voit pour SA session (le serveur les applique tels quels). Moyen non réglé (boutique.regles.transfert_especes.moyens) ou droit absent : a_arbitrer. Idempotente par uuid.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "transfert_especes"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "type": "object",
+                    "required": [
+                        "session_uuid",
+                        "lignes",
+                        "motif"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "session_uuid": {
+                            "$ref": "commun.json#/$defs/uuid",
+                            "description": "Session serveur, ou UUID de l'ouverture_session locale."
+                        },
+                        "lignes": {
+                            "type": "array",
+                            "minItems": 1,
+                            "maxItems": 30,
+                            "items": {
+                                "type": "object",
+                                "required": [
+                                    "moyen",
+                                    "montant"
+                                ],
+                                "additionalProperties": false,
+                                "properties": {
+                                    "moyen": {
+                                        "$ref": "commun.json#/$defs/code"
+                                    },
+                                    "montant": {
+                                        "$ref": "commun.json#/$defs/montant"
+                                    }
+                                }
+                            }
+                        },
+                        "motif": {
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "maxLength": 500
+                        }
+                    }
                 }
             }
         }

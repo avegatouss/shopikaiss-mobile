@@ -1188,6 +1188,17 @@
             "fichier": "valides/donnees-z-local--prevente.json",
             "schema": "donnees-z-local-1.json#/$defs/detail_prevente",
             "valide": true
+        },
+        {
+            "fichier": "valides/operation--transfert-especes.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--transfert-especes-sans-ligne.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "au moins 1 élément(s)"
         }
     ]
 }

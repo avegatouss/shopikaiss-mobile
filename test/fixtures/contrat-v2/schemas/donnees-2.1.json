@@ -768,6 +768,29 @@
                                     "description": "false : l’écran Prévente n’est pas proposé."
                                 }
                             }
+                        },
+                        "transfert_especes": {
+                            "description": "Capacité transfert.especes (lot 16) : présente seulement si la boutique a activé le transfert de fin de journée vers les espèces (Paramètres › Trésorerie). Absente : bouton masqué.",
+                            "type": "object",
+                            "required": [
+                                "actif",
+                                "moyens"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "actif": {
+                                    "const": true
+                                },
+                                "moyens": {
+                                    "type": "array",
+                                    "maxItems": 30,
+                                    "uniqueItems": true,
+                                    "items": {
+                                        "$ref": "commun.json#/$defs/code"
+                                    },
+                                    "description": "Moyens dont tout le solde de la session part vers les espèces (jamais les espèces ; les cartes seulement si la boutique les a cochées)."
+                                }
+                            }
                         }
                     }
                 },
@@ -1933,7 +1956,7 @@
                     "type": "boolean"
                 },
                 "elements": {
-                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs. Une clé inconnue du terminal est ignorée.",
+                    "description": "Éléments de l’écran de vente, triés par ordre croissant (1 à N, sans trou). Clés connues : scanner, recherche, favoris, categories, marques, fournisseurs ; boutons de la barre : vue, plein_ecran, ventes_recentes, retour, carte_cadeau, coffret, client_rapide, produit_rapide, calculatrice, clavier, quitter ; boutons des postes seulement : recu, note, session, retour_web, back_office. Une clé inconnue du terminal est ignorée.",
                     "type": "array",
                     "minItems": 1,
                     "maxItems": 30,
