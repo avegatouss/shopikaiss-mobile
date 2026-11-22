@@ -917,23 +917,24 @@ class LocalRegisterAdapter {
     final id = _requireOperationId(operationId);
     final lines = _editLines();
     final deposit = args['deposit'] == null ? 0 : _int(args, 'deposit');
-    final methodCode = args['method'] as String?;
+    final methodCode = _optText(args, 'method', max: 32);
     final method = methodCode == null ? null : _snapshot().methods.where((m) => m.code == methodCode).firstOrNull;
     if (methodCode != null && method == null) throw const AdapterFailure('moyen_inconnu', 'Moyen de paiement inconnu sur ce terminal.');
-    final pickup = args['pickup_at'] is String ? DateTime.tryParse(args['pickup_at'] as String) : null;
+    final pickupText = _optText(args, 'pickup_at', max: 40);
+    final pickup = pickupText == null ? null : (DateTime.tryParse(pickupText) ?? (throw const AdapterFailure('argument_invalide', 'Argument « pickup_at » invalide (date ISO attendue).')));
     try {
       final created = await engine.createPreSale(
         operator,
         customerName: _text(args, 'customer_name', max: 160),
-        customerPhone: args['customer_phone'] as String?,
-        customerUuid: args['customer_id'] as String?,
+        customerPhone: _optText(args, 'customer_phone', max: 40),
+        customerUuid: _optText(args, 'customer_id', max: 36),
         pickupAt: pickup,
         lines: lines,
         deposit: deposit,
         depositMethod: method,
-        received: args['received'] as int?,
-        reference: args['reference'] as String?,
-        note: args['note'] as String?,
+        received: _optInt(args, 'received'),
+        reference: _optText(args, 'reference', max: 120),
+        note: _optText(args, 'note', max: 500),
         operationUuid: id,
       );
       if (_draft.lines.isNotEmpty) {
@@ -950,11 +951,11 @@ class LocalRegisterAdapter {
   Future<Map<String, dynamic>> _cancelPreSale(Map<String, dynamic> args, String? operationId) async {
     final operator = _operator ?? (throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.'));
     final refund = args['refund'] == null ? 0 : _int(args, 'refund');
-    final methodCode = args['method'] as String?;
+    final methodCode = _optText(args, 'method', max: 32);
     final method = methodCode == null ? null : _snapshot().methods.where((m) => m.code == methodCode).firstOrNull;
     try {
       final cancelled = await engine.cancelPreSale(operator, _text(args, 'pre_sale_id', max: 36),
-          reason: _text(args, 'reason', max: 500), refund: refund, refundMethod: method, reference: args['reference'] as String?, operationUuid: _requireOperationId(operationId));
+          reason: _text(args, 'reason', max: 500), refund: refund, refundMethod: method, reference: _optText(args, 'reference', max: 120), operationUuid: _requireOperationId(operationId));
       _emit('session');
       return {'pre_sale': cancelled.toJson()};
     } on OfflineRefusal catch (e) {
@@ -1007,7 +1008,7 @@ class LocalRegisterAdapter {
     final operator = _operator;
     if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.');
     try {
-      final done = await engine.recordCashTransfer(operator, reason: args['reason'] as String?, operationUuid: _requireOperationId(operationId));
+      final done = await engine.recordCashTransfer(operator, reason: _optText(args, 'reason', max: 500), operationUuid: _requireOperationId(operationId));
       _emit('session');
       final lines = (done.content['lignes'] as List).cast<Map>();
       return {
@@ -2149,6 +2150,12 @@ class LocalRegisterAdapter {
     if (value is! int) throw AdapterFailure('argument_invalide', 'Argument « $key » invalide.');
     return value;
   }
+
+  /// Texte facultatif : absent ou null = null ; autre type ou trop long = refus `argument_invalide`.
+  static String? _optText(Map<String, dynamic> args, String key, {required int max}) => args[key] == null ? null : _text(args, key, max: max);
+
+  /// Entier facultatif : absent ou null = null ; autre type = refus `argument_invalide`.
+  static int? _optInt(Map<String, dynamic> args, String key) => args[key] == null ? null : _int(args, key);
 }
 
 /// Panier en cours, tel que conservé sur le terminal.
