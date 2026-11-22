@@ -70,11 +70,69 @@ class ReceiptSettings {
     final logo = logoPng == null ? null : receiptLogoRaster(logoPng!, paperWidth);
     final out = BytesBuilder(copy: false);
     for (var i = 0; i < copyCount(copies ?? this.copies); i++) {
-      // Marges de C (`398a128`, puis `9e044dd`) : deux lignes avant le logo ou le texte, deux après le dernier QR (dans receiptBytesWithQr).
-      out.add([...EscPos.init(), EscPos.esc, 0x64, 2]);
+      // Demande du responsable (22/11) : rien avant le logo, ni ligne ni avance de papier ; seulement l'initialisation.
+      // La marge de fin (après le dernier QR, puis la coupe) sépare les exemplaires.
+      out.add(EscPos.init());
       if (logo != null) out.add(logo);
       out.add(ticket);
     }
     return out.takeBytes();
   }
+
+  /// Document imprimé autre qu'un ticket de vente (X, Z, transfert, prévente…) : commence par le logo (rien au-dessus),
+  /// puis l'entête de la boutique ([header]), le document [body] (octets ESC/POS déjà mis en page), le pied ([footer]),
+  /// l'avance et la coupe. L'initialisation et la coupe propres à [body] sont retirées pour n'en garder qu'une.
+  Uint8List documentBytes(Uint8List body, {required int paperWidth, List<String> header = const [], List<String> footer = const []}) {
+    final logo = logoPng == null ? null : receiptLogoRaster(logoPng!, paperWidth);
+    var start = 0;
+    final init = EscPos.init();
+    if (body.length >= init.length && _same(body, 0, init)) start = init.length;
+    var end = body.length;
+    for (var n = 2; n <= 6; n++) {
+      final cut = EscPos.feedAndCut(n);
+      if (end - start >= cut.length && _same(body, end - cut.length, cut)) {
+        end -= cut.length;
+        break;
+      }
+    }
+    List<int> text(List<String> lines, {bool boldFirst = false}) => [
+      EscPos.esc, 0x61, 1, // centré
+      for (final (i, line) in lines.indexed) ...[
+        if (boldFirst && i == 0) ...[EscPos.esc, 0x45, 1],
+        ...latin1.encode('${stripAccents(line).replaceAll(RegExp(r'[^\x20-\x7E]'), '?')}\n'),
+        if (boldFirst && i == 0) ...[EscPos.esc, 0x45, 0],
+      ],
+      EscPos.esc, 0x61, 0, // à gauche
+    ];
+    final out = BytesBuilder(copy: false)..add(init);
+    if (logo != null) out.add(logo);
+    if (header.isNotEmpty) out.add(text(header, boldFirst: true));
+    out.add(body.sublist(start, end));
+    if (footer.isNotEmpty) out.add(text(footer));
+    out.add(EscPos.feedAndCut(3));
+    return out.takeBytes();
+  }
+
+  static bool _same(Uint8List bytes, int at, List<int> expected) {
+    for (var i = 0; i < expected.length; i++) {
+      if (bytes[at + i] != expected[i]) return false;
+    }
+    return true;
+  }
+}
+
+/// Entête d'un document imprimé (raison sociale, adresse, téléphone, NCC, texte d'entête) et son pied.
+({List<String> header, List<String> footer}) storeFrame(StoreInfo? store) {
+  if (store == null) return (header: const [], footer: const []);
+  String? clean(String? s) => s == null || s.trim().isEmpty ? null : s.trim();
+  return (
+    header: [
+      ?clean(store.legalName),
+      ?clean(store.address),
+      if (clean(store.phone) case final phone?) 'Tél. $phone',
+      if (clean(store.taxId) case final ncc?) 'NCC $ncc',
+      ...?clean(store.header)?.split('\n'),
+    ],
+    footer: [...?clean(store.footer)?.split('\n')],
+  );
 }

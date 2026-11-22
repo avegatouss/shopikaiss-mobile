@@ -393,7 +393,23 @@ void main() {
     expect(count(duplicate, cut), 1);
     final bare = const ReceiptSettings(qrEnabled: false).saleBytes(lines, paperWidth: 80);
     expect((count(bare, cut), count(bare, raster)), (1, 0), reason: 'sans logo ni QR : texte seul');
-    expect(bare.sublist(0, 5), [0x1B, 0x40, 0x1B, 0x64, 2], reason: 'deux lignes avant le texte (marges C 9e044dd)');
+    // Demande du responsable (22/11) : rien avant le logo ou le texte, seulement l'initialisation.
+    expect(bare.sublist(0, 2), [0x1B, 0x40]);
+    expect(bare.sublist(2, 5), isNot([0x1B, 0x64, 2]), reason: 'plus d’avance de papier en tête');
+    final firstText = one == 0 ? -1 : sale.indexOf(0x0A);
+    final firstImage = List.generate(sale.length - 3, (i) => i).firstWhere((i) => sale[i] == 0x1D && sale[i + 1] == 0x76 && sale[i + 2] == 0x30);
+    expect(firstImage, lessThan(firstText), reason: 'le logo est la première chose imprimée');
+
+    // Autres documents (X, Z, transfert…) : logo d'abord, entête, corps sans sa propre initialisation, pied, une coupe.
+    final body = offlineTicketBytes(['PRE-X', 'Ventes 1 000']);
+    final framed = settings.documentBytes(body, paperWidth: 58, header: const ['Boutique Essai', 'Tél. 0700'], footer: const ['Merci']);
+    expect(framed.sublist(0, 2), [0x1B, 0x40]);
+    final text = String.fromCharCodes(framed);
+    expect(text.indexOf('Boutique Essai'), greaterThan(framed.indexOf(0x76)), reason: 'entête sous le logo');
+    expect(text.indexOf('Merci'), greaterThan(text.indexOf('Ventes 1 000')));
+    final plain = const ReceiptSettings(qrEnabled: false).documentBytes(body, paperWidth: 58, header: const ['Boutique Essai']);
+    expect((count(framed, cut), count(plain, [0x1B, 0x40]), count(plain, cut)), (1, 1, 1), reason: 'une seule initialisation, une seule coupe');
+    expect(String.fromCharCodes(plain).indexOf('Boutique Essai'), lessThan(String.fromCharCodes(plain).indexOf('PRE-X')), reason: 'sans logo : la raison sociale en premier');
     expect(bare.sublist(bare.length - 7), [0x1B, 0x64, 2, 0x1D, 0x56, 66, 0], reason: 'deux lignes avant la coupe');
 
   });

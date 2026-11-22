@@ -1020,7 +1020,7 @@ class _RestaurantOrderPageState extends State<_RestaurantOrderPage> {
       '',
       'Ce document n’est pas un ticket de caisse.',
     ];
-    await widget.host._printText(text, failure: 'Préfacture non imprimée', saved: ' : elle est bien enregistrée.');
+    await widget.host._printText(text, failure: 'Préfacture non imprimée', saved: ' : elle est bien enregistrée.', framed: true);
   }
 
   Future<void> _transfer() async {

@@ -872,9 +872,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
     final columns = width >= 80 ? 48 : 32;
     String row(String left, String right) => '$left${' ' * (columns - left.length - right.length).clamp(1, columns)}$right';
-    final store = _snapshot?.store;
-    await _printText([
-      if (store != null) store.name,
+    await _printText(framed: true, [
       'TRANSFERT VERS LES ESPÈCES',
       zDate(DateTime.now()),
       'Caissier : ${operator.name}',
@@ -968,7 +966,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (document == null) return _toast('Documents de clôture non disponibles sur ce terminal.');
     final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
     final printout = document.layout(paperWidth: width);
-    await _printText(printout.lines, failure: 'Document non imprimé', bytes: printout.bytes());
+    await _printText(printout.lines, failure: 'Document non imprimé', bytes: printout.bytes(), framed: true);
     final operator = _operator;
     if (operator != null && document.editionType != null) await _engine.recordEdition(operator, document);
   }
@@ -2801,7 +2799,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final snapshot = _snapshot;
     if (snapshot == null) return;
     final session = widget.session;
-    await _printText(offlineSlipLines(
+    await _printText(framed: true, offlineSlipLines(
       snapshot: snapshot,
       title: title,
       date: operation.date,
@@ -3175,10 +3173,18 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     return _printText(lines, failure: 'Ticket d’essai non imprimé', bytes: settings.saleBytes(lines, paperWidth: width));
   }
 
-  Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false, Uint8List? bytes}) async {
+  /// [framed] : document autre qu'un ticket de vente (X, Z, transfert, bon, préfacture) : logo en tout premier, entête et
+  /// pied de la boutique (demande du responsable, 22/11).
+  Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false, Uint8List? bytes, bool framed = false}) async {
     final session = widget.session;
     if (session.hasPrinter) {
-      final result = await session.channel.printRaw(bytes ?? offlineTicketBytes(text, compact: compact));
+      var raw = bytes ?? offlineTicketBytes(text, compact: compact);
+      if (framed) {
+        final frame = storeFrame(_snapshot?.store);
+        final width = session.rollWidth > 0 ? session.rollWidth : 58;
+        raw = (await ReceiptSettings.read(_engine)).documentBytes(raw, paperWidth: width, header: frame.header, footer: frame.footer);
+      }
+      final result = await session.channel.printRaw(raw);
       if (!result.ok) _toast('$failure (${result.error})$saved');
       return;
     }
