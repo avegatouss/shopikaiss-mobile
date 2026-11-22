@@ -107,7 +107,11 @@ const knownV2Types = {
 };
 
 /// Types ajoutés par la révision 2.1 (donnees-2.1.json), connus seulement quand la forme 2.1 est active.
-const knownV2Types21 = {'categorie', 'client', 'panier', 'lot', 'modele_ticket', 'ticket_terminal', 'pass_reglages', 'pass_evenement', 'pass'};
+const knownV2Types21 = {
+  'categorie', 'client', 'panier', 'lot', 'modele_ticket', 'ticket_terminal', 'pass_reglages', 'pass_evenement', 'pass', //
+  'interface_caisse', // 2.1 lot 13
+  'prevente', // 2.1 lot 15
+};
 
 /// Types de la révision restaurant-1 (donnees-restaurant-1.json, lots R-1 à R-3), connus quand `restaurant.v1` est
 /// accordée.

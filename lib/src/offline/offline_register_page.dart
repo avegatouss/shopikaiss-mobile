@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -23,6 +24,7 @@ import 'customer_display.dart';
 import 'cash_book_page.dart';
 import 'catalogue_edit.dart';
 import 'engine.dart';
+import 'interface_settings_sheet.dart';
 import 'local_prices.dart';
 import 'local_sessions_ui.dart';
 import 'models.dart';
@@ -175,6 +177,19 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Map<int, BigInt> _sold = {};
 
   AppSettings get _look => widget.session.settings;
+
+  /// Interface appliquée (2.1 lot 13) : publiée par le responsable, ou réglage local du poste s'il n'est pas verrouillé.
+  RegisterInterface get _ui {
+    RegisterInterface? local;
+    if (_look.registerInterface.isNotEmpty) {
+      try {
+        local = RegisterInterface.fromJson(jsonDecode(_look.registerInterface) as Map, origin: 'local');
+      } on FormatException {
+        local = null;
+      }
+    }
+    return RegisterInterface.effective(_engine.publishedInterface, local);
+  }
 
   /// Retour automatique du curseur au scanner, selon le réglage (F2 et le toucher le placent toujours).
   void _autoFocusScan() {
@@ -1370,12 +1385,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final wholesale = _engine.wholesaleRules;
     Widget action(String label, IconData icon, VoidCallback? onPressed) =>
         TextButton.icon(onPressed: onPressed, icon: Icon(icon, size: 18), label: Text(label), style: TextButton.styleFrom(visualDensity: VisualDensity.compact));
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-      child: Row(
-        children: [
-          SegmentedButton<bool>(
+    final ui = _ui;
+    // Boutons réglables (2.1 lot 13) : masqués selon `visible`, ordonnés selon `ordre` ; les autres gardent leur place.
+    final keyed = <(String, Widget)>[
+      (
+        'vue',
+        Padding(
+          padding: const EdgeInsets.only(right: 8),
+          child: SegmentedButton<bool>(
             showSelectedIcon: false,
             style: const ButtonStyle(visualDensity: VisualDensity.compact),
             segments: const [
@@ -1388,7 +1405,36 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               unawaited(widget.session.save());
             },
           ),
-          const SizedBox(width: 8),
+        ),
+      ),
+      ('ventes_recentes', action('Ventes récentes', Icons.history, _openJournal)),
+      if (operator != null) ('livre_caisse', action('Livre de caisse', Icons.menu_book_outlined, _openCashBook)),
+      ('recu', action('Reçu', Icons.receipt_long_outlined, _openJournal)),
+      ('note', action(_note == null ? 'Note' : 'Note ✓', Icons.note_alt_outlined, extras ? _editNote : null)),
+      ('session', action('Session de caisse', Icons.point_of_sale, operator != null && _cart.isEmpty && (canClose || _engine.sessionOpen) ? _sessionMenu : null)),
+      (
+        'clavier',
+        action(_look.hideSoftKeyboard ? 'Clavier masqué' : 'Clavier affiché', _look.hideSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard, () {
+          setState(() => _look.hideSoftKeyboard = !_look.hideSoftKeyboard);
+          unawaited(widget.session.save());
+          _syncKeyboard();
+        }),
+      ),
+      ('calculatrice', action('Calculatrice', Icons.calculate_outlined, () => showDialog<void>(context: context, builder: (_) => const DeskCalculator()))),
+      ('back_office', action('Back-office web', Icons.dashboard_outlined, () => _openShopWeb(admin: true))),
+      (
+        'retour_web',
+        action(_engine.permanentLocal ? 'Ouvrir la caisse web' : 'Reconnecter', _engine.permanentLocal ? Icons.open_in_browser : Icons.wifi_find, _engine.syncing ? null : () => _tryOnline()),
+      ),
+    ];
+    final byKey = {for (final (k, w) in keyed) k: w};
+    final ordered = [for (final k in ui.sorted([for (final (k, _) in keyed) k])) if (ui.visible(k)) byKey[k]!];
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+      child: Row(
+        children: [
+          if (ordered.isNotEmpty) ordered.first,
           if (_engine.restaurant?.restaurantProfile ?? false) ...[
             SegmentedButton<bool>(
               showSelectedIcon: false,
@@ -1409,23 +1455,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           ],
           if (operator != null)
             action(operator.name, Icons.person_outline, _cart.isEmpty && (_snapshot?.rules.pinRequired ?? true) ? () => setState(() => _operator = null) : null),
-          action('Ventes récentes', Icons.history, _openJournal),
-          if (operator != null) action('Livre de caisse', Icons.menu_book_outlined, _openCashBook),
-          action('Reçu', Icons.receipt_long_outlined, _openJournal),
-          action(_note == null ? 'Note' : 'Note ✓', Icons.note_alt_outlined, extras ? _editNote : null),
           if (_tier.cart || (wholesale != null && wholesale.manual && operator != null && _engine.hasRight(operator, wholesale.right)))
             // Comme au web : le mode d'un panier repris est figé.
             action(_tier.cart ? 'Tarif détail' : 'Tarif gros', Icons.sell_outlined, _shared == null ? _toggleWholesale : null),
-          action('Session de caisse', Icons.point_of_sale, operator != null && _cart.isEmpty && (canClose || _engine.sessionOpen) ? _sessionMenu : null),
           if (operator != null && (_engine.restaurant?.restaurantProfile ?? false)) action('Registre', Icons.event_note, () => _restoRegisterDialog(this)),
-          action(_look.hideSoftKeyboard ? 'Clavier masqué' : 'Clavier affiché', _look.hideSoftKeyboard ? Icons.keyboard_hide : Icons.keyboard, () {
-            setState(() => _look.hideSoftKeyboard = !_look.hideSoftKeyboard);
-            unawaited(widget.session.save());
-            _syncKeyboard();
-          }),
-          action('Calculatrice', Icons.calculate_outlined, () => showDialog<void>(context: context, builder: (_) => const DeskCalculator())),
-          action('Back-office web', Icons.dashboard_outlined, () => _openShopWeb(admin: true)),
-          action(_engine.permanentLocal ? 'Ouvrir la caisse web' : 'Reconnecter', _engine.permanentLocal ? Icons.open_in_browser : Icons.wifi_find, _engine.syncing ? null : () => _tryOnline()),
+          ...ordered.skip(1),
         ],
       ),
     );
@@ -1461,6 +1495,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         _openJournal();
       } else if (choice == 'livre') {
         _openCashBook();
+      } else if (choice == 'interface') {
+        _editInterface();
       } else if (choice == 'caissier') {
         setState(() => _operator = null);
       } else if (choice == 'cloture') {
@@ -1489,6 +1525,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       if (_lastSyncMessage != null) PopupMenuItem<String>(enabled: false, child: Text(_lastSyncMessage!)),
       const PopupMenuItem(value: 'journal', child: Text('Ventes et retours')),
       if (_operator != null) const PopupMenuItem(value: 'livre', child: Text('Livre de caisse')),
+      if (_operator != null && _engine.hasRight(_operator!, 'caisse_cloturer')) const PopupMenuItem(value: 'interface', child: Text('Interface de la caisse')),
       const PopupMenuItem(value: 'site', child: Text('Site de la boutique')),
       if (widget.onOpenSettings != null) const PopupMenuItem(value: 'reglages', child: Text('Réglages')),
       if (_engine.imagesSupported) const PopupMenuItem(value: 'images', child: Text('Horaires des images')),
@@ -1608,7 +1645,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 const SizedBox(width: 8),
                 if (_passButton(snapshot, totals.payable) case final pass?) ...[pass, const SizedBox(width: 8)],
                 FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: _brand, minimumSize: const Size(0, 48)),
+                  style: FilledButton.styleFrom(backgroundColor: _brand, minimumSize: Size(0, 48 * _ui.payScale), textStyle: TextStyle(fontSize: 14 * _ui.payScale, fontWeight: FontWeight.w600)),
                   onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
                   child: const Text('Payer'),
                 ),
@@ -1636,17 +1673,15 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   Widget _catalogue(Snapshot snapshot) {
-    final results = snapshot.search(_search.text, limit: null, category: _category, brand: _brandFilter, supplier: _supplier);
+    final ui = _ui;
+    // Un filtre masqué par l'interface ne filtre plus (jamais de filtre actif invisible).
+    final category = ui.visible('categories') ? _category : null;
+    final brand = ui.visible('marques') ? _brandFilter : null;
+    final supplier = ui.visible('fournisseurs') ? _supplier : null;
+    final results = snapshot.search(ui.visible('recherche') ? _search.text : '', limit: null, category: category, brand: brand, supplier: supplier);
     final shown = results.length.clamp(0, _productLimit);
-    final tile = _look.tileWidth.toDouble();
-    return Padding(
-      padding: const EdgeInsets.all(8),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
+    final tile = _look.tileWidth * ui.productScale;
+    final scanField = TextField(
                   controller: _scanInput,
                   focusNode: _searchFocus,
                   autofocus: _look.scanAutoFocus,
@@ -1660,11 +1695,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     suffixIcon: IconButton(tooltip: 'Ajouter le code scanné', icon: const Icon(Icons.arrow_forward), onPressed: () => _scan(snapshot, _scanInput.text)),
                   ),
                   onSubmitted: (value) => _scan(snapshot, value),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
+                );
+    final searchField = TextField(
                   controller: _search,
                   focusNode: _productSearchFocus,
                   decoration: InputDecoration(
@@ -1676,14 +1708,29 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     suffixIcon: _search.text.isEmpty ? const Icon(Icons.search) : IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(_search.clear)),
                   ),
                   onChanged: (_) => setState(() => _productLimit = _productPage),
-                ),
-              ),
-            ],
-          ),
+                );
+    final fields = [
+      for (final key in ui.sorted(const ['scanner', 'recherche']))
+        if (ui.visible(key)) Expanded(child: key == 'scanner' ? scanField : searchField),
+    ];
+    final filters = [
+      for (final key in ui.sorted(const ['fournisseurs', 'marques']))
+        if (key == 'fournisseurs' && ui.visible(key) && snapshot.suppliers.isNotEmpty)
+          Expanded(child: _filter('Fournisseur', 'Tous les fournisseurs', _supplier, snapshot.suppliers, (v) => _supplier = v))
+        else if (key == 'marques' && ui.visible(key) && snapshot.brands.isNotEmpty)
+          Expanded(child: _filter('Marque', 'Toutes les marques', _brandFilter, snapshot.brands, (v) => _brandFilter = v)),
+    ];
+    return Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(
+        children: [
+          // Zone de scan masquée : le champ reste là, invisible, pour la douchette (saisie clavier).
+          if (!ui.visible('scanner')) SizedBox(width: 1, height: 1, child: ExcludeSemantics(child: Opacity(opacity: 0, child: scanField))),
+          if (fields.isNotEmpty) Row(children: [for (final (i, f) in fields.indexed) ...[if (i > 0) const SizedBox(width: 8), f]]),
           const SizedBox(height: 8),
-          if (snapshot.categories.isNotEmpty)
+          if (ui.visible('categories') && snapshot.categories.isNotEmpty)
             SizedBox(
-              height: 40,
+              height: 40 * ui.categoryScale,
               child: ListView(
                 scrollDirection: Axis.horizontal,
                 children: [
@@ -1691,6 +1738,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                     Padding(
                       padding: const EdgeInsets.only(right: 6),
                       child: ChoiceChip(
+                        labelStyle: TextStyle(fontSize: 14 * ui.categoryScale),
+                        padding: EdgeInsets.symmetric(horizontal: 4 * ui.categoryScale),
                         label: Text(category ?? 'Voir tout'),
                         selected: _category == category,
                         onSelected: (_) => setState(() {
@@ -1702,21 +1751,15 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 ],
               ),
             ),
-          if (snapshot.suppliers.isNotEmpty || snapshot.brands.isNotEmpty)
+          if (filters.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 6),
-              child: Row(
-                children: [
-                  if (snapshot.suppliers.isNotEmpty) Expanded(child: _filter('Fournisseur', 'Tous les fournisseurs', _supplier, snapshot.suppliers, (v) => _supplier = v)),
-                  if (snapshot.suppliers.isNotEmpty && snapshot.brands.isNotEmpty) const SizedBox(width: 8),
-                  if (snapshot.brands.isNotEmpty) Expanded(child: _filter('Marque', 'Toutes les marques', _brandFilter, snapshot.brands, (v) => _brandFilter = v)),
-                ],
-              ),
+              child: Row(children: [for (final (i, f) in filters.indexed) ...[if (i > 0) const SizedBox(width: 8), f]]),
             ),
           Row(
             children: [
               Expanded(child: Text('$shown / ${results.length} produits', style: const TextStyle(fontSize: 12))),
-              if (_category != null || _brandFilter != null || _supplier != null)
+              if (category != null || brand != null || supplier != null)
                 TextButton(
                   onPressed: () => setState(() {
                     _category = _brandFilter = _supplier = null;
@@ -1736,10 +1779,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             child: results.isEmpty
                 ? const Center(child: Text('Aucun article à afficher.', textAlign: TextAlign.center))
                 : _listView
-                ? ListView.separated(
-                    itemCount: shown,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) => _productRow(results[index]),
+                // Mode compact : taille du texte réglée (`police_compacte`) ; le mode visuel n'en dépend pas.
+                ? MediaQuery(
+                    data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(MediaQuery.textScalerOf(context).scale(1) * ui.compactScale)),
+                    child: ListView.separated(
+                      itemCount: shown,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (context, index) => _productRow(results[index]),
+                    ),
                   )
                 : GridView.builder(
                     gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
@@ -2182,7 +2229,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   if (_passButton(snapshot, totals.payable) case final pass?) ...[pass, const SizedBox(width: 8)],
                   Expanded(
                     child: FilledButton.icon(
-                      style: FilledButton.styleFrom(padding: const EdgeInsets.all(14)),
+                      style: FilledButton.styleFrom(padding: const EdgeInsets.all(14), minimumSize: Size(0, 52 * _ui.payScale), textStyle: TextStyle(fontSize: 15 * _ui.payScale, fontWeight: FontWeight.w600)),
                       onPressed: _cart.isEmpty ? null : () => _checkout(snapshot, totals.payable),
                       icon: const Icon(Icons.payments_outlined),
                       label: const Text('Payer'),
@@ -2682,6 +2729,23 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     ), failure: 'Bon non imprimé');
   }
 
+  /// Interface de la caisse (2.1 lot 13) : réglage local du poste, sauf verrou du responsable.
+  Future<void> _editInterface() async {
+    RegisterInterface? local;
+    if (_look.registerInterface.isNotEmpty) {
+      try {
+        local = RegisterInterface.fromJson(jsonDecode(_look.registerInterface) as Map, origin: 'local');
+      } on FormatException {
+        local = null;
+      }
+    }
+    final chosen = await showInterfaceSettings(context, published: _engine.publishedInterface, local: local);
+    if (chosen == null || !mounted) return;
+    setState(() => _look.registerInterface = identical(chosen, RegisterInterface.defaults) ? '' : chosen.encode());
+    unawaited(widget.session.save());
+    _toast(_look.registerInterface.isEmpty ? 'Réglage de la boutique rétabli sur ce poste.' : 'Interface enregistrée sur ce poste.');
+  }
+
   /// Livre de caisse (2.1 lot 14) : livre du poste, et de la boutique pour un gérant.
   void _openCashBook() {
     final operator = _operator;
@@ -3077,6 +3141,47 @@ class _Blocked extends StatelessWidget {
 }
 
 /// Choix du caissier : PIN de caisse vérifié sur le terminal (empreinte reçue avec le catalogue).
+/// Tuile d'utilisateur de la connexion : pastille colorée aux initiales, nom sur deux lignes au plus.
+class _OperatorTile extends StatelessWidget {
+  const _OperatorTile({required this.operator, required this.onTap});
+
+  final Operator operator;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = operatorColor(operator.id);
+    return SizedBox(
+      width: 132,
+      height: 112,
+      child: Material(
+        color: color.withValues(alpha: .08),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: color.withValues(alpha: .45), width: 1.5)),
+        child: InkWell(
+          key: ValueKey('operator-${operator.id}'),
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(8),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircleAvatar(
+                  radius: 24,
+                  backgroundColor: color,
+                  child: Text(operatorInitials(operator.name), style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 6),
+                Text(operator.name, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w600, height: 1.15)),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _OperatorLogin extends StatefulWidget {
   const _OperatorLogin({required this.engine, required this.onLogged, this.version = ''});
 
@@ -3132,16 +3237,14 @@ class _OperatorLoginState extends State<_OperatorLogin> {
               Text('Qui encaisse ?', style: Theme.of(context).textTheme.headlineSmall),
               const SizedBox(height: 12),
               if (operators.isEmpty) const Text('Aucun caissier avec un PIN de caisse : définissez les PIN dans ShopiKaiss (Utilisateurs).'),
+              // Tuiles d'utilisateurs (lot 13) : couleur stable par opérateur, initiales, nom en entier.
               Wrap(
-                spacing: 8,
-                runSpacing: 8,
+                spacing: 10,
+                runSpacing: 10,
+                alignment: WrapAlignment.center,
                 children: [
                   for (final o in operators)
-                    ActionChip(
-                      avatar: const Icon(Icons.person),
-                      label: Text(o.name),
-                      onPressed: () => setState(() => (_selected = o, _pin = '', _error = null)),
-                    ),
+                    _OperatorTile(operator: o, onTap: () => setState(() => (_selected = o, _pin = '', _error = null))),
                 ],
               ),
             ],
@@ -3155,6 +3258,12 @@ class _OperatorLoginState extends State<_OperatorLogin> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            CircleAvatar(
+              radius: 30,
+              backgroundColor: operatorColor(_selected!.id),
+              child: Text(operatorInitials(_selected!.name), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+            ),
+            const SizedBox(height: 8),
             Text(_selected!.name, style: Theme.of(context).textTheme.headlineSmall),
             const SizedBox(height: 8),
             Text('•' * _pin.length + '○' * (6 - _pin.length).clamp(0, 6), style: const TextStyle(fontSize: 28, letterSpacing: 6)),
@@ -3167,12 +3276,30 @@ class _OperatorLoginState extends State<_OperatorLogin> {
               mainAxisSpacing: 6,
               crossAxisSpacing: 6,
               children: [
-                for (final key in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '←', '0', 'OK'])
+                for (final key in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '←', '0'])
                   FilledButton.tonal(
+                    style: FilledButton.styleFrom(minimumSize: const Size(0, 56)),
                     onPressed: _checking ? null : () => _key(key),
-                    child: _checking && key == 'OK' ? const CircularProgressIndicator() : Text(key, style: const TextStyle(fontSize: 20)),
+                    child: Text(key, style: const TextStyle(fontSize: 22)),
                   ),
+                const SizedBox.shrink(),
               ],
+            ),
+            const SizedBox(height: 8),
+            // Bouton Connexion : 56 dp au moins, couleur de l'opérateur choisi.
+            FilledButton.icon(
+              key: const ValueKey('login-submit'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(56),
+                backgroundColor: operatorColor(_selected!.id),
+                foregroundColor: Colors.white,
+                textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              onPressed: _checking || _pin.isEmpty ? null : () => _key('OK'),
+              icon: _checking
+                  ? const SizedBox.square(dimension: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.login),
+              label: const Text('Connexion'),
             ),
             TextButton(onPressed: () => setState(() => _selected = null), child: const Text('Changer de caissier')),
           ],

@@ -138,6 +138,13 @@ class CaisseV2Client {
   /// `boutique.regles.modification_ticket`, `operateur.approbateur_modification`. Accordée seulement avec `contrat.2_1`.
   static const saleEditCapability = 'vente.modification';
 
+  /// Interface réglable de la caisse (2.1 lot 13) : type `interface_caisse` (une entité par terminal, clé = son uuid).
+  /// Accordée seulement avec `contrat.2_1`.
+  static const interfaceCapability = 'caisse.interface';
+
+  /// Prévente / réservations (2.1 lot 15) : opérations `prevente_*`, type `prevente`, règle `boutique.regles.prevente`.
+  static const preSaleCapability = 'prevente.v1';
+
   /// Livre de caisse sur le poste (2.1 lot 14) : `GET /livre-caisse`, droit `livre_caisse_voir`. Accordée seulement avec
   /// `contrat.2_1`.
   static const cashBookCapability = 'livre_caisse.v1';

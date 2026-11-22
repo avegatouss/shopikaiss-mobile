@@ -12,6 +12,7 @@ import 'cash_book.dart';
 import 'catalogue_edit.dart';
 import 'local_sessions.dart';
 import 'models.dart';
+import 'register_interface.dart';
 import 'money.dart';
 import 'notifier.dart';
 import 'store.dart';
@@ -227,6 +228,9 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Jour civil de la boutique d'un instant (`AAAA-MM-JJ`, fuseau publié quand il est connu).
   String dayOf(DateTime date) => PassDay.of(date, null);
+
+  /// Interface de la caisse publiée pour ce terminal (2.1 lot 13, `interface_caisse`) ; défauts sans la capacité.
+  RegisterInterface get publishedInterface => RegisterInterface.defaults;
 
   // ------------------------------------------------------------------ Livre de caisse (2.1 lot 14)
 

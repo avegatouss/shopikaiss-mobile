@@ -213,6 +213,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.saleEditCapability,
           CaisseV2Client.multipleSessionsCapability,
           CaisseV2Client.cashBookCapability,
+          CaisseV2Client.interfaceCapability,
         ],
       ],
     );
@@ -1076,6 +1077,14 @@ class V2Engine extends CaisseEngine {
   String dayOf(DateTime date) => PassDay.of(date, _shopRules?['fuseau'] as String?);
 
   // ------------------------------------------------------------------ Livre de caisse (2.1 lot 14)
+
+  RegisterInterface _interface = RegisterInterface.defaults;
+
+  @override
+  RegisterInterface get publishedInterface => _interface;
+
+  /// Uuid du terminal appairé (lu avant la reconstruction de [_device]).
+  String? get _deviceTerminal => _device['terminal_uuid'] as String?;
 
   @override
   bool get onlineCashBookSupported => v2.contract21 && _serverOffers(CaisseV2Client.cashBookCapability);
@@ -2539,6 +2548,9 @@ class V2Engine extends CaisseEngine {
     final device = await v2.read(V2Keys.device);
     _device = device == null ? const {} : {...Map<String, dynamic>.from(jsonDecode(device) as Map), 'epoque': int.tryParse(await v2.read(V2Keys.epoch) ?? '')};
     deviceName = device == null ? null : '${_device['nom'] ?? ''} — ${_device['terminal_nom'] ?? ''}';
+    // Lot 13 : seule l'entité de ce terminal compte (le serveur publie celle de chaque terminal de la boutique).
+    final ui = _serverOffers(CaisseV2Client.interfaceCapability) ? (await v2.entities('interface_caisse'))[_deviceTerminal] : null;
+    _interface = ui == null ? RegisterInterface.defaults : RegisterInterface.fromJson(ui);
     final cursor = await v2.read(V2Keys.cursor);
     if (cursor == null || device == null) {
       snapshot = null;

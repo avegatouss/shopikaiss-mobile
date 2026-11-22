@@ -18,6 +18,7 @@ class AppSettings {
     required this.adminCode,
     this.hideSoftKeyboard = true,
     this.scanAutoFocus = true,
+    this.registerInterface = '',
     this.customerDisplayUrl = '',
     this.screenLayout = 'auto',
     this.appPrinterFirst = true,
@@ -99,6 +100,10 @@ class AppSettings {
   /// Désactivé, il n'y va que sur demande (toucher, F2) : utile quand on saisit au doigt sans douchette (C, `cdf860a`).
   bool scanAutoFocus;
 
+  /// Interface de la caisse réglée sur ce poste (2.1 lot 13), forme publiée `interface_caisse` en JSON ; vide : aucun
+  /// réglage local (l'interface publiée s'applique). Ignorée tant que le responsable verrouille l'interface.
+  String registerInterface;
+
   /// Lien imposé à l'afficheur client (second écran), même origine que la boutique ; vide = lien envoyé par la caisse.
   /// Typiquement le lien « page web » copié depuis Réglages › Afficheur client, pour vérifier l'affichage.
   String customerDisplayUrl;
@@ -144,6 +149,7 @@ class AppSettings {
       adminCode: p.getString('adminCode') ?? '',
       hideSoftKeyboard: !(p.getBool('softKeyboardAllowed') ?? false),
       scanAutoFocus: p.getBool('scanAutoFocus') ?? true,
+      registerInterface: p.getString('registerInterface') ?? '',
       customerDisplayUrl: p.getString('customerDisplayUrl') ?? '',
       screenLayout: p.getString('screenLayout') ?? 'auto',
       appPrinterFirst: p.getBool('appPrinterFirst') ?? true,
@@ -186,6 +192,7 @@ class AppSettings {
     await p.setString('adminCode', adminCode);
     await p.setBool('softKeyboardAllowed', !hideSoftKeyboard);
     await p.setBool('scanAutoFocus', scanAutoFocus);
+    await p.setString('registerInterface', registerInterface);
     await p.setString('customerDisplayUrl', customerDisplayUrl);
     await p.setString('screenLayout', screenLayout);
     await p.setBool('appPrinterFirst', appPrinterFirst);
