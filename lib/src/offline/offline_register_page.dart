@@ -338,6 +338,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     _floor = _engine.restaurant?.restaurantProfile ?? false;
     _refreshSold();
     _refreshSuspended();
+    // Remise à zéro appliquée au démarrage (lot 17) : avis montré dès le premier affichage.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _changed());
   }
 
   @override
@@ -361,7 +363,47 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    final notice = _engine.shopResetNotice;
+    if (notice != null && !_resetShown) {
+      _resetShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showShopReset(notice));
+    }
+  }
+
+  /// Avis de remise à zéro (2.1 lot 17) en cours d'affichage.
+  bool _resetShown = false;
+
+  /// Remise à zéro faite par la boutique : avis montré une fois ; un panier qui retirait une prévente ou corrigeait un
+  /// ticket effacés est vidé, les paniers en attente relus.
+  Future<void> _showShopReset(String notice) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.restart_alt, size: 36),
+        title: const Text('Caisse remise à zéro'),
+        content: Text(notice, style: const TextStyle(fontSize: 16)),
+        actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
+      ),
+    );
+    if (!mounted) return;
+    if (_preSaleUse != null || _editing != null) {
+      ScaffoldMessenger.of(context).hideCurrentMaterialBanner();
+      await _engine.deleteDraft(_draftUuid);
+      if (!mounted) return;
+      setState(() {
+        _clearCart();
+        _editing = null;
+        _draftUuid = const Uuid().v4();
+      });
+    }
+    await _engine.acknowledgeShopReset();
+    _resetShown = false;
+    _refreshSold();
+    _refreshSuspended();
   }
 
   /// Paniers en attente de ce terminal ; ceux vendus ou supprimés ailleurs sont retirés.

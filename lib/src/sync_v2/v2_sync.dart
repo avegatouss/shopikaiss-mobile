@@ -99,7 +99,10 @@ class V2Sync {
           '${contract21 && shared(CaisseV2Client.cashTransferCapability) ? '+transfert1' : ''}'
           // `prevente1` : première annonce de `prevente.v1` (lot 15), instantané pour recevoir la règle, le droit et les
           // préventes ouvertes publiées.
-          '${contract21 && shared(CaisseV2Client.preSaleCapability) ? '+prevente1' : ''}';
+          '${contract21 && shared(CaisseV2Client.preSaleCapability) ? '+prevente1' : ''}'
+          // `remise1` : première annonce de `remise.zero` (lot 17), instantané pour recevoir `regles.remise_a_zero` d'une
+          // remise déjà faite (le journal ne republie pas la boutique).
+          '${contract21 && shared(CaisseV2Client.shopResetCapability) ? '+remise1' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {

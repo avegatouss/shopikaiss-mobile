@@ -268,6 +268,17 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Lignes de la prévente remises au panier pour son retrait (produits encore au catalogue local).
   List<CartLine> preSaleCart(PreSale preSale) => const [];
 
+  // ------------------------------------------------------------------ Remise à zéro (2.1 lot 17)
+
+  /// Capacité `remise.zero` accordée : la boutique peut remettre ce terminal à zéro avant la production.
+  bool get shopResetSupported => false;
+
+  /// Avis de la dernière remise à zéro appliquée sur ce terminal, à montrer une fois ; null sinon.
+  String? get shopResetNotice => null;
+
+  /// L'avis de remise à zéro a été lu.
+  Future<void> acknowledgeShopReset() async {}
+
   // ------------------------------------------------------------------ Mobile money → espèces (2.1 lot 16)
 
   /// Règle `boutique.regles.transfert_especes` publiée et capacité `transfert.especes` accordée.

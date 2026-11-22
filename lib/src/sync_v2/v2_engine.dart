@@ -216,6 +216,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.interfaceCapability,
           CaisseV2Client.cashTransferCapability,
           CaisseV2Client.preSaleCapability,
+          CaisseV2Client.shopResetCapability,
         ],
       ],
     );
@@ -235,6 +236,9 @@ class V2Engine extends CaisseEngine {
     v2.restaurant = v2.contract21 && announceRestaurant && revision.contains('+restaurant');
     v2.zLocal = v2.contract21 && revision.contains('+zlocal');
     await _rebuild();
+    // Remise à zéro reçue mais pas appliquée (arrêt entre la lecture du journal et l'effacement) : appliquée ici.
+    if (await _applyShopReset()) await _rebuild();
+    shopResetNotice = await v2.read(V2Keys.resetNotice);
     await _count();
     notifyListeners();
   }
@@ -330,6 +334,8 @@ class V2Engine extends CaisseEngine {
       final state = await v2.read(V2Keys.serverState);
       if (state != null) _state = Map<String, dynamic>.from(jsonDecode(state) as Map);
       await _rebuild();
+      // Lot 17 : remise à zéro publiée par la boutique (règle reçue par le journal ou l'instantané de cette synchro).
+      if (await _applyShopReset()) await _rebuild();
       return SyncReport(
         sent: report.sent,
         integrated: report.integrated,
@@ -1772,7 +1778,7 @@ class V2Engine extends CaisseEngine {
     await rememberTicketModel(uuid);
     final operation = await _record(uuid, 'vente_modification', cashier, (sequence) {
       final built = builder.content(
-        numberLocal: 'HL2-$epoch-${sequence.toString().padLeft(6, '0')}',
+        numberLocal: _localSaleNumber(epoch, sequence),
         draftUuid: _newUuid(),
         sessionUuid: origin['session_uuid'] as String,
         cart: cart,
@@ -2643,7 +2649,7 @@ class V2Engine extends CaisseEngine {
           'vente',
           operator,
           (sequence) => builder.content(
-            numberLocal: 'HL2-$epoch-${sequence.toString().padLeft(6, '0')}',
+            numberLocal: _localSaleNumber(epoch, sequence),
             draftUuid: draft ?? _newUuid(),
             sessionUuid: _sessionUuid!,
             cart: cart,
@@ -2864,6 +2870,8 @@ class V2Engine extends CaisseEngine {
   /// Catalogue présenté, reconstruit depuis la projection (après chaque synchronisation et au chargement).
   Future<void> _rebuild() async {
     _customers = null;
+    final base = (await v2.read(V2Keys.resetBase))?.split(':');
+    _numberBase = base == null || base.length != 2 ? null : (int.tryParse(base.first), int.tryParse(base.last) ?? 0);
     _serverSessions = Map<String, String>.from(jsonDecode(await v2.read(V2Keys.serverSessions) ?? '{}') as Map);
     _blocked = await v2.read(V2Keys.blocked);
     final window = (await v2.read(V2Keys.imageWindow))?.split('-');
@@ -3189,6 +3197,86 @@ class V2Engine extends CaisseEngine {
     final lastClosure = await v2.lastOf('cloture_session');
     final lastDay = await v2.lastOf('cloture_journee');
     _closureSinceDay = lastClosure != null && (lastDay == null || lastClosure.$1 > lastDay.$1 || (lastClosure.$1 == lastDay.$1 && lastClosure.$2 > lastDay.$2));
+  }
+
+  // ------------------------------------------------------------------ Remise à zéro (2.1 lot 17)
+
+  /// Base des numéros locaux de vente posée par la dernière remise : (époque, dernière séquence avant la remise).
+  (int?, int)? _numberBase;
+
+  @override
+  String? shopResetNotice;
+
+  @override
+  bool get shopResetSupported => _serverOffers(CaisseV2Client.shopResetCapability);
+
+  /// Numéro local d'une vente : `HL2-époque-n`, n compté depuis la dernière remise à zéro de cette époque (1 d'abord).
+  String _localSaleNumber(Object? epoch, int sequence) {
+    final base = _numberBase;
+    final n = base != null && base.$1 == epoch && sequence > base.$2 ? sequence - base.$2 : sequence;
+    return 'HL2-$epoch-${n.toString().padLeft(6, '0')}';
+  }
+
+  /// Remise à zéro de la boutique : quand `boutique.regles.remise_a_zero.uuid` diffère du dernier appliqué, les pièces
+  /// locales d'avant la remise sont effacées (V2Store.resetShop), les opérations non envoyées archivées d'abord, les
+  /// paniers conservés d'avant la remise oubliés, et un avis préparé. Vrai si un effacement a eu lieu.
+  Future<bool> _applyShopReset() async {
+    final rule = _shopRules?['remise_a_zero'];
+    if (rule is! Map) return false;
+    final uuid = rule['uuid'];
+    final at = DateTime.tryParse('${rule['le']}')?.toUtc();
+    if (uuid is! String || at == null || uuid == await v2.read(V2Keys.resetUuid)) return false;
+    // Copie des opérations jamais intégrées (non envoyées, refusées) AVANT l'effacement : une coupure entre les deux laisse la copie et la file.
+    final pending = [
+      for (final row in await v2.operationRows())
+        if ((V2OperationState.unsent.contains(row['etat']) || row['etat'] == V2OperationState.rejected) && (DateTime.tryParse('${(row['operation'] as Map)['cree_le']}')?.isBefore(at) ?? true)) row['operation'],
+    ];
+    if (pending.isNotEmpty) await _archiveReset(uuid, at, pending);
+    final result = await v2.resetShop(uuid, at);
+    var drafts = 0;
+    for (final d in await store.openDrafts()) {
+      if (d.updatedAt.toUtc().isBefore(at)) {
+        await store.deleteDraft(d.uuid);
+        drafts++;
+      }
+    }
+    // Terminal appairé après la remise : rien d'effacé, pas d'avis.
+    if (result.erased == 0 && drafts == 0) return true;
+    final l = at.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    final when = '${two(l.day)}/${two(l.month)}/${l.year} à ${two(l.hour)}:${two(l.minute)}';
+    final n = result.unsent.length;
+    shopResetNotice = n == 0
+        ? 'Caisse remise à zéro par la boutique le $when : ventes, sessions et Z d’essai effacés de ce terminal. Catalogue, opérateurs et réglages sont gardés.'
+        : 'Caisse remise à zéro par la boutique le $when : $n opération${n > 1 ? 's' : ''} d’essai non intégrée${n > 1 ? 's' : ''} écartée${n > 1 ? 's' : ''} '
+            '(copie gardée sur le terminal), ventes, sessions et Z d’essai effacés. Catalogue, opérateurs et réglages sont gardés.';
+    await v2.write(V2Keys.resetNotice, shopResetNotice);
+    return true;
+  }
+
+  /// Copie horodatée des opérations non envoyées écartées par une remise : fichier à côté de la base (preuve en cas de
+  /// doute), sinon dans la base elle-même.
+  Future<void> _archiveReset(String uuid, DateTime at, List<Object?> operations) async {
+    final stamp = DateTime.now().toUtc();
+    final text = jsonEncode({'remise_uuid': uuid, 'remise_le': at.toIso8601String(), 'archive_le': stamp.toIso8601String(), 'operations': operations});
+    final path = v2.db.path;
+    if (p.isAbsolute(path)) {
+      try {
+        final name = 'remise-a-zero-${stamp.toIso8601String().substring(0, 19).replaceAll(RegExp('[^0-9]'), '')}-${uuid.substring(0, 8)}.json';
+        await File(p.join(p.dirname(path), name)).writeAsString(text, flush: true);
+        return;
+      } on FileSystemException {
+        // Dossier non inscriptible : copie dans la base.
+      }
+    }
+    await v2.write(V2Keys.resetArchive, text);
+  }
+
+  @override
+  Future<void> acknowledgeShopReset() async {
+    shopResetNotice = null;
+    await v2.write(V2Keys.resetNotice, null);
+    notifyListeners();
   }
 
   Future<void> _contact() async {

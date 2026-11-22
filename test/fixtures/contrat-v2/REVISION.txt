@@ -1,8 +1,8 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commits : integration/lots-12-15 3ba28b1d (A) : lots 12 (sessions locales), 13 (interface réglable), 14 (livre de
-caisse, livre-caisse.json), 15 (prévente) et 16 (transfert mobile money → espèces) réunis par A sur 04818bc0 (lots 10
-et 11). Schémas et fixtures recopiés tels quels. 223 fixtures, 16 schémas.
-Précédent : 92bffdb5 (221 fixtures, fdb6f04), lot 12 seul (199, fe8b15b), fusion B des lots 10 et 11 (194).
+Commits : feat/remise-a-zero 51f0745d (A, lot 17 : remise à zéro, regles.remise_a_zero dans donnees-2.1.json) sur main
+3deacfed (lots 12 à 16, contrat identique à integration/lots-12-15 3ba28b1d). Schémas et fixtures recopiés tels quels.
+223 fixtures, 16 schémas.
+Précédent : 3ba28b1d (223 fixtures, e39dc61), 92bffdb5 (221, fdb6f04), lot 12 seul (199, fe8b15b), lots 10 et 11 (194).
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

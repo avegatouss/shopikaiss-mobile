@@ -61,6 +61,10 @@ class AdapterFailure implements Exception {
 /// (Z de journée du terminal, identifiant d'opération facultatif ; puis closureDocument kind `z-jour-terminal`),
 /// syncStatus (état, compte à rebours) ; status porte `sync` et les capacités `open_session` (plafond) et `close_day`.
 ///
+/// Remise à zéro (2.1 lot 17) : faite par le moteur à la synchronisation (rien à appeler). `status.shop_reset` =
+/// {supported, notice} ; `notice` (texte) à montrer UNE fois, puis acknowledgeShopReset {} (le panier en cours qui retirait
+/// une prévente ou corrigeait un ticket effacés est vidé).
+///
 /// Prévente (2.1 lot 15) : preSales {query, open_only}, createPreSale {customer_name, customer_phone, customer_id,
 /// pickup_at, deposit, method, received, reference, note} sur les lignes du panier (identifiant d'opération ; panier vidé),
 /// cancelPreSale {pre_sale_id, reason, refund, method, reference}, loadPreSale {pre_sale_id} (panier vide : les lignes
@@ -179,6 +183,8 @@ class LocalRegisterAdapter {
         return engine.syncStatus.toJson(engine.now);
       case 'localSessions':
         return _localSessions();
+      case 'acknowledgeShopReset':
+        return _acknowledgeShopReset();
       case 'preSales':
         return _preSales(args);
       case 'createPreSale':
@@ -392,7 +398,21 @@ class LocalRegisterAdapter {
     'business_day': await engine.businessDay(),
     // Interface publiée pour ce terminal (2.1 lot 13), forme du contrat, sans les préférences locales d'Android.
     'register_interface': engine.publishedInterface.toJson(),
+    // Remise à zéro de la boutique (2.1 lot 17) : avis à montrer une fois (null sinon).
+    'shop_reset': {'supported': engine.shopResetSupported, 'notice': engine.shopResetNotice},
   };
+
+  /// Avis de remise à zéro lu ; un panier lié à une pièce effacée (prévente, ticket corrigé) est vidé.
+  Future<Map<String, dynamic>> _acknowledgeShopReset() async {
+    await engine.acknowledgeShopReset();
+    if (_draft.preSale != null || _draft.edit != null) {
+      await engine.deleteDraft(_draft.uuid);
+      _draft = _Draft(_newUuid());
+      _emit('panier');
+    }
+    _emit('session');
+    return _status();
+  }
 
   Map<String, dynamic>? _sessionView() {
     final session = engine.snapshot?.session;

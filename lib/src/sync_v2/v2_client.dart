@@ -149,6 +149,10 @@ class CaisseV2Client {
   /// `boutique.regles.transfert_especes`, droit `transfert_especes`. Accordée seulement avec `contrat.2_1`.
   static const cashTransferCapability = 'transfert.especes';
 
+  /// Remise à zéro de la boutique avant la production (2.1 lot 17) : règle `boutique.regles.remise_a_zero` {uuid, le}.
+  /// Annoncée parce que l'effacement local est en place. Accordée seulement avec `contrat.2_1`.
+  static const shopResetCapability = 'remise.zero';
+
   /// Livre de caisse sur le poste (2.1 lot 14) : `GET /livre-caisse`, droit `livre_caisse_voir`. Accordée seulement avec
   /// `contrat.2_1`.
   static const cashBookCapability = 'livre_caisse.v1';

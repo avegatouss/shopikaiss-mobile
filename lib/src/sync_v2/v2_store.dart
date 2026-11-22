@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' show min;
 
 import 'package:sqflite_common/sqlite_api.dart';
 
@@ -98,6 +99,14 @@ class V2Keys {
   /// « journée partielle » du pré-Z, README §12.4.3).
   static const journalAt = 'v2.journal_le';
   static const journalFailed = 'v2.journal_echec';
+
+  /// Remise à zéro de la boutique (2.1 lot 17) : uuid de la dernière remise appliquée, base des numéros locaux de vente
+  /// (`époque:séquence` : le numéro repart de 1 après elle), avis à montrer une fois, copie des opérations non envoyées
+  /// écartées quand aucun fichier ne peut être écrit.
+  static const resetUuid = 'v2.remise_uuid';
+  static const resetBase = 'v2.remise_base';
+  static const resetNotice = 'v2.remise_avis';
+  static const resetArchive = 'v2.remise_archive';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
@@ -445,6 +454,71 @@ class V2Store {
     final rows = await db.rawQuery('SELECT cle, SUM(variation_micros) AS v FROM v2_mouvements WHERE couvert_le IS NULL GROUP BY cle');
     return {for (final r in rows) r['cle'] as String: r['v'] as int};
   }
+
+  // ---------------------------------------------------------------- remise à zéro (2.1 lot 17)
+
+  /// Clés des pièces locales effacées entièrement par une remise : journal des bons et dernier lot remonté, plafonds
+  /// d'autorisation restaurant du jour, promotions figées des commandes, compteur des Z registre, copie du livre de caisse.
+  /// Les adresses d'imprimantes (`v2.resto_imprimantes`) sont des réglages : gardées.
+  static const resetKeys = [
+    'v2.resto_bons_journal', 'v2.resto_bons_dernier_lot', 'v2.resto_autorisations', 'v2.resto_promotions_figees', 'v2.resto_z_local', //
+    V2Keys.cashBook,
+  ];
+
+  /// Opérations du catalogue gardées par une remise une fois intégrées : le serveur garde les produits.
+  static const _catalogueTypes = {'creation_produit', 'modification_produit'};
+
+  /// Remise à zéro de la boutique, en UNE transaction : les opérations du terminal datées (`cree_le`) d'avant [at] — même
+  /// critère que le serveur, qui les refuse — sont effacées avec leurs mouvements de stock, paniers consommés, Z rendus,
+  /// correspondances de session, ouverture et clôture en cours ; les pièces de [resetKeys] aussi ; le numéro local de
+  /// vente repart de 1 (si plus rien ne reste de cette époque). Gardés : projection (catalogue, stock du serveur,
+  /// opérateurs, réglages), appairage, séquence, identifiants locaux. [uuid] est mémorisé dans la même transaction.
+  ///
+  /// Rend les opérations effacées jamais intégrées (non envoyées ou refusées, à archiver) et le nombre d'effacées.
+  Future<({List<Map<String, dynamic>> unsent, int erased})> resetShop(String uuid, DateTime at) => db.transaction((txn) async {
+    final erased = <String>[];
+    final unsent = <Map<String, dynamic>>[];
+    var keptInEpoch = false;
+    final epoch = int.tryParse(await read(V2Keys.epoch, txn) ?? '');
+    for (final r in await txn.query('v2_operations', columns: ['uuid', 'epoque', 'type', 'etat', 'operation', 'cree_le'])) {
+      final operation = Map<String, dynamic>.from(jsonDecode(r['operation'] as String) as Map);
+      final created = DateTime.tryParse('${operation['cree_le'] ?? r['cree_le']}');
+      final state = r['etat'] as String;
+      final catalogue = _catalogueTypes.contains(r['type']) && (state == V2OperationState.integrated || state == V2OperationState.resolved);
+      if (catalogue || (created != null && !created.isBefore(at))) {
+        if (r['epoque'] == epoch) keptInEpoch = true;
+        continue;
+      }
+      erased.add(r['uuid'] as String);
+      // Jamais intégrée au serveur : non envoyée, ou refusée (`remise_a_zero` quand elle part juste avant l'effacement).
+      if (V2OperationState.unsent.contains(state) || state == V2OperationState.rejected) unsent.add(operation);
+    }
+    for (var i = 0; i < erased.length; i += 400) {
+      final chunk = erased.sublist(i, min(i + 400, erased.length));
+      final marks = List.filled(chunk.length, '?').join(', ');
+      await txn.delete('v2_mouvements', where: 'operation_uuid IN ($marks)', whereArgs: chunk);
+      await txn.delete('v2_paniers_consommes', where: 'operation_uuid IN ($marks)', whereArgs: chunk);
+      await txn.delete('v2_operations', where: 'uuid IN ($marks)', whereArgs: chunk);
+    }
+    final gone = erased.toSet();
+    // Z et Z restaurant rendus par le serveur pour une opération effacée.
+    for (final r in await txn.rawQuery("SELECT cle FROM kv WHERE cle LIKE 'v2.z.%' OR cle LIKE 'v2.zr.%'")) {
+      final key = r['cle'] as String;
+      if (gone.contains(key.substring(key.indexOf('.', 3) + 1))) await write(key, null, txn);
+    }
+    final sessions = Map<String, dynamic>.from(jsonDecode(await read(V2Keys.serverSessions, txn) ?? '{}') as Map)..removeWhere((k, _) => gone.contains(k));
+    await write(V2Keys.serverSessions, sessions.isEmpty ? null : jsonEncode(sessions), txn);
+    for (final key in const [V2Keys.localSession, V2Keys.closingOperation]) {
+      if (gone.contains(await read(key, txn))) await write(key, null, txn);
+    }
+    for (final key in resetKeys) {
+      await write(key, null, txn);
+    }
+    final next = int.parse(await read(V2Keys.nextSequence, txn) ?? '1');
+    if (!keptInEpoch && epoch != null) await write(V2Keys.resetBase, '$epoch:${next - 1}', txn);
+    await write(V2Keys.resetUuid, uuid, txn);
+    return (unsent: unsent, erased: erased.length);
+  }, exclusive: true);
 
   // ---------------------------------------------------------------- file
 

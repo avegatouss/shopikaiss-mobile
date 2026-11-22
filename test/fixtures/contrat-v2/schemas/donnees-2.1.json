@@ -769,6 +769,24 @@
                                 }
                             }
                         },
+                        "remise_a_zero": {
+                            "description": "Capacité remise.zero (lot 17) : dernière remise à zéro de la boutique avant la production, absente tant qu'il n'y en a pas. Un uuid nouveau pour le poste : il efface ses pièces locales (ventes, sessions, Z, file d'envoi, préventes, compteurs) et garde catalogue, réglages et opérateurs.",
+                            "type": "object",
+                            "required": [
+                                "uuid",
+                                "le"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                },
+                                "le": {
+                                    "$ref": "commun.json#/$defs/horodatage",
+                                    "description": "Instant de la remise (UTC). Une opération dont cree_le est antérieur est refusée : rejet_protocole remise_a_zero."
+                                }
+                            }
+                        },
                         "transfert_especes": {
                             "description": "Capacité transfert.especes (lot 16) : présente seulement si la boutique a activé le transfert de fin de journée vers les espèces (Paramètres › Trésorerie). Absente : bouton masqué.",
                             "type": "object",
