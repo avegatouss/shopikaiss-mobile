@@ -107,6 +107,10 @@ class V2Keys {
   static const resetBase = 'v2.remise_base';
   static const resetNotice = 'v2.remise_avis';
   static const resetArchive = 'v2.remise_archive';
+
+  /// Dernier logo de la boutique téléchargé (capacité `boutique.logo`) : `{uuid, empreinte, png}` (PNG normalisé pour
+  /// l'impression), gardé hors connexion jusqu'au suivant.
+  static const shopLogo = 'v2.logo_boutique';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).

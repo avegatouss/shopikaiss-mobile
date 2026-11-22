@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:bcrypt/bcrypt.dart';
 
@@ -267,6 +268,20 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Lignes de la prévente remises au panier pour son retrait (produits encore au catalogue local).
   List<CartLine> preSaleCart(PreSale preSale) => const [];
+
+  // ------------------------------------------------------------------ Logo de la boutique (capacité boutique.logo)
+
+  /// La boutique publie son logo (ou l'absence de logo) : la copie locale importée sur le poste n'est plus utilisée.
+  bool get shopLogoPublished => false;
+
+  /// Uuid du logo de la boutique téléchargé sur ce terminal, null sinon.
+  String? get shopLogoUuid => null;
+
+  /// Échec du dernier téléchargement du logo publié, null sinon.
+  String? get shopLogoError => null;
+
+  /// Logo à imprimer en tête des documents, à partir de la copie locale [local] (PNG normalisé).
+  Uint8List? receiptLogo(Uint8List? local) => local;
 
   // ------------------------------------------------------------------ Remise à zéro (2.1 lot 17)
 

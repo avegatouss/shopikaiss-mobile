@@ -3234,10 +3234,20 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Pour ${_snapshot?.store.name ?? 'cette boutique'} sur ce terminal. Logo gardé en copie locale : rien n’est téléchargé à l’impression.',
+              Text(
+                  settings.shopLogo
+                      ? 'Pour ${_snapshot?.store.name ?? 'cette boutique'} sur ce terminal. Logo publié par la boutique : il se change au web (Paramètres de la boutique).'
+                      : 'Pour ${_snapshot?.store.name ?? 'cette boutique'} sur ce terminal. Logo gardé en copie locale : rien n’est téléchargé à l’impression.',
                   style: const TextStyle(fontSize: 12, color: Colors.black54)),
               if (settings.logoPng != null) Padding(padding: const EdgeInsets.only(top: 8), child: Center(child: Image.memory(settings.logoPng!, height: 70))),
-              Wrap(
+              if (settings.shopLogo && settings.logoPng == null)
+                const Padding(padding: EdgeInsets.only(top: 8), child: Text('La boutique n’a pas de logo : les impressions commencent par l’entête.')),
+              if (_engine.shopLogoError case final logoError?)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(logoError, style: const TextStyle(fontSize: 12, color: Colors.deepOrange)),
+                ),
+              if (!settings.shopLogo) Wrap(
                 spacing: 8,
                 children: [
                   TextButton.icon(

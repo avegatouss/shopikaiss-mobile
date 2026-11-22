@@ -10,14 +10,24 @@ import 'models.dart';
 /// Réglages des tickets de vente de ce terminal : logo, QR résumé, lien facultatif, 1 à 3 exemplaires.
 /// Mêmes règles que Windows (C, `a2b56d2`, `bd7c87c`, `6ea2f2f`, `e8354be`), mais rangés **par boutique** dans la base
 /// du moteur : le logo ou le lien d'une boutique ne passe pas sur une autre (réserve de la passation C du 21/11).
-/// Le logo est une copie locale (PNG normalisé) : rien n'est téléchargé à l'impression.
+/// Le logo est une copie locale (PNG normalisé) : rien n'est téléchargé à l'impression. Quand la boutique publie son
+/// logo (capacité `boutique.logo`), c'est lui qui est imprimé ([shopLogo]) ; la copie importée sur le poste est gardée
+/// ([localLogoPng]) pour un serveur qui ne le publie pas.
 class ReceiptSettings {
-  const ReceiptSettings({this.copies = 1, this.qrEnabled = true, this.link = '', this.logoPng});
+  const ReceiptSettings({this.copies = 1, this.qrEnabled = true, this.link = '', this.logoPng, this.localLogoPng, this.shopLogo = false});
 
   final int copies;
   final bool qrEnabled;
   final String link;
+
+  /// Logo imprimé.
   final Uint8List? logoPng;
+
+  /// Copie importée sur le poste (enregistrée), quand [shopLogo] l'emporte.
+  final Uint8List? localLogoPng;
+
+  /// Logo décidé par la boutique (publié au web) : pas d'import sur le poste.
+  final bool shopLogo;
 
   static String key(Snapshot snapshot) => 'ticket-reglages-v1:${(snapshot.raw['boutique'] as Map?)?['uuid'] ?? snapshot.store.name}';
 
@@ -27,18 +37,21 @@ class ReceiptSettings {
     final snapshot = engine.snapshot;
     if (snapshot == null) return const ReceiptSettings();
     final raw = await engine.store.read(key(snapshot));
-    if (raw == null) return const ReceiptSettings();
+    if (raw == null) return ReceiptSettings(logoPng: engine.receiptLogo(null), shopLogo: engine.shopLogoPublished);
     try {
       final m = jsonDecode(raw) as Map;
       final link = m['qr_link'] is String ? m['qr_link'] as String : '';
+      final local = m['logo_png'] is String ? base64Decode(m['logo_png'] as String) : null;
       return ReceiptSettings(
         copies: copyCount(m['copies']),
         qrEnabled: m['qr_enabled'] != false,
         link: validReceiptLink(link) ? link.trim() : '',
-        logoPng: m['logo_png'] is String ? base64Decode(m['logo_png'] as String) : null,
+        logoPng: engine.receiptLogo(local),
+        localLogoPng: local,
+        shopLogo: engine.shopLogoPublished,
       );
     } on FormatException {
-      return const ReceiptSettings();
+      return ReceiptSettings(logoPng: engine.receiptLogo(null), shopLogo: engine.shopLogoPublished);
     }
   }
 
@@ -48,7 +61,10 @@ class ReceiptSettings {
     if (!validReceiptLink(link)) throw const FormatException('Lien invalide (http ou https, 350 octets au plus).');
     await engine.store.write(
       key(snapshot),
-      jsonEncode({'copies': copyCount(copies), 'qr_enabled': qrEnabled, 'qr_link': link.trim(), 'logo_png': logoPng == null ? null : base64Encode(logoPng!)}),
+      jsonEncode({'copies': copyCount(copies), 'qr_enabled': qrEnabled, 'qr_link': link.trim(), 'logo_png': ?switch (shopLogo ? localLogoPng : logoPng) {
+        final png? => base64Encode(png),
+        null => null,
+      }}),
     );
   }
 
@@ -57,6 +73,8 @@ class ReceiptSettings {
     qrEnabled: qrEnabled ?? this.qrEnabled,
     link: link ?? this.link,
     logoPng: removeLogo ? null : logoPng ?? this.logoPng,
+    localLogoPng: localLogoPng,
+    shopLogo: shopLogo,
   );
 
   /// Lignes d'un ticket de vente telles qu'imprimées (« DONT TVA » en capitales, montant inchangé).

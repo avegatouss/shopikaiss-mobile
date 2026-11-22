@@ -130,11 +130,18 @@ class FakeV2Server implements V2Transport {
   final images = <String, List<int>>{};
   int? imageStatus;
 
+  /// Logos servis par `GET /logos/{uuid}` (capacité boutique.logo).
+  final logos = <String, List<int>>{};
+
   @override
   Future<V2Response> fetchBytes(String apiBase, String path, {Map<String, String> headers = const {}, Duration? timeout}) async {
     requests.add((method: 'GET', path: path, headers: headers, body: null));
     final status = imageStatus;
     if (status != null) return V2Response(status, null, retryAfter: status == 429 ? 30 : null);
+    if (path.startsWith('/logos/')) {
+      final logo = logos[path.substring('/logos/'.length)];
+      return logo == null ? const V2Response(404, null) : V2Response(200, null, bytes: logo);
+    }
     final bytes = images[path.substring('/images/'.length)];
     return bytes == null ? const V2Response(404, null) : V2Response(200, null, bytes: bytes);
   }

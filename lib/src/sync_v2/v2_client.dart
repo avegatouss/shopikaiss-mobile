@@ -153,6 +153,10 @@ class CaisseV2Client {
   /// Annoncée parce que l'effacement local est en place. Accordée seulement avec `contrat.2_1`.
   static const shopResetCapability = 'remise.zero';
 
+  /// Logo de la boutique publié aux postes : `boutique.ticket.logo` et `logo_carre` ({uuid, empreinte, octets, largeur,
+  /// hauteur} ou null), fichier `GET /logos/{uuid}` (JPEG immuable). Accordée seulement avec `contrat.2_1`.
+  static const shopLogoCapability = 'boutique.logo';
+
   /// Livre de caisse sur le poste (2.1 lot 14) : `GET /livre-caisse`, droit `livre_caisse_voir`. Accordée seulement avec
   /// `contrat.2_1`.
   static const cashBookCapability = 'livre_caisse.v1';
@@ -256,6 +260,9 @@ class CaisseV2Client {
 
   /// Image d'un produit (`GET /images/{uuid}`, révision 2.1) ; réponse brute, l'appelant gère 404 et 429.
   Future<V2Response> image(String uuid) => transport.fetchBytes(apiBase, '/images/$uuid', headers: _headers);
+
+  /// Logo de la boutique (`GET /logos/{uuid}`, capacité `boutique.logo`) : JPEG immuable, demandé une fois par uuid.
+  Future<V2Response> logo(String uuid) => transport.fetchBytes(apiBase, '/logos/$uuid', headers: _headers);
 
   Future<Object?> _call(
     String method,

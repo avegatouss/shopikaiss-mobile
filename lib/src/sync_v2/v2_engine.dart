@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -20,6 +21,7 @@ import '../offline/models.dart';
 import '../offline/store.dart';
 import '../offline/ticket.dart';
 import '../offline/x_z_report.dart';
+import '../windows/platform/receipt_logo.dart' show normalizeReceiptLogo;
 import 'contract_schemas.dart';
 import 'schema_validator.dart';
 import 'decimal6.dart';
@@ -217,6 +219,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.cashTransferCapability,
           CaisseV2Client.preSaleCapability,
           CaisseV2Client.shopResetCapability,
+          CaisseV2Client.shopLogoCapability,
         ],
       ],
     );
@@ -239,6 +242,7 @@ class V2Engine extends CaisseEngine {
     // Remise à zéro reçue mais pas appliquée (arrêt entre la lecture du journal et l'effacement) : appliquée ici.
     if (await _applyShopReset()) await _rebuild();
     shopResetNotice = await v2.read(V2Keys.resetNotice);
+    _shopLogo = _decodeShopLogo(await v2.read(V2Keys.shopLogo));
     await _count();
     notifyListeners();
   }
@@ -336,6 +340,8 @@ class V2Engine extends CaisseEngine {
       await _rebuild();
       // Lot 17 : remise à zéro publiée par la boutique (règle reçue par le journal ou l'instantané de cette synchro).
       if (await _applyShopReset()) await _rebuild();
+      // Logo publié : téléchargé quand son uuid change (jamais à l'impression).
+      if (failure == null) await _refreshShopLogo();
       return SyncReport(
         sent: report.sent,
         integrated: report.integrated,
@@ -2902,6 +2908,7 @@ class V2Engine extends CaisseEngine {
     _vat = await v2.shopVat();
     final shop = (await v2.entities('boutique'))[_device['boutique_uuid']];
     _shopRules = (shop?['regles'] as Map?)?.cast<String, dynamic>();
+    _shopTicket = (shop?['ticket'] as Map?)?.cast<String, dynamic>();
     final passSettings = (await v2.entities('pass_reglages'))[_device['boutique_uuid']];
     _passSettings = passSettings == null ? null : PassSettings(passSettings);
     _resto = await _loadRestaurant();
@@ -3197,6 +3204,83 @@ class V2Engine extends CaisseEngine {
     final lastClosure = await v2.lastOf('cloture_session');
     final lastDay = await v2.lastOf('cloture_journee');
     _closureSinceDay = lastClosure != null && (lastDay == null || lastClosure.$1 > lastDay.$1 || (lastClosure.$1 == lastDay.$1 && lastClosure.$2 > lastDay.$2));
+  }
+
+  // ------------------------------------------------------------------ Logo de la boutique (capacité boutique.logo)
+
+  /// `boutique.ticket` publié (logo, entête, pied…).
+  Map<String, dynamic>? _shopTicket;
+
+  /// Dernier logo téléchargé, PNG normalisé pour l'impression.
+  ({String uuid, Uint8List png})? _shopLogo;
+
+  /// Échec du dernier téléchargement du logo (affiché dans les réglages), null sinon.
+  @override
+  String? shopLogoError;
+
+  @override
+  bool get shopLogoPublished => _serverOffers(CaisseV2Client.shopLogoCapability) && (_shopTicket?.containsKey('logo') ?? false);
+
+  Map? get _publishedLogo => shopLogoPublished ? _shopTicket!['logo'] as Map? : null;
+
+  @override
+  String? get shopLogoUuid => _shopLogo?.uuid;
+
+  /// Logo à imprimer : celui de la boutique quand elle le publie (null publié : aucun logo ; pas encore téléchargé : le
+  /// dernier téléchargé, sinon [local]) ; sans la capacité, la copie locale importée sur le poste.
+  @override
+  Uint8List? receiptLogo(Uint8List? local) {
+    if (!shopLogoPublished) return local;
+    if (_publishedLogo == null) return null;
+    return _shopLogo?.png ?? local;
+  }
+
+  static ({String uuid, Uint8List png})? _decodeShopLogo(String? raw) {
+    if (raw == null) return null;
+    try {
+      final m = jsonDecode(raw) as Map;
+      return (uuid: m['uuid'] as String, png: base64Decode(m['png'] as String));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Télécharge le logo publié quand son uuid change : taille et SHA-256 vérifiés, PNG normalisé gardé dans la base.
+  /// Échec (réseau, empreinte, image illisible) : le logo précédent reste, nouvel essai à la synchronisation suivante.
+  Future<void> _refreshShopLogo() async {
+    final client = _client;
+    if (client == null || !shopLogoPublished) return;
+    final logo = _publishedLogo;
+    if (logo == null) {
+      if (_shopLogo != null) {
+        _shopLogo = null;
+        await v2.write(V2Keys.shopLogo, null);
+      }
+      shopLogoError = null;
+      return;
+    }
+    final uuid = logo['uuid'] as String;
+    if (_shopLogo?.uuid == uuid) return;
+    final response = await client.logo(uuid);
+    final bytes = response.bytes;
+    if (!response.ok || bytes == null) {
+      shopLogoError = response.status == 0 ? null : 'Logo de la boutique non reçu (${response.status}) : nouvel essai à la prochaine synchronisation.';
+      return;
+    }
+    if (bytes.length != logo['octets'] || sha256.convert(bytes).toString() != logo['empreinte']) {
+      shopLogoError = 'Logo de la boutique reçu incomplet ou altéré : ignoré, nouvel essai à la prochaine synchronisation.';
+      return;
+    }
+    final Uint8List png;
+    try {
+      png = normalizeReceiptLogo(Uint8List.fromList(bytes));
+    } catch (_) {
+      shopLogoError = 'Logo de la boutique illisible : remplacez-le au web (JPEG ou PNG).';
+      return;
+    }
+    _shopLogo = (uuid: uuid, png: png);
+    shopLogoError = null;
+    await v2.write(V2Keys.shopLogo, jsonEncode({'uuid': uuid, 'empreinte': logo['empreinte'], 'png': base64Encode(png)}));
   }
 
   // ------------------------------------------------------------------ Remise à zéro (2.1 lot 17)

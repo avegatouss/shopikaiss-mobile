@@ -1093,6 +1093,12 @@ const contractV2Schemas = <String, String>{
                             ],
                             "maxLength": 1000
                         },
+                        "logo": {
+                            "$ref": "#/$defs/logo_boutique"
+                        },
+                        "logo_carre": {
+                            "$ref": "#/$defs/logo_boutique"
+                        },
                         "largeur_papier": {
                             "type": "integer",
                             "minimum": 30,
@@ -2347,6 +2353,45 @@ const contractV2Schemas = <String, String>{
                     "maxLength": 500
                 }
             }
+        },
+        "logo_boutique": {
+            "description": "Capacité boutique.logo : logo de la boutique pour les impressions du poste (en tête de chaque document, sans rien au-dessus). Fichier JPEG servi par GET /logos/{uuid}, immuable ; null : pas de logo.",
+            "oneOf": [
+                {
+                    "type": "null"
+                },
+                {
+                    "type": "object",
+                    "required": [
+                        "uuid",
+                        "empreinte",
+                        "octets",
+                        "largeur",
+                        "hauteur"
+                    ],
+                    "additionalProperties": false,
+                    "properties": {
+                        "uuid": {
+                            "$ref": "commun.json#/$defs/uuid"
+                        },
+                        "empreinte": {
+                            "$ref": "commun.json#/$defs/empreinte"
+                        },
+                        "octets": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "largeur": {
+                            "type": "integer",
+                            "minimum": 1
+                        },
+                        "hauteur": {
+                            "type": "integer",
+                            "minimum": 1
+                        }
+                    }
+                }
+            ]
         }
     }
 }

@@ -183,6 +183,8 @@ class LocalRegisterAdapter {
         return engine.syncStatus.toJson(engine.now);
       case 'localSessions':
         return _localSessions();
+      case 'shopLogo':
+        return _shopLogo();
       case 'acknowledgeShopReset':
         return _acknowledgeShopReset();
       case 'preSales':
@@ -400,7 +402,21 @@ class LocalRegisterAdapter {
     'register_interface': engine.publishedInterface.toJson(),
     // Remise à zéro de la boutique (2.1 lot 17) : avis à montrer une fois (null sinon).
     'shop_reset': {'supported': engine.shopResetSupported, 'notice': engine.shopResetNotice},
+    // Logo publié par la boutique (capacité boutique.logo) : `uuid` change quand un nouveau logo est téléchargé ; le
+    // PNG se lit par la commande shopLogo. Déjà appliqué à escpos_base64 des documents rendus par l'adaptateur.
+    'shop_logo': {'published': engine.shopLogoPublished, 'uuid': engine.shopLogoUuid},
   };
+
+  /// Logo imprimé en tête des documents : celui de la boutique quand elle le publie, sinon la copie locale du poste.
+  Future<Map<String, dynamic>> _shopLogo() async {
+    final settings = await ReceiptSettings.read(engine);
+    return {
+      'published': engine.shopLogoPublished,
+      'uuid': engine.shopLogoUuid,
+      'source': settings.logoPng == null ? null : (engine.shopLogoPublished && engine.shopLogoUuid != null ? 'boutique' : 'local'),
+      'png_base64': settings.logoPng == null ? null : base64Encode(settings.logoPng!),
+    };
+  }
 
   /// Avis de remise à zéro lu ; un panier lié à une pièce effacée (prévente, ticket corrigé) est vidé.
   Future<Map<String, dynamic>> _acknowledgeShopReset() async {

@@ -102,7 +102,9 @@ class V2Sync {
           '${contract21 && shared(CaisseV2Client.preSaleCapability) ? '+prevente1' : ''}'
           // `remise1` : première annonce de `remise.zero` (lot 17), instantané pour recevoir `regles.remise_a_zero` d'une
           // remise déjà faite (le journal ne republie pas la boutique).
-          '${contract21 && shared(CaisseV2Client.shopResetCapability) ? '+remise1' : ''}';
+          '${contract21 && shared(CaisseV2Client.shopResetCapability) ? '+remise1' : ''}'
+          // `logo1` : première annonce de `boutique.logo`, instantané pour recevoir `boutique.ticket.logo`.
+          '${contract21 && shared(CaisseV2Client.shopLogoCapability) ? '+logo1' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {
