@@ -50,8 +50,8 @@ void main() {
     final back = RegisterInterface.fromJson(jsonDecode(local.encode()) as Map, origin: 'local');
     expect((back.productTile, back.visible('marques'), back.origin), ('xl', false, 'local'));
 
-    expect(operatorColor(7), operatorColor(7));
-    expect(operatorColor(7), isNot(operatorColor(8)));
+    expect(operatorArgb(7), operatorArgb(7));
+    expect(operatorArgb(7), isNot(operatorArgb(8)));
     expect([operatorInitials('Awa Koné'), operatorInitials('Mariam'), operatorInitials('  Jean  Paul  Kouassi ')], ['AK', 'MA', 'JK']);
   });
 

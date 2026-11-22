@@ -396,6 +396,73 @@ abstract class CaisseEngine extends EngineNotifier {
     return matches.single;
   }
 
+  /// Code responsable seul (demande du responsable, 22/11) : le responsable est reconnu par son code de 8 chiffres
+  /// parmi TOUS les codes publiés ; plusieurs correspondances valent un refus ; un code inconnu est compté (blocage
+  /// progressif). Le responsable reconnu doit ensuite figurer dans [eligible], sinon [notAllowed] (son nom en tête).
+  Future<Operator> identifyApprover(String code, {required List<Operator> eligible, required String notAllowed}) async {
+    const key = '${StoreKeys.approvalFailures}code';
+    final locked = await _lockedFor(key);
+    if (locked != null) throw OfflineRefusal('Trop d’essais : réessayez dans ${locked.inSeconds + 1} s.');
+    final holders = <int, Operator>{
+      for (final o in [...?snapshot?.operators, ...editApprovers, ...eligible])
+        if (o.approvalCodeHash?.isNotEmpty ?? false) o.id: o,
+    };
+    final matches = <Operator>[];
+    if (RegExp(r'^\d{8}$').hasMatch(code)) {
+      for (final o in holders.values) {
+        if (await approvalCodeMatches(o, code)) matches.add(o);
+      }
+    }
+    if (matches.length > 1) {
+      throw const OfflineRefusal('Ce code correspond à plusieurs responsables : il n’identifie personne. Faites redéfinir leurs codes.');
+    }
+    if (matches.isEmpty) {
+      final failures = (int.tryParse((await store.read(key))?.split('|').first ?? '') ?? 0) + 1;
+      final lockedUntil = failures >= 3 ? now.add(Duration(seconds: (30 * (1 << (failures - 3).clamp(0, 5))).clamp(30, 900))) : null;
+      await store.write(key, '$failures|${lockedUntil?.toUtc().toIso8601String() ?? ''}');
+      throw const OfflineRefusal('Code responsable inconnu.');
+    }
+    await store.write(key, null);
+    final approver = matches.single;
+    if (!eligible.any((o) => o.id == approver.id)) throw OfflineRefusal('${approver.name} $notAllowed');
+    return approver;
+  }
+
+  /// [code] est-il celui de [approver] (empreinte publiée) ? Sans compter d'échec : c'est [identifyApprover] qui compte.
+  Future<bool> approvalCodeMatches(Operator approver, String code) async {
+    final hash = approver.approvalCodeHash;
+    return hash != null && hash.isNotEmpty && await _verifyPin(code, hash);
+  }
+
+  /// Remise au-delà du seuil du caissier autorisée par le seul code du responsable.
+  Future<SaleApproval> authorizeDiscountByCode({
+    required Operator cashier,
+    required String code,
+    required String reason,
+    required List<CartLine> lines,
+    required int globalDiscount,
+  }) async {
+    final motive = reason.trim();
+    if (motive.isEmpty || motive.length > 500) throw const OfflineRefusal('Indiquez le motif de la remise (500 caractères au plus).');
+    final approver = await identifyApprover(code, eligible: approversFor(cashier, lines, globalDiscount), notAllowed: 'ne peut pas autoriser cette remise (droit ou plafond).');
+    return SaleApproval(approverId: approver.id, reason: motive, verifiedAt: now.toUtc().toIso8601String());
+  }
+
+  /// Geste du restaurant autorisé par le seul code du responsable (mêmes contrôles que [restoAuthorize]).
+  Future<RestoApproval> restoAuthorizeByCode({
+    required Operator cashier,
+    required String code,
+    required String reason,
+    required int amount,
+    String type = 'resto_modifier_envoye',
+    int? percent,
+    String? refund,
+  }) async {
+    final eligible = await restoApprovers(cashier, amount, type: type, percent: percent, refund: refund);
+    final approver = await identifyApprover(code, eligible: eligible, notAllowed: 'ne peut pas autoriser ce geste (droit ou plafonds).');
+    return restoAuthorize(cashier: cashier, approver: approver, code: code, reason: reason, amount: amount, type: type, percent: percent, refund: refund);
+  }
+
   /// Ancien total, nouveau total, différence et moyens de règlement possibles d'une modification de [sale].
   SaleEditPreview previewSaleEdit(OfflineOperation sale, List<CartLine> lines) =>
       throw const OfflineRefusal('Modification de ticket non disponible sur ce terminal.');
@@ -755,6 +822,15 @@ abstract class CaisseEngine extends EngineNotifier {
     final s = snapshot;
     if (facts == null || s == null) return null;
     return buildClosureDocument(facts, ZContext.of(s, publishedCashCodes: await publishedCashCodes()), kind: kind, version: version, now: now, duplicate: duplicate);
+  }
+
+  /// Z de journée du terminal (2.1 lot 12) visé par l'uuid de sa `cloture_journee`, même après les journées suivantes.
+  Future<ClosureDocument?> dayClosureDocument(String dayClosureUuid, String version, {bool duplicate = true}) async {
+    final facts = await closureFacts();
+    final s = snapshot;
+    if (facts == null || s == null) return null;
+    return buildClosureDocument(facts, ZContext.of(s, publishedCashCodes: await publishedCashCodes()),
+        kind: ZKind.terminalDay, version: version, now: now, duplicate: duplicate, dayClosureUuid: dayClosureUuid);
   }
 
   /// Audit d'une édition provisoire imprimée (pré-X, pré-Z ; lot Z local) : une opération par impression, avec son

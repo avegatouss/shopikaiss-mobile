@@ -468,14 +468,30 @@ extension _RestoCommands on LocalRegisterAdapter {
     });
   }
 
-  /// Autorisation d'un responsable quand le geste l'exige : `approval` {approver_id, code} ; le code n'est jamais gardé.
+  /// Autorisation d'un responsable quand le geste l'exige : `approval` {code} (responsable reconnu par son code seul ;
+  /// `approver_id` facultatif, ancien format) ; le code n'est jamais gardé.
   Future<RestoApproval?> _restoApproval(Operator operator, Map<String, dynamic> args, _RestoTerms terms, String reason) async {
     if (!terms.required) return null;
     final raw = args['approval'];
     if (raw is! Map) {
-      throw const AdapterFailure('autorisation_requise', 'Ce geste exige l’autorisation d’un responsable : joignez approval {approver_id, code}.');
+      throw const AdapterFailure('autorisation_requise', 'Ce geste exige l’autorisation d’un responsable : joignez approval {code}.');
     }
     final fields = raw.cast<String, dynamic>();
+    if (fields['approver_id'] == null) {
+      try {
+        return await engine.restoAuthorizeByCode(
+          cashier: operator,
+          code: _text(fields, 'code', max: 8),
+          reason: reason,
+          amount: terms.amount,
+          type: terms.type,
+          percent: terms.percent,
+          refund: terms.refund,
+        );
+      } on OfflineRefusal catch (e) {
+        throw AdapterFailure('autorisation_refusee', e.message);
+      }
+    }
     final approvers = await engine.restoApprovers(operator, terms.amount, type: terms.type, percent: terms.percent, refund: terms.refund);
     final approver = approvers.where((o) => '${o.id}' == '${fields['approver_id']}').firstOrNull ??
         (throw const AdapterFailure('autorisation_refusee', 'Ce responsable ne peut pas autoriser ce geste (droit, code ou plafonds).'));

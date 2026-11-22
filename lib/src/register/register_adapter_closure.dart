@@ -42,7 +42,12 @@ extension _ClosureCommands on LocalRegisterAdapter {
 
     final ClosureDocument? document;
     try {
-      document = await engine.closureDocument(kind, version, duplicate: duplicate);
+      // Z de journée : `operation_id` (rendu par closeDay) vise cette journée précise, même après la suivante.
+      final day = args['operation_id'];
+      if (day != null && (day is! String || !CaisseEngine.uuidPattern.hasMatch(day))) throw const AdapterFailure('argument_invalide', 'Argument « operation_id » invalide.');
+      document = kind == ZKind.terminalDay && day is String
+          ? await engine.dayClosureDocument(day, version, duplicate: duplicate)
+          : await engine.closureDocument(kind, version, duplicate: duplicate);
     } on ClosureUnavailable catch (e) {
       throw AdapterFailure('document_absent', e.message);
     }

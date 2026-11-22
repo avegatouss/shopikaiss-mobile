@@ -544,7 +544,6 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     }
     final code = TextEditingController();
     final reason = TextEditingController();
-    var approver = approvers.first;
     var busy = false;
     String? error;
     return showDialog<SaleApproval>(
@@ -558,13 +557,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Remise au-delà du seuil de ${cashier.name}.'),
-                DropdownButton<Operator>(
-                  value: approver,
-                  isExpanded: true,
-                  items: [for (final o in approvers) DropdownMenuItem(value: o, child: Text(o.name))],
-                  onChanged: (o) => setLocal(() => approver = o ?? approver),
-                ),
+                Text('Remise au-delà du seuil de ${cashier.name} : un responsable saisit son code.'),
                 TextField(
                   controller: code,
                   autofocus: true,
@@ -585,9 +578,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   : () async {
                       setLocal(() => busy = true);
                       try {
-                        final approval = await _engine.authorizeDiscount(
+                        final approval = await _engine.authorizeDiscountByCode(
                           cashier: cashier,
-                          approver: approver,
                           code: code.text.trim(),
                           reason: reason.text,
                           lines: lines,
@@ -3150,7 +3142,7 @@ class _OperatorTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = operatorColor(operator.id);
+    final color = Color(operatorArgb(operator.id));
     return SizedBox(
       width: 132,
       height: 112,
@@ -3260,7 +3252,7 @@ class _OperatorLoginState extends State<_OperatorLogin> {
           children: [
             CircleAvatar(
               radius: 30,
-              backgroundColor: operatorColor(_selected!.id),
+              backgroundColor: Color(operatorArgb(_selected!.id)),
               child: Text(operatorInitials(_selected!.name), style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
             ),
             const SizedBox(height: 8),
@@ -3291,7 +3283,7 @@ class _OperatorLoginState extends State<_OperatorLogin> {
               key: const ValueKey('login-submit'),
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(56),
-                backgroundColor: operatorColor(_selected!.id),
+                backgroundColor: Color(operatorArgb(_selected!.id)),
                 foregroundColor: Colors.white,
                 textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),

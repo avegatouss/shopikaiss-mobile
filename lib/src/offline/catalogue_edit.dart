@@ -24,7 +24,7 @@ class NewProduct {
     this.purchasePrice,
     this.wholesalePrice,
     this.wholesaleMin,
-    this.unlimitedStock = false,
+    this.unlimitedStock = true,
   });
 
   final String name;

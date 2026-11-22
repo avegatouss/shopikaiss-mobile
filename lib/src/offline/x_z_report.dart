@@ -1793,7 +1793,8 @@ class ClosureDocument {
 /// Document [kind] ([ZKind.preX], [ZKind.session], [ZKind.preZ]) en version [version], calculé sans réseau. Le pré-Z
 /// est celui de la journée quand `z.journee` est connue ([journeyPreZModel]), sinon celui de ce terminal ([dayZModel]).
 /// Lève [ClosureUnavailable] s'il n'y a pas de session à imprimer.
-ClosureDocument buildClosureDocument(ClosureFacts facts, ZContext context, {required String kind, required String version, required DateTime now, bool duplicate = false}) {
+ClosureDocument buildClosureDocument(ClosureFacts facts, ZContext context,
+    {required String kind, required String version, required DateTime now, bool duplicate = false, String? dayClosureUuid}) {
   Map<String, dynamic> model;
   Map<String, dynamic>? edition;
   switch (kind) {
@@ -1814,7 +1815,8 @@ ClosureDocument buildClosureDocument(ClosureFacts facts, ZContext context, {requ
         };
       }
     case ZKind.terminalDay:
-      final closure = facts.dayClosures.lastOrNull ?? (throw const ClosureUnavailable('Aucun Z de journée sur ce terminal.'));
+      final closure = (dayClosureUuid == null ? facts.dayClosures.lastOrNull : facts.dayClosures.where((d) => d['uuid'] == dayClosureUuid).firstOrNull) ??
+          (throw ClosureUnavailable(dayClosureUuid == null ? 'Aucun Z de journée sur ce terminal.' : 'Z de journée introuvable sur ce terminal.'));
       final content = closure['contenu'] as Map;
       model = terminalDayZModel(facts, context, facts.sessionsOfDay(closure),
           day: content['jour'] as String, now: now, closedAt: _date(closure['cree_le']), duplicate: duplicate);

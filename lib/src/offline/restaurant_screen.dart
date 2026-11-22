@@ -481,8 +481,8 @@ class _SentCancelDialogState extends State<_SentCancelDialog> {
   final _reason = TextEditingController();
   final _code = TextEditingController();
   late int _quantity = widget.maxQuantity == null ? 0 : (widget.maxQuantity! < Decimal6.scale ? widget.maxQuantity! : Decimal6.scale);
+  /// Responsables qui pourraient autoriser (pour dire s'il en existe) ; le code seul désigne lequel.
   List<Operator>? _approvers;
-  Operator? _approver;
   String? _error;
   bool _busy = false;
 
@@ -507,7 +507,6 @@ class _SentCancelDialogState extends State<_SentCancelDialog> {
     if (!mounted) return;
     setState(() {
       _approvers = list;
-      if (!list.any((o) => o.id == _approver?.id)) _approver = list.firstOrNull;
     });
   }
 
@@ -516,11 +515,11 @@ class _SentCancelDialogState extends State<_SentCancelDialog> {
     if (reason.length < 3) return setState(() => _error = 'Indiquez le motif (3 caractères au moins).');
     RestoApproval? approval;
     if (_needsApproval) {
-      final approver = _approver;
-      if (approver == null) return setState(() => _error = 'Aucun responsable de ce terminal ne peut autoriser cette annulation.');
+      if (_approvers?.isEmpty ?? true) return setState(() => _error = 'Aucun responsable de ce terminal ne peut autoriser cette annulation.');
       setState(() => _busy = true);
       try {
-        approval = await widget.engine.restoAuthorize(cashier: widget.operator, approver: approver, code: _code.text.trim(), reason: reason, amount: widget.amountOf(_quantity));
+        // Code responsable seul : le responsable est reconnu par son code, sans liste.
+        approval = await widget.engine.restoAuthorizeByCode(cashier: widget.operator, code: _code.text.trim(), reason: reason, amount: widget.amountOf(_quantity));
       } on OfflineRefusal catch (e) {
         _code.clear();
         return setState(() {
@@ -580,12 +579,6 @@ class _SentCancelDialogState extends State<_SentCancelDialog> {
                 else if (approvers.isEmpty)
                   const Padding(padding: EdgeInsets.only(top: 8), child: Text('Aucun responsable de ce terminal ne peut autoriser cette annulation.', style: TextStyle(color: Colors.red)))
                 else ...[
-                  DropdownButtonFormField<int>(
-                    initialValue: _approver?.id,
-                    decoration: const InputDecoration(labelText: 'Responsable'),
-                    items: [for (final o in approvers) DropdownMenuItem(value: o.id, child: Text(o.name))],
-                    onChanged: (id) => setState(() => _approver = approvers.firstWhere((o) => o.id == id)),
-                  ),
                   TextField(
                     controller: _code,
                     obscureText: true,
@@ -665,8 +658,8 @@ class _GestureDialogState extends State<_GestureDialog> {
   final _reason = TextEditingController();
   final _code = TextEditingController();
   bool _percent = false;
+  /// Responsables qui pourraient autoriser (pour dire s'il en existe) ; le code seul désigne lequel.
   List<Operator>? _approvers;
-  Operator? _approver;
   String? _error;
   bool _busy = false;
 
@@ -712,7 +705,6 @@ class _GestureDialogState extends State<_GestureDialog> {
     if (!mounted) return;
     setState(() {
       _approvers = list;
-      if (!list.any((o) => o.id == _approver?.id)) _approver = list.firstOrNull;
     });
   }
 
@@ -728,13 +720,11 @@ class _GestureDialogState extends State<_GestureDialog> {
     if (reason.length < 3) return setState(() => _error = 'Indiquez le motif (3 caractères au moins).');
     RestoApproval? approval;
     if (_needsApproval) {
-      final approver = _approver;
-      if (approver == null) return setState(() => _error = 'Aucun responsable de ce terminal ne peut autoriser ce geste.');
+      if (_approvers?.isEmpty ?? true) return setState(() => _error = 'Aucun responsable de ce terminal ne peut autoriser ce geste.');
       setState(() => _busy = true);
       try {
-        approval = await widget.engine.restoAuthorize(
+        approval = await widget.engine.restoAuthorizeByCode(
           cashier: widget.operator,
-          approver: approver,
           code: _code.text.trim(),
           reason: reason,
           amount: _amount,
@@ -805,12 +795,6 @@ class _GestureDialogState extends State<_GestureDialog> {
                 else if (approvers.isEmpty)
                   const Padding(padding: EdgeInsets.only(top: 8), child: Text('Aucun responsable de ce terminal ne peut autoriser ce geste.', style: TextStyle(color: Colors.red)))
                 else ...[
-                  DropdownButtonFormField<int>(
-                    initialValue: _approver?.id,
-                    decoration: const InputDecoration(labelText: 'Responsable'),
-                    items: [for (final o in approvers) DropdownMenuItem(value: o.id, child: Text(o.name))],
-                    onChanged: (id) => setState(() => _approver = approvers.firstWhere((o) => o.id == id)),
-                  ),
                   TextField(
                     controller: _code,
                     obscureText: true,

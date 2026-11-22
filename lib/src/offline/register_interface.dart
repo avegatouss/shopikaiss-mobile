@@ -4,7 +4,6 @@
 library;
 
 import 'dart:convert';
-import 'dart:ui' show Color;
 
 /// Interface résolue pour ce poste : entité publiée `interface_caisse` (clé = uuid du terminal), ou réglage local quand
 /// le responsable ne l'a pas verrouillée, ou défauts (écran d'avant le lot 13).
@@ -128,20 +127,21 @@ class RegisterInterface {
 }
 
 /// Couleur stable d'un opérateur pour les tuiles de connexion (lot 13, hors contrat) : calculée depuis son identifiant,
-/// palette sombre au contraste AA avec un texte blanc.
-Color operatorColor(int operatorId) => operatorPalette[operatorId.abs() % operatorPalette.length];
+/// palette sombre au contraste AA avec un texte blanc. Entier ARGB (`Color(operatorArgb(id))` côté écran) : ce fichier
+/// est importé par le moteur, compilé pour l'hôte Windows sans Flutter (pas de `dart:ui`).
+int operatorArgb(int operatorId) => operatorPalette[operatorId.abs() % operatorPalette.length];
 
-const operatorPalette = [
-  Color(0xFF1565C0), // bleu
-  Color(0xFF2E7D32), // vert
-  Color(0xFF6A1B9A), // violet
-  Color(0xFFC62828), // rouge
-  Color(0xFF00695C), // sarcelle
-  Color(0xFFAD1457), // framboise
-  Color(0xFF4E342E), // brun
-  Color(0xFF283593), // indigo
-  Color(0xFFBF360C), // orange brûlé
-  Color(0xFF37474F), // ardoise
+const operatorPalette = <int>[
+  0xFF1565C0, // bleu
+  0xFF2E7D32, // vert
+  0xFF6A1B9A, // violet
+  0xFFC62828, // rouge
+  0xFF00695C, // sarcelle
+  0xFFAD1457, // framboise
+  0xFF4E342E, // brun
+  0xFF283593, // indigo
+  0xFFBF360C, // orange brûlé
+  0xFF37474F, // ardoise
 ];
 
 /// Initiales d'un nom (« Awa Koné » → « AK »), pour les tuiles de connexion.

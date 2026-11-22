@@ -107,6 +107,9 @@ class _ApprovalEngine extends OfflineEngine {
   Future<bool> checkApprovalCode(Operator approver, String code) async => code == '12345678';
 
   @override
+  Future<bool> approvalCodeMatches(Operator approver, String code) async => code == '12345678';
+
+  @override
   Future<OfflineOperation> recordSale(
     List<CartLine> lines,
     List<CartPayment> payments,
@@ -1074,7 +1077,7 @@ void main() {
       await tester.enterText(find.widgetWithText(TextField, 'Motif de la remise'), 'Client fidèle');
       await tester.tap(find.text('Autoriser'));
       await tester.pumpAndSettle();
-      expect(find.text('Code d’autorisation incorrect.'), findsOneWidget);
+      expect(find.text('Code responsable inconnu.'), findsOneWidget, reason: 'code seul : reconnu parmi les codes publiés');
       await tester.enterText(find.widgetWithText(TextField, 'Code du responsable (8 chiffres)'), '12345678');
       await tester.tap(find.text('Autoriser'));
       await tester.pumpAndSettle();

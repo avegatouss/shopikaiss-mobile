@@ -193,6 +193,11 @@ void main() {
     expect(again['operation_id'], closed['operation_id'], reason: 'idempotent');
     final document = await adapter.execute('closureDocument', {'kind': ZKind.terminalDay, 'version': ZVersion.short, 'duplicate': false}, null);
     expect(document['lines'], isNotEmpty);
+    final targeted = await adapter.execute('closureDocument', {'kind': ZKind.terminalDay, 'version': ZVersion.short, 'duplicate': false, 'operation_id': closed['operation_id']}, null);
+    expect(targeted['lines'], document['lines'], reason: 'Z de journée visé par son identifiant');
+    await expectLater(adapter.execute('closureDocument', {'kind': ZKind.terminalDay, 'version': ZVersion.short, 'operation_id': 'abcdef00-0000-4000-8000-0000000000ff'}, null),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'document_absent')));
+    expect(((await adapter.execute('status', {}, null))['register_interface'] as Map)['origine'], 'defaut');
     await adapter.close();
   });
 }

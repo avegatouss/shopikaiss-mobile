@@ -1692,7 +1692,8 @@ class V2Engine extends CaisseEngine {
       'prix_achat': purchase,
       'prix_gros': wholesale,
       'gros_quantite_min': minimum,
-      'stock_illimite': product.unlimitedStock,
+      // Produit créé sur le poste : toujours en stock illimité (décision du responsable, 22/11 ; le serveur l'impose).
+      'stock_illimite': true,
     });
     return _productAfterWrite(uuid);
   });

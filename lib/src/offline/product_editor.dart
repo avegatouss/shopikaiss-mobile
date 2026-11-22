@@ -34,7 +34,6 @@ class _ProductEditorState extends State<_ProductEditor> {
     text: widget.existing?.wholesaleMin == null ? '' : Decimal6.label(Decimal6.parse(widget.existing!.wholesaleMin!)),
   );
   late String? _category = widget.existing?.categoryUuid;
-  late bool _unlimited = widget.existing?.unlimitedStock ?? true;
   String? _error;
   bool _saving = false;
 
@@ -100,7 +99,7 @@ class _ProductEditorState extends State<_ProductEditor> {
             purchasePrice: _amount(_purchase),
             wholesalePrice: _amount(_wholesale),
             wholesaleMin: _minimum.text,
-            unlimitedStock: _unlimited,
+            unlimitedStock: true,
           ),
         );
       }
@@ -176,12 +175,11 @@ class _ProductEditorState extends State<_ProductEditor> {
               ],
             ),
             if (!_editing)
-              SwitchListTile(
+              const ListTile(
                 contentPadding: EdgeInsets.zero,
-                value: _unlimited,
-                onChanged: (v) => setState(() => _unlimited = v),
-                title: const Text('Stock illimité'),
-                subtitle: Text(_unlimited ? 'Pas de suivi de stock.' : 'Stock suivi, à 0 : la vente suit la règle de survente de la boutique.'),
+                leading: Icon(Icons.all_inclusive),
+                title: Text('Stock illimité'),
+                subtitle: Text('Un produit créé sur le poste n’a pas de suivi de stock ; la boutique le règle ensuite au back-office.'),
               ),
             if (_error != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_error!, style: const TextStyle(color: Colors.red))),
           ],

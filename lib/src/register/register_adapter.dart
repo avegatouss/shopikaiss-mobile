@@ -68,7 +68,8 @@ class AdapterFailure implements Exception {
 /// client de passage. La vue donne `customer`.
 ///
 /// Remise au-delà du seuil du caissier : la vue donne `discount_approval` {required, approvers} ; `commitSale` reçoit
-/// alors `approval` {approver_id, code, reason}. Le code n'est jamais conservé.
+/// alors `approval` {code, reason} : le responsable est reconnu par son code seul (`approver_id` facultatif, ancien
+/// format). Le code n'est jamais conservé.
 ///
 /// Paniers en attente : un seul panier courant ; les autres sont suspendus, conservés sur le terminal et repris par
 /// leur identifiant. Un panier encaissé est consommé par la transaction de la vente (une seule vente par panier).
@@ -365,6 +366,8 @@ class LocalRegisterAdapter {
     'sync': engine.syncStatus.toJson(engine.now),
     'multiple_sessions': engine.multipleSessionsSupported,
     'business_day': await engine.businessDay(),
+    // Interface publiée pour ce terminal (2.1 lot 13), forme du contrat, sans les préférences locales d'Android.
+    'register_interface': engine.publishedInterface.toJson(),
   };
 
   Map<String, dynamic>? _sessionView() {
@@ -1181,7 +1184,7 @@ class LocalRegisterAdapter {
           purchasePrice: _optionalInt(args, 'purchase_price'),
           wholesalePrice: _optionalInt(args, 'wholesale_price'),
           wholesaleMin: _optionalString(args, 'wholesale_min'),
-          unlimitedStock: args['unlimited_stock'] == true,
+          unlimitedStock: true, // imposé : produit créé sur le poste toujours en stock illimité
         ),
         operationUuid: operationId,
       );
@@ -1812,6 +1815,20 @@ class LocalRegisterAdapter {
     final raw = args['approval'];
     if (raw is! Map) throw const AdapterFailure('autorisation_requise', 'Remise au-delà du seuil du caissier : autorisation d’un responsable requise.');
     final fields = raw.cast<String, dynamic>();
+    // Code responsable seul : aucun choix dans une liste.
+    if (fields['approver_id'] == null) {
+      try {
+        return await engine.authorizeDiscountByCode(
+          cashier: operator,
+          code: _text(fields, 'code', max: 8),
+          reason: _text(fields, 'reason', max: 500),
+          lines: lines,
+          globalDiscount: _draft.globalDiscount,
+        );
+      } on OfflineRefusal catch (e) {
+        throw AdapterFailure('autorisation_refusee', e.message);
+      }
+    }
     final approver = engine.approversFor(operator, lines, _draft.globalDiscount).where((o) => '${o.id}' == '${fields['approver_id']}').firstOrNull;
     if (approver == null) throw const AdapterFailure('autorisation_refusee', 'Ce responsable ne peut pas autoriser cette remise.');
     try {

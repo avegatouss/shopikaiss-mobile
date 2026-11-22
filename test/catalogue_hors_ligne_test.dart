@@ -532,7 +532,8 @@ void main() {
     );
     expect(e.snapshot!.byCode('6190000000888'), isNull);
     final savon = e.snapshot!.byCode('6190000000011')!.$1;
-    expect((await e.soldSinceSnapshot())[savon.id], BigInt.from(2000000), reason: 'vente non couverte écrite sous l’uuid local, comptée sur le Savon');
+    // Produit créé sur le poste : stock illimité imposé (22/11), donc aucun mouvement local à reporter sur le Savon.
+    expect((await e.soldSinceSnapshot())[savon.id], isNull, reason: 'stock illimité : pas de mouvement local');
     expect(e.snapshot!.byId(local.id)!.id, savon.id, reason: 'l’identifiant local mène au produit existant');
     final lines = (await adapter.execute('view', {}, null))['lines'] as List;
     expect((lines.single as Map)['name'], 'Savon', reason: 'la ligne du panier suit le rattachement au lieu de disparaître');

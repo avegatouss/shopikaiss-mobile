@@ -115,6 +115,24 @@ void main() {
     await adapter.close();
   });
 
+  test('code seul partout (remise, restaurant) : reconnu parmi tous les codes, habilitation vérifiée ensuite', () async {
+    serve();
+    final e = await engine();
+    Operator named(String name) => e.snapshot!.operators.firstWhere((o) => o.name == name);
+    expect((await e.identifyApprover('12345678', eligible: [named('Mariam')], notAllowed: 'ne peut pas.')).name, 'Mariam');
+    await expectLater(e.identifyApprover('87654321', eligible: [named('Mariam')], notAllowed: 'ne peut pas autoriser cette remise.'),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', 'Paul ne peut pas autoriser cette remise.')));
+    await expectLater(e.identifyApprover('11112222', eligible: [named('Mariam'), named('Paul')], notAllowed: '.'),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('plusieurs responsables'))));
+    await expectLater(e.identifyApprover('00000000', eligible: [named('Mariam')], notAllowed: '.'),
+        throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', 'Code responsable inconnu.')));
+    // Remise : sans responsable habilité (aucun approbateur_remise ici), le code ne suffit pas.
+    await expectLater(
+      e.authorizeDiscountByCode(cashier: awa(e), code: '12345678', reason: 'Client fidèle', lines: [CartLine(product: savon(e))], globalDiscount: 0),
+      throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Mariam ne peut pas autoriser cette remise'))),
+    );
+  });
+
   test('code responsable seul : un seul responsable reconnu ; inconnu compté ; doublon refusé', () async {
     serve();
     final e = await engine();
