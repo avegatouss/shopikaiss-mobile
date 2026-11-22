@@ -210,6 +210,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.productCreateCapability,
           CaisseV2Client.productEditCapability,
           CaisseV2Client.saleEditCapability,
+          CaisseV2Client.multipleSessionsCapability,
         ],
       ],
     );
@@ -270,6 +271,7 @@ class V2Engine extends CaisseEngine {
   Future<bool> probe() async {
     final client = _client;
     if (client == null || !paired) return false;
+    lastSyncAttempt = now;
     var ok = false;
     try {
       _state = await client.state();
@@ -299,6 +301,7 @@ class V2Engine extends CaisseEngine {
     final engine = _sync;
     if (engine == null || !paired || _syncing) return const SyncReport(reachable: false);
     _syncing = true;
+    lastSyncAttempt = now;
     notifyListeners();
     try {
       await _drainLegacy();
@@ -437,10 +440,7 @@ class V2Engine extends CaisseEngine {
     if (!s.rules.sessionOpening) throw const OfflineRefusal('L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.');
     if (sessionOpen) throw const OfflineRefusal('Une session est déjà ouverte sur ce terminal.');
     if (float < 0) throw const OfflineRefusal('Fond de caisse invalide.');
-    final closing = await v2.read(V2Keys.closingOperation);
-    if (closing != null && (await v2.operation(closing))?['etat'] == V2OperationState.arbitration) {
-      throw const OfflineRefusal('La clôture précédente attend un arbitrage de la boutique : faites-la traiter avant d’ouvrir une session.');
-    }
+    if (await sessionOpeningBlocker() case final refusal?) throw OfflineRefusal(refusal);
     _requireRight(operator, 'ouverture_session', 'ouvrir une session');
     final uuid = _newUuid();
     final operation = await _record(uuid, 'ouverture_session', operator, (_) => {'fond': float});
@@ -1049,6 +1049,153 @@ class V2Engine extends CaisseEngine {
     return operation;
   });
 
+  // ------------------------------------------------------------------ Sessions locales séparées (2.1 lot 12)
+
+  /// Ouverture locale → session serveur (`details.session_serveur`), relue à chaque reconstruction.
+  Map<String, String> _serverSessions = const {};
+
+  bool _sameSession(String? a, String? b) => a != null && b != null && (a == b || _serverSessions[a] == b || _serverSessions[b] == a);
+
+  @override
+  bool get multipleSessionsSupported => v2.contract21 && _serverOffers(CaisseV2Client.multipleSessionsCapability);
+
+  @override
+  int get localSessionsMax => ((_shopRules?['sessions_locales'] as Map?)?['max'] as int?) ?? 20;
+
+  @override
+  int get syncIntervalSeconds => ((_state?['delais'] as Map?)?['changements_secondes'] as int?) ?? 60;
+
+  @override
+  String get today => PassDay.of(now, _shopRules?['fuseau'] as String?);
+
+  /// La session serveur [serverSession] a-t-elle une clôture de ce terminal pas encore reflétée ou non intégrée ?
+  /// Une clôture désigne sa session par l'uuid local de l'ouverture ou par celui du serveur.
+  Future<bool> _closedLocallyMultiple(String serverSession) async {
+    for (final row in await v2.operationsOfType('cloture_session')) {
+      final state = row['etat'] as String;
+      if (state == V2OperationState.rejected || state == V2OperationState.resolved) continue;
+      final session = ((row['operation'] as Map)['contenu'] as Map)['session_uuid'] as String?;
+      if (session == null) continue;
+      if (_sameSession(session, serverSession)) return true;
+      // Ouverture intégrée avant que le serveur ne rende sa correspondance : prudence, la session est close ici.
+      if (state != V2OperationState.integrated && !_serverSessions.containsKey(session) && (await v2.operation(session))?['etat'] == V2OperationState.integrated) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @override
+  Future<List<LocalSession>> localSessions() async {
+    if (!paired) return const [];
+    final list = <LocalSession>[];
+    LocalSession? find(String? uuid) => list.where((s) => s.matches(uuid)).lastOrNull;
+    String? reason(Map row) {
+      final raison = row['raison'] as Map?;
+      return waitingReasonLabel(raison?['code'] as String?) ?? raison?['message'] as String?;
+    }
+
+    for (final row in (await v2.operationRows()).reversed) {
+      final operation = row['operation'] as Map;
+      final content = operation['contenu'] as Map;
+      final state = row['etat'] as String;
+      switch (operation['type']) {
+        case 'ouverture_session':
+          final uuid = operation['uuid'] as String;
+          list.add(LocalSession(
+            uuid: uuid,
+            serverUuid: _serverSessions[uuid],
+            openedAt: DateTime.tryParse('${operation['cree_le']}')?.toLocal(),
+            openerId: int.tryParse('${operation['operateur_id']}'),
+            openingState: state,
+            openingReason: reason(row),
+          ));
+        case 'cloture_session':
+          final session = content['session_uuid'] as String;
+          final target = find(session) ?? LocalSession(uuid: session);
+          if (!list.contains(target)) list.add(target);
+          target
+            ..closingUuid = operation['uuid'] as String
+            ..closingSessionUuid = session
+            ..closedAt = DateTime.tryParse('${operation['cree_le']}')?.toLocal()
+            ..closingState = state
+            ..closingReason = reason(row);
+        case 'cloture_journee':
+          if (state == V2OperationState.rejected) continue;
+          for (final uuid in (content['sessions'] as List).cast<String>()) {
+            find(uuid)
+              ?..dayClosureUuid = operation['uuid'] as String
+              ..day = content['jour'] as String;
+          }
+      }
+    }
+    return list;
+  }
+
+  @override
+  Future<String?> sessionOpeningBlocker() async {
+    if (!multipleSessionsSupported) {
+      // Sans la capacité, le serveur fusionnerait la nouvelle session dans celle restée ouverte : refus maintenu.
+      final closing = await v2.read(V2Keys.closingOperation);
+      if (closing != null && (await v2.operation(closing))?['etat'] == V2OperationState.arbitration) {
+        return 'La clôture précédente attend un arbitrage de la boutique : faites-la traiter avant d’ouvrir une session.';
+      }
+      return null;
+    }
+    final waiting = (await localSessions()).where((s) => s.closed && s.awaitingServer).length;
+    if (waiting >= localSessionsMax) return 'Connectez le poste pour synchroniser : $waiting sessions attendent la boutique.';
+    return null;
+  }
+
+  @override
+  Future<String> businessDay() async {
+    final today = this.today;
+    final last = (await v2.operationsOfType('cloture_journee'))
+        .where((r) => r['etat'] != V2OperationState.rejected)
+        .map((r) => ((r['operation'] as Map)['contenu'] as Map)['jour'] as String)
+        .fold<String?>(null, (max, d) => max == null || d.compareTo(max) > 0 ? d : max);
+    return last != null && last.compareTo(today) >= 0 ? nextDay(last) : today;
+  }
+
+  @override
+  Future<String?> dayClosureBlocker(Operator? operator) async {
+    if (!multipleSessionsSupported) return 'Clôture de journée non disponible sur ce terminal : clôturez la journée en ligne.';
+    if (operator == null) return 'Identifiez le caissier.';
+    if (!hasRight(operator, 'caisse_cloturer')) return '${operator.name} n’a pas le droit de clôturer.';
+    if (sessionOpen) return 'Clôturez d’abord la session en cours.';
+    final facts = await closureFacts();
+    if (facts == null || facts.sessionsWithoutDay.isEmpty) return 'Aucune session clôturée depuis le dernier Z de journée.';
+    return null;
+  }
+
+  @override
+  Future<OfflineOperation> closeDay(Operator operator, {String? operationUuid}) => serialized(() async {
+    if (operationUuid != null) {
+      if (!CaisseEngine.uuidPattern.hasMatch(operationUuid)) throw const OfflineRefusal('Identifiant d’opération invalide (UUID en minuscules attendu).');
+      final existing = await v2.operation(operationUuid);
+      if (existing != null) return _view(existing);
+    }
+    if (await dayClosureBlocker(operator) case final refusal?) throw OfflineRefusal(refusal);
+    final facts = (await closureFacts())!;
+    final context = ZContext.of(snapshot!, publishedCashCodes: await publishedCashCodes());
+    final sessions = facts.sessionsWithoutDay;
+    final detail = terminalDayDetail(facts, context, sessions);
+    final summary = detail['summary'] as Map;
+    final contract = zLocalSupported ? detailToContract(detail) : null;
+    final day = await businessDay();
+    final operation = await _record(operationUuid ?? _newUuid(), 'cloture_journee', operator, (_) => {
+      'jour': day,
+      'sessions': {for (final s in sessions) '${(s.closure!['contenu'] as Map)['session_uuid']}'}.toList(),
+      'totaux': terminalDayTotals(sessions, context),
+      'tickets': summary['tickets'] as int,
+      'chiffre_affaires': summary['revenue'] as int,
+      'detail': contract != null && v2.validator.validate(contract, r'donnees-z-local-1.json#/$defs/detail_cloture').isEmpty ? contract : null,
+    });
+    await _rebuild();
+    await _afterWrite();
+    return operation;
+  });
+
   /// Lot Z local accordé par le serveur et reçu dans la projection (`z.local` avec `contrat.2_1`).
   bool get zLocalSupported => v2.zLocal && _serverOffers(CaisseV2Client.zLocalCapability);
 
@@ -1114,7 +1261,7 @@ class V2Engine extends CaisseEngine {
     if (!sale.isSale) return 'Seul un ticket de vente se modifie.';
     if (sale.status == OperationStatus.refused) return 'Ce ticket a été refusé par le serveur : il ne se modifie pas.';
     final content = sale.content;
-    if (content['session_uuid'] != _sessionUuid || !sessionOpen) return 'Seul un ticket de la session ouverte se modifie.';
+    if (!_sameSession(content['session_uuid'] as String?, _sessionUuid) || !sessionOpen) return 'Seul un ticket de la session ouverte se modifie.';
     final window = (_shopRules?['modification_ticket'] as Map?)?['fenetre'] ?? 'same_day';
     final fuseau = _shopRules?['fuseau'] as String?;
     if (window == 'same_day' && PassDay.of(sale.date, fuseau) != PassDay.of(now, fuseau)) return 'Seul un ticket du jour se modifie.';
@@ -1613,7 +1760,7 @@ class V2Engine extends CaisseEngine {
       if (product?.category case final String c when c.isNotEmpty) categories[e.key] = c;
       names[e.key] = product?.name ?? '${e.value['nom'] ?? ''}';
     }
-    final sessions = sessionsFromOperations(operations, openSession: open);
+    final sessions = sessionsFromOperations(operations, openSession: open, aliases: {for (final e in _serverSessions.entries) e.value: e.key});
     for (final s in sessions) {
       if (s.closure != null) s.closureState = states['${s.closure!['uuid']}'];
     }
@@ -1632,6 +1779,7 @@ class V2Engine extends CaisseEngine {
       zDay: day,
       terminalUuid: terminal,
       journalStale: await _journalStale(),
+      dayClosures: [for (final o in operations) if (o['type'] == 'cloture_journee') o],
     );
   }
 
@@ -2307,6 +2455,7 @@ class V2Engine extends CaisseEngine {
   /// Catalogue présenté, reconstruit depuis la projection (après chaque synchronisation et au chargement).
   Future<void> _rebuild() async {
     _customers = null;
+    _serverSessions = Map<String, String>.from(jsonDecode(await v2.read(V2Keys.serverSessions) ?? '{}') as Map);
     _blocked = await v2.read(V2Keys.blocked);
     final window = (await v2.read(V2Keys.imageWindow))?.split('-');
     _imageWindow = window == null ? null : (start: window.first, end: window.last);
@@ -2599,6 +2748,7 @@ class V2Engine extends CaisseEngine {
 
   /// Clôture émise par ce terminal que le serveur n'a pas encore reflétée : la session ne se rouvre pas d'elle-même.
   Future<bool> _closedLocally(String serverSession) async {
+    if (multipleSessionsSupported) return _closedLocallyMultiple(serverSession);
     final uuid = await v2.read(V2Keys.closingOperation);
     final row = uuid == null ? null : await v2.operation(uuid);
     final state = row?['etat'] as String?;
@@ -2620,6 +2770,7 @@ class V2Engine extends CaisseEngine {
     pendingSales = sum((t, s) => t == 'vente' && V2OperationState.unsent.contains(s));
     refusedCount = sum((_, s) => s == V2OperationState.rejected);
     localArbitrationCount = sum((_, s) => s == V2OperationState.arbitration);
+    waitingCount = await v2.waitingCount();
   }
 
   Future<void> _contact() async {

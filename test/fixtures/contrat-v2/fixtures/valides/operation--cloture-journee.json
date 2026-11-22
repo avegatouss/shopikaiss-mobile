@@ -1,0 +1,39 @@
+{
+    "uuid": "a0000000-0000-4000-8000-000000000412",
+    "type": "cloture_journee",
+    "appareil": {
+        "uuid": "0d4c3b2a-1f0e-4d9c-8b7a-6a5b4c3d2e1f",
+        "epoque": 1
+    },
+    "sequence": 58,
+    "cree_le": "2026-11-22T21:30:00Z",
+    "operateur_id": "7",
+    "versions": {
+        "politiques": "12",
+        "calcul": "1",
+        "curseur_catalogue": "c-000100"
+    },
+    "contenu": {
+        "jour": "2026-11-22",
+        "sessions": [
+            "5e55a0d1-0000-4000-8000-000000000001",
+            "5e55a0d1-0000-4000-8000-000000000002"
+        ],
+        "totaux": [
+            {
+                "moyen": "especes",
+                "theorique": 84500,
+                "compte": 84000
+            },
+            {
+                "moyen": "wave",
+                "theorique": 12000,
+                "compte": null
+            }
+        ],
+        "tickets": 37,
+        "chiffre_affaires": 96500,
+        "detail": null
+    },
+    "empreinte": "4cc2d43b70c68c584d4b5f9af270e142eb83ea7a7187cc1019d04f124d22886b"
+}

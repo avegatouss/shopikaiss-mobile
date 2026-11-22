@@ -1,0 +1,13 @@
+{
+    "operation_uuid": "a0000000-0000-4000-8000-000000000412",
+    "etat": "integree",
+    "version_etat": "1763847000000",
+    "raison": null,
+    "details": {
+        "journee": {
+            "jour": "2026-11-22",
+            "sessions": 2,
+            "ecart": 0
+        }
+    }
+}

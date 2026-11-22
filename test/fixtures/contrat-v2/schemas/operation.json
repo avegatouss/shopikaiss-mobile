@@ -54,6 +54,9 @@
         },
         {
             "$ref": "#/$defs/vente_modification"
+        },
+        {
+            "$ref": "#/$defs/cloture_journee"
         }
     ],
     "$defs": {
@@ -4422,6 +4425,129 @@
                 },
                 "contenu": {
                     "$ref": "#/$defs/contenu_vente_modification"
+                }
+            }
+        },
+        "contenu_cloture_journee": {
+            "type": "object",
+            "required": [
+                "jour",
+                "sessions",
+                "totaux",
+                "tickets",
+                "chiffre_affaires"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Jour d'exploitation clos (fuseau de la boutique, boutique.regles.fuseau)."
+                },
+                "sessions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    },
+                    "description": "Sessions du terminal réunies sur ce Z de journée : uuid de l'ouverture_session locale ou de la session serveur, chacune clôturée par une cloture_session de ce terminal émise avant cette opération."
+                },
+                "totaux": {
+                    "type": "array",
+                    "maxItems": 30,
+                    "description": "Totaux par moyen imprimés sur le Z de journée du terminal (somme de ses Z de session).",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "moyen",
+                            "theorique",
+                            "compte"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "moyen": {
+                                "$ref": "commun.json#/$defs/code"
+                            },
+                            "theorique": {
+                                "$ref": "commun.json#/$defs/montant_signe"
+                            },
+                            "compte": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "commun.json#/$defs/montant"
+                                    }
+                                ],
+                                "description": "null : moyen non compté."
+                            }
+                        }
+                    }
+                },
+                "tickets": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "chiffre_affaires": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "detail": {
+                    "description": "Facultatif : bloc de détail imprimé (DetailCloture, version 1), conservé pour le duplicata.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "donnees-z-local-1.json#/$defs/detail_cloture"
+                        }
+                    ]
+                }
+            }
+        },
+        "cloture_journee": {
+            "description": "Capacité session.multiple (2.1 lot 12) : clôture de la journée de caisse du terminal, hors connexion. Le terminal imprime son Z de journée, qui réunit ses sessions clôturées du jour, puis émet cette opération. Intégrée quand toutes les sessions listées sont clôturées au serveur (sinon recue, raison journee.sessions_en_attente) ; totaux rapprochés du calcul du serveur, écart noté, jamais refusé. Idempotente par uuid.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "cloture_journee"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_cloture_journee"
                 }
             }
         }

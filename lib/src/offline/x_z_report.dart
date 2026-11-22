@@ -25,10 +25,14 @@ abstract final class ZKind {
   static const session = 'z-session';
   static const day = 'z-jour';
 
+  /// Z de journée du terminal (2.1 lot 12, `cloture_journee`) : ses sessions clôturées réunies en un document.
+  static const terminalDay = 'z-jour-terminal';
+
   /// Titres imprimés (`ModeleZ::TITRES`).
   static const titles = {
     session: 'Z — CLÔTURE DE SESSION',
     day: 'Z JOURNALIER',
+    terminalDay: 'Z DE JOURNÉE DU TERMINAL',
     preX: 'PRÉ-X — DOCUMENT PROVISOIRE, NON CLÔTURÉ',
     preZ: 'PRÉ-Z — DOCUMENT PROVISOIRE, NON CLÔTURÉ',
   };
@@ -109,9 +113,26 @@ class ClosureFacts {
     this.zDay,
     this.terminalUuid,
     this.journalStale = false,
+    this.dayClosures = const [],
   });
 
   final List<ClosureSession> sessions;
+
+  /// Z de journée émis par ce terminal (`cloture_journee`, 2.1 lot 12), opérations brutes dans l'ordre chronologique,
+  /// quarantaines exclues.
+  final List<Map> dayClosures;
+
+  /// Sessions reprises par [dayClosure] (uuid listé, local ou porté par la clôture).
+  List<ClosureSession> sessionsOfDay(Map dayClosure) {
+    final listed = {for (final u in (((dayClosure['contenu'] as Map)['sessions'] as List?) ?? const [])) '$u'};
+    return [for (final s in sessions) if (s.closed && (listed.contains(s.uuid) || listed.contains('${(s.closure!['contenu'] as Map)['session_uuid']}'))) s];
+  }
+
+  /// Sessions clôturées sur ce terminal et pas encore reprises par un Z de journée (clôture en quarantaine exclue).
+  List<ClosureSession> get sessionsWithoutDay {
+    final done = {for (final d in dayClosures) ...sessionsOfDay(d)};
+    return [for (final s in sessions) if (s.closed && s.closureState != 'rejet_protocole' && !done.contains(s)) s];
+  }
 
   /// Session ouverte du terminal (null : aucune).
   final String? openSessionUuid;
@@ -150,7 +171,14 @@ DateTime? _date(Object? raw) => raw is String ? DateTime.tryParse(raw)?.toLocal(
 /// Découpe les opérations du terminal (ordre chronologique, opérations rejetées exclues) en sessions : une ouverture ou
 /// une vente d'une autre session commence une session, une clôture la termine. [openSession] : session ouverte du
 /// terminal (`session_uuid`, `operateur_id`, `ouverte_le`), ajoutée vide si aucune opération ne la porte encore.
-List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSession}) {
+List<ClosureSession> sessionsFromOperations(List<Map> operations, {Map? openSession, Map<String, String> aliases = const {}}) {
+  if (aliases.isNotEmpty) {
+    operations = [
+      for (final o in operations)
+        if (aliases[((o['contenu'] as Map?) ?? const {})['session_uuid']] case final local?) {...o, 'contenu': {...(o['contenu'] as Map), 'session_uuid': local}} else o,
+    ];
+    if (aliases[openSession?['session_uuid']] case final local?) openSession = {...openSession!, 'session_uuid': local};
+  }
   final sessions = <ClosureSession>[];
   ClosureSession? current;
   ClosureSession start({String? uuid, DateTime? at, int? opener, int? float}) {
@@ -823,6 +851,94 @@ Map<String, dynamic> dayZModel(ClosureFacts facts, ZContext context, {required D
   }, mentions: [
     if (open.isNotEmpty)
       '${open.length} session(s) encore ouverte(s), non comptée(s) ici : ${[for (final s in open) '${[context.terminalName, context.operatorName(s.openerId)].where((t) => t.isNotEmpty).join(' · ')} depuis le ${zDate(s.openedAt)}'].join(', ')}.',
+    'Ce terminal seulement : le Z journalier de la boutique regroupe tous les postes.',
+    _localMention,
+  ]);
+}
+
+/// Totaux par moyen du Z de journée du terminal (`cloture_journee.totaux`) : théorique et compté sommés sur ses
+/// sessions. Espèces : attendu (fond compris) et compté ; autres moyens : encaissé et comptage déclaré (null si aucun).
+List<Map<String, dynamic>> terminalDayTotals(List<ClosureSession> sessions, ZContext context) {
+  final theoretical = <String, int>{};
+  final counted = <String, int?>{};
+  final cashCode = context.cashCode;
+  for (final s in sessions) {
+    final cash = _cash(s, context);
+    theoretical[cashCode] = (theoretical[cashCode] ?? 0) + (cash.expected ?? cash.salesCash - cash.refunds);
+    counted[cashCode] = (counted[cashCode] ?? 0) + (cash.counted ?? 0);
+    for (final sale in s.sales) {
+      for (final p in ((sale['contenu'] as Map)['paiements'] as List? ?? const []).cast<Map>()) {
+        final code = '${p['moyen']}';
+        if (context.cashCodes.contains(code) || !_counted(sale)) continue;
+        theoretical[code] = (theoretical[code] ?? 0) + _int(p['montant']) + _int(p['ecart_arrondi']);
+        counted.putIfAbsent(code, () => null);
+      }
+    }
+    for (final c in (((s.closure?['contenu'] as Map?)?['comptage'] as List?) ?? const []).cast<Map>()) {
+      final code = '${c['moyen']}';
+      theoretical.putIfAbsent(code, () => 0);
+      counted[code] = (counted[code] ?? 0) + _int(c['montant']);
+    }
+  }
+  return [for (final e in theoretical.entries) {'moyen': e.key, 'theorique': e.value, 'compte': counted[e.key]}];
+}
+
+/// Détail (format interne) du Z de journée du terminal : les détails figés des Z de session composés s'ils le sont
+/// tous, sinon recalculé depuis la file.
+Map<String, dynamic> terminalDayDetail(ClosureFacts facts, ZContext context, List<ClosureSession> sessions) {
+  final frozen = [for (final s in sessions) s.frozenDetail];
+  return frozen.isNotEmpty && frozen.every((d) => d != null)
+      ? composeDetails([for (final d in frozen) detailFromContract(d!)])
+      : closureDetail(facts, sessions, methodNames: context.methodNames, cashCode: context.cashCode);
+}
+
+/// Modèle du Z de journée du terminal ([ZKind.terminalDay]) : ses sessions clôturées du jour [day] (`AAAA-MM-JJ`),
+/// un bloc par session, espèces totalisées, contrôle des autres moyens et détail des ventes de toutes.
+Map<String, dynamic> terminalDayZModel(ClosureFacts facts, ZContext context, List<ClosureSession> sessions,
+    {required String day, required DateTime now, DateTime? closedAt, bool duplicate = false}) {
+  final header = <Map<String, dynamic>>[
+    if (context.terminalName.isNotEmpty) zValue('Terminal', context.terminalName),
+    zValue('Journée du', '${day.substring(8, 10)}/${day.substring(5, 7)}/${day.substring(0, 4)}'),
+    zValue('Sessions', '${sessions.length}'),
+    if (closedAt != null) zValue('Clôturée', zDate(closedAt)),
+  ];
+  int? total(int? Function(({int? float, int salesCash, int refunds, int? expected, int? counted, int? difference}) c) of) {
+    var sum = 0;
+    for (final s in sessions) {
+      final v = of(_cash(s, context));
+      if (v == null) return null;
+      sum += v;
+    }
+    return sum;
+  }
+
+  final blocks = [
+    for (final s in sessions)
+      {
+        'titre': 'Session ${context.operatorName(s.openerId)}'.trim(),
+        'lignes': [
+          zValue('Ouverture', zDate(s.openedAt)),
+          zValue('Clôture', zDate(s.closedAt)),
+          _moneyOrDash('Fond', _cash(s, context).float),
+          _moneyOrDash('Théorique', _cash(s, context).expected),
+          _moneyOrDash('Compté', _cash(s, context).counted),
+          _moneyOrDash('Écart', _cash(s, context).difference, bold: true, sign: true),
+        ],
+      },
+  ];
+  final difference = total((c) => c.difference);
+  final detail = terminalDayDetail(facts, context, sessions);
+  return _assemble(ZKind.terminalDay, context.storeName, null, header, detail, now: now, duplicate: duplicate, parts: {
+    'especes': [
+      _moneyOrDash('Fond', total((c) => c.float)),
+      _moneyOrDash('Théorique', total((c) => c.expected), bold: true),
+      _moneyOrDash('Compté', total((c) => c.counted), bold: true),
+      _moneyOrDash('Écart', difference, bold: true, sign: true),
+    ],
+    'ecart': difference,
+    'sessions': blocks,
+    'controle_moyens': _methodControl(sessions, context),
+  }, mentions: [
     'Ce terminal seulement : le Z journalier de la boutique regroupe tous les postes.',
     _localMention,
   ]);
@@ -1697,6 +1813,11 @@ ClosureDocument buildClosureDocument(ClosureFacts facts, ZContext context, {requ
           'partielle': true,
         };
       }
+    case ZKind.terminalDay:
+      final closure = facts.dayClosures.lastOrNull ?? (throw const ClosureUnavailable('Aucun Z de journée sur ce terminal.'));
+      final content = closure['contenu'] as Map;
+      model = terminalDayZModel(facts, context, facts.sessionsOfDay(closure),
+          day: content['jour'] as String, now: now, closedAt: _date(closure['cree_le']), duplicate: duplicate);
     case ZKind.preX:
       final session = facts.openSession ?? (throw const ClosureUnavailable('Aucune session ouverte sur ce terminal.'));
       model = sessionZModel(facts, session, context, kind: ZKind.preX, now: now);

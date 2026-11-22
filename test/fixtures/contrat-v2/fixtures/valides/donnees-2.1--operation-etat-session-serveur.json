@@ -1,0 +1,11 @@
+{
+    "operation_uuid": "a0000000-0000-4000-8000-000000000414",
+    "etat": "integree",
+    "version_etat": "1763845200000",
+    "raison": null,
+    "details": {
+        "session_serveur": {
+            "session_uuid": "5e55a0d1-0000-4000-8000-000000000031"
+        }
+    }
+}

@@ -283,6 +283,41 @@
                                     "description": "Utilisateur qui a arbitré ; null sans arbitrage."
                                 }
                             }
+                        },
+                        "session_serveur": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : session serveur d'une ouverture_session intégrée (id local ↔ id serveur).",
+                            "type": "object",
+                            "required": [
+                                "session_uuid"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "session_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            }
+                        },
+                        "journee": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : rapprochement d'une cloture_journee intégrée.",
+                            "type": "object",
+                            "required": [
+                                "jour",
+                                "sessions",
+                                "ecart"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "jour": {
+                                    "$ref": "commun.json#/$defs/jour"
+                                },
+                                "sessions": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "ecart": {
+                                    "type": "integer"
+                                }
+                            }
                         }
                     }
                 },

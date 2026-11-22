@@ -738,6 +738,22 @@
                                     "description": "same_day : le jour même (fuseau de la boutique) ET session de la vente ouverte ; open_session : tant que la session de la vente est ouverte. Jamais une session close."
                                 }
                             }
+                        },
+                        "sessions_locales": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : sessions locales séparées. Absente sans la capacité.",
+                            "type": "object",
+                            "required": [
+                                "max"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "max": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 50,
+                                    "description": "Sessions que le terminal peut ouvrir (et clôturer) tant que le serveur ne les a pas intégrées ; au-delà, il demande une connexion avant d'en ouvrir une autre (Paramètres › Caisse hors ligne, 20 par défaut)."
+                                }
+                            }
                         }
                     }
                 },
@@ -1094,6 +1110,42 @@
                                         }
                                     ],
                                     "description": "Utilisateur qui a arbitré ; null sans arbitrage."
+                                }
+                            }
+                        },
+                        "session_serveur": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : sur une ouverture_session intégrée, la session serveur qui lui correspond (id local ↔ id serveur). Une ouverture rattachée à une session déjà ouverte au serveur (ouverte au web) rend cette session.",
+                            "type": "object",
+                            "required": [
+                                "session_uuid"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "session_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            }
+                        },
+                        "journee": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : sur une cloture_journee intégrée, le rapprochement du serveur.",
+                            "type": "object",
+                            "required": [
+                                "jour",
+                                "sessions",
+                                "ecart"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "jour": {
+                                    "$ref": "commun.json#/$defs/jour"
+                                },
+                                "sessions": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "ecart": {
+                                    "type": "integer",
+                                    "description": "Somme des écarts (terminal − serveur) sur les théoriques par moyen ; 0 si le Z du terminal concorde."
                                 }
                             }
                         }

@@ -1,0 +1,10 @@
+{
+    "operation_uuid": "a0000000-0000-4000-8000-000000000415",
+    "etat": "recue",
+    "version_etat": "1763845100000",
+    "raison": {
+        "code": "session.cloture_precedente",
+        "message": "La clôture précédente de ce terminal attend un arbitrage de la boutique : cette session sera ouverte au serveur juste après.",
+        "details": null
+    }
+}

@@ -1043,6 +1043,32 @@
             "schema": "donnees-z-local-1.json#/$defs/detail_modifications",
             "valide": false,
             "erreur_attendue": "valeur hors liste"
+        },
+        {
+            "fichier": "valides/operation--cloture-journee.json",
+            "schema": "operation.json",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/operation--cloture-journee-sans-session.json",
+            "schema": "operation.json",
+            "valide": false,
+            "erreur_attendue": "au moins 1 élément(s)"
+        },
+        {
+            "fichier": "valides/donnees-2.1--operation-etat-session-serveur.json",
+            "schema": "donnees-2.1.json#/$defs/operation_etat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-2.1--operation-etat-journee.json",
+            "schema": "donnees-2.1.json#/$defs/operation_etat",
+            "valide": true
+        },
+        {
+            "fichier": "valides/donnees-2.1--operation-etat-attente-cloture-precedente.json",
+            "schema": "donnees-2.1.json#/$defs/operation_etat",
+            "valide": true
         }
     ]
 }

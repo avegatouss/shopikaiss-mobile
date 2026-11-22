@@ -23,6 +23,7 @@ import 'customer_display.dart';
 import 'catalogue_edit.dart';
 import 'engine.dart';
 import 'local_prices.dart';
+import 'local_sessions_ui.dart';
 import 'models.dart';
 import 'money.dart';
 import 'pass_sheet.dart';
@@ -310,7 +311,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     FocusManager.instance.addListener(_syncKeyboard);
     HardwareKeyboard.instance.addHandler(_onKey);
     final rules = _snapshot?.rules;
-    _probe = Timer.periodic(Duration(seconds: rules?.probeSeconds ?? 20), (_) => _tryOnline(automatic: true));
+    // Envoi automatique au rythme publié (`delais.changements_secondes`, 2.1 lot 12) : l'indicateur de synchro montre
+    // le compte à rebours ; une vérification toutes les 5 s suffit.
+    _probe = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (_engine.syncDue) _tryOnline(automatic: true);
+    });
     if (rules != null && !rules.pinRequired) _operator = _snapshot!.operatorById(_snapshot!.lastOperatorId);
     // TBC : un point de vente restaurant (Service de table ou Restaurant) ouvre directement son écran après la connexion.
     _floor = _engine.restaurant?.restaurantProfile ?? false;
@@ -743,6 +748,20 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                 subtitle: const Text('Duplicata du Z de la dernière session clôturée ici'),
                 onTap: () => Navigator.pop(context, 'duplicata'),
               ),
+              if (_engine.multipleSessionsSupported) ...[
+                ListTile(
+                  leading: const Icon(Icons.event_available_outlined),
+                  title: const Text('Réimprimer le Z de journée'),
+                  subtitle: const Text('Duplicata du dernier Z de journée de ce poste'),
+                  onTap: () => Navigator.pop(context, 'duplicata_jour'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.view_list_outlined),
+                  title: const Text('Sessions de ce poste'),
+                  subtitle: Text('État au serveur · plafond de ${_engine.localSessionsMax} avant synchronisation'),
+                  onTap: () => Navigator.pop(context, 'sessions'),
+                ),
+              ],
             ],
           ),
         ),
@@ -760,6 +779,68 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         if (await _askZVersion('Duplicata du dernier Z', 'Réimpression du Z de la dernière session clôturée sur ce terminal.') case final version?) {
           await _printClosure(ZKind.session, version, duplicate: true);
         }
+      case 'duplicata_jour':
+        await _reprintDay();
+      case 'sessions':
+        await showLocalSessions(context, _engine);
+    }
+  }
+
+  // ------------------------------------------------------------------ Journée de caisse du poste (2.1 lot 12)
+
+  /// « Synchroniser maintenant » de l'indicateur : envoi immédiat, sans quitter la caisse locale.
+  Future<void> _syncNow() => _tryOnline(automatic: true);
+
+  /// Z de journée du terminal : confirme les sessions reprises, émet `cloture_journee`, puis imprime le document.
+  Future<void> _closeDay() async {
+    final operator = _operator;
+    if (operator == null) return;
+    final blocker = await _engine.dayClosureBlocker(operator);
+    if (!mounted) return;
+    if (blocker != null) return _refuse(blocker, title: 'Clôture de la journée impossible');
+    final facts = await _engine.closureFacts();
+    final day = await _engine.businessDay();
+    if (!mounted || facts == null) return;
+    final sessions = facts.sessionsWithoutDay;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.event_available_outlined),
+        title: Text('Clôturer la journée du ${formatDayFr(day)}'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('${sessions.length} session(s) clôturée(s) sur ce poste seront réunies dans le Z de journée.'),
+            const SizedBox(height: 8),
+            for (final s in sessions)
+              Text('• ${_engine.snapshot?.operatorById(s.openerId)?.name ?? 'Session'} · ${zDate(s.openedAt)} → ${zDate(s.closedAt)}', style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            const Text('Une session ouverte ensuite comptera pour la journée suivante.'),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Clôturer la journée')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      await _engine.closeDay(operator, operationUuid: const Uuid().v4());
+    } on OfflineRefusal catch (e) {
+      return _refuse(e.message, title: 'Clôture de la journée impossible');
+    }
+    if (!mounted) return;
+    setState(() {});
+    unawaited(_tryOnline(automatic: true));
+    final version = await _askZVersion('Journée clôturée', 'Imprimer le Z de journée de ce poste ?', later: true);
+    if (version != null) await _printClosure(ZKind.terminalDay, version);
+  }
+
+  Future<void> _reprintDay() async {
+    if (await _askZVersion('Duplicata du Z de journée', 'Réimpression du dernier Z de journée de ce poste.') case final version?) {
+      await _printClosure(ZKind.terminalDay, version, duplicate: true);
     }
   }
 
@@ -1099,6 +1180,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   Future<void> _tryOnline({bool automatic = false}) async {
     if (_probing) return;
     _probing = true;
+    _engine.lastSyncAttempt = _engine.now;
     try {
       if (!await _engine.probe()) {
         if (!automatic) _toast('La boutique ne répond toujours pas.');
@@ -1182,7 +1264,14 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                           _floor = (_engine.restaurant?.restaurantProfile ?? false) && _cart.isEmpty;
                         })))
                     : !_engine.sessionOpen
-                    ? _scrollable(_SessionOpening(engine: _engine, operator: _operator!, onOpened: () => setState(() {})))
+                    ? _scrollable(_SessionOpening(
+                        engine: _engine,
+                        operator: _operator!,
+                        onOpened: () => setState(() {}),
+                        onCloseDay: _closeDay,
+                        onReprintDay: () => _reprintDay(),
+                        onSessions: () => showLocalSessions(context, _engine),
+                      ))
                     : _floor && (_engine.restaurant?.tableService ?? false)
                     ? _RestaurantFloor(host: this)
                     : _floor && (_engine.restaurant?.production ?? false)
@@ -1231,29 +1320,38 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
                   Flexible(child: Text(_snapshot!.store.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Align(
-                    alignment: Alignment.centerRight,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: _bannerColor.withValues(alpha: .1), borderRadius: BorderRadius.circular(16)),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(_bannerIcon, color: _bannerColor, size: 16),
-                          const SizedBox(width: 4),
-                          Flexible(
-                            child: Text(status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: _bannerColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(color: _bannerColor.withValues(alpha: .1), borderRadius: BorderRadius.circular(16)),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(_bannerIcon, color: _bannerColor, size: 16),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(status, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: _bannerColor, fontSize: 12, fontWeight: FontWeight.w600)),
+                              ),
+                            ],
                           ),
-                        ],
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 6),
+                      // Indicateur de synchro (2.1 lot 12) : pastille et compte à rebours ; un appui ouvre le détail.
+                      Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: SyncIndicator(engine: _engine, compact: true, onSyncNow: _syncNow))),
+                    ],
                   ),
                 ),
-                IconButton(
-                  tooltip: 'Synchroniser',
-                  onPressed: _engine.syncing ? null : () => _tryOnline(),
-                  icon: _engine.syncing ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh),
-                ),
+                // Petit téléphone : l'indicateur tient lieu de bouton (son détail porte « Synchroniser maintenant »).
+                if (!_compact)
+                  IconButton(
+                    tooltip: 'Synchroniser',
+                    onPressed: _engine.syncing ? null : () => _tryOnline(),
+                    icon: _engine.syncing ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.refresh),
+                  ),
                 _registerMenu(),
               ],
             ),
@@ -3102,11 +3200,23 @@ class _OperatorLoginState extends State<_OperatorLogin> {
 }
 
 class _SessionOpening extends StatefulWidget {
-  const _SessionOpening({required this.engine, required this.operator, required this.onOpened});
+  const _SessionOpening({
+    required this.engine,
+    required this.operator,
+    required this.onOpened,
+    required this.onCloseDay,
+    required this.onReprintDay,
+    required this.onSessions,
+  });
 
   final CaisseEngine engine;
   final Operator operator;
   final VoidCallback onOpened;
+
+  /// Sessions locales (2.1 lot 12) : Z de journée, son duplicata, liste des sessions du poste.
+  final Future<void> Function() onCloseDay;
+  final Future<void> Function() onReprintDay;
+  final Future<void> Function() onSessions;
 
   @override
   State<_SessionOpening> createState() => _SessionOpeningState();
@@ -3116,9 +3226,38 @@ class _SessionOpeningState extends State<_SessionOpening> {
   final _float = TextEditingController(text: '0');
   String? _error;
 
+  /// Plafond atteint ou clôture à arbitrer (sans `session.multiple`) ; jour de la prochaine session ; Z de journée.
+  String? _blocker;
+  String? _day;
+  String? _dayBlocker;
+  bool _dayClosed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _refresh();
+  }
+
+  Future<void> _refresh() async {
+    final engine = widget.engine;
+    final blocker = await engine.sessionOpeningBlocker();
+    final day = await engine.businessDay();
+    final dayBlocker = await engine.dayClosureBlocker(widget.operator);
+    final sessions = await engine.localSessions();
+    if (!mounted) return;
+    setState(() {
+      _blocker = blocker;
+      _day = day;
+      _dayBlocker = dayBlocker;
+      _dayClosed = sessions.any((s) => s.dayClosureUuid != null);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final allowed = widget.engine.snapshot?.rules.sessionOpening ?? false;
+    final multiple = widget.engine.multipleSessionsSupported;
+    final nextDay = multiple && _day != null && _day != widget.engine.today;
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 420),
@@ -3136,6 +3275,14 @@ class _SessionOpeningState extends State<_SessionOpening> {
                       ? 'Comptez le fond de caisse : la session sera ouverte sur la boutique au retour de la connexion.'
                       : 'La boutique n’autorise pas l’ouverture de session hors ligne : la vente reprendra en ligne.',
                 ),
+                if (nextDay) ...[
+                  const SizedBox(height: 12),
+                  _note(context, Icons.event_available_outlined, 'Journée du ${formatDayFr(widget.engine.today)} clôturée sur ce poste : la prochaine session comptera pour le ${formatDayFr(_day!)}.', const Color(0xFF1565C0)),
+                ],
+                if (allowed && _blocker != null) ...[
+                  const SizedBox(height: 12),
+                  _note(context, Icons.cloud_off, _blocker!, const Color(0xFFC62828)),
+                ],
                 if (allowed) ...[
                   const SizedBox(height: 12),
                   TextField(
@@ -3145,7 +3292,40 @@ class _SessionOpeningState extends State<_SessionOpening> {
                     decoration: InputDecoration(labelText: 'Fond de caisse (F)', errorText: _error),
                   ),
                   const SizedBox(height: 12),
-                  FilledButton(onPressed: _open, child: const Text('Ouvrir la session')),
+                  FilledButton(
+                    style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(56)),
+                    onPressed: _blocker == null ? _open : null,
+                    child: const Text('Ouvrir la session'),
+                  ),
+                ],
+                if (multiple) ...[
+                  const SizedBox(height: 16),
+                  const Divider(height: 1),
+                  const SizedBox(height: 8),
+                  if (widget.engine.hasRight(widget.operator, 'caisse_cloturer'))
+                    OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                      onPressed: _dayBlocker == null
+                          ? () async {
+                              await widget.onCloseDay();
+                              await _refresh();
+                            }
+                          : null,
+                      icon: const Icon(Icons.event_available_outlined),
+                      label: const Text('Clôturer la journée (Z de journée)'),
+                    ),
+                  if (_dayBlocker != null && widget.engine.hasRight(widget.operator, 'caisse_cloturer'))
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(_dayBlocker!, style: Theme.of(context).textTheme.bodySmall, textAlign: TextAlign.center),
+                    ),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    children: [
+                      TextButton.icon(onPressed: widget.onSessions, icon: const Icon(Icons.view_list_outlined), label: const Text('Sessions de ce poste')),
+                      if (_dayClosed) TextButton.icon(onPressed: widget.onReprintDay, icon: const Icon(Icons.copy_outlined), label: const Text('Duplicata du Z de journée')),
+                    ],
+                  ),
                 ],
               ],
             ),
@@ -3163,4 +3343,17 @@ class _SessionOpeningState extends State<_SessionOpening> {
       setState(() => _error = e.message);
     }
   }
+
+  Widget _note(BuildContext context, IconData icon, String text, Color color) => Container(
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(color: color.withValues(alpha: .08), borderRadius: BorderRadius.circular(8), border: Border.all(color: color.withValues(alpha: .3))),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 18, color: color),
+        const SizedBox(width: 8),
+        Expanded(child: Text(text, style: TextStyle(color: color))),
+      ],
+    ),
+  );
 }

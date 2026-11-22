@@ -25,18 +25,18 @@ extension _ClosureCommands on LocalRegisterAdapter {
     if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier pour consulter les documents.');
     final kind = args['kind'];
     final version = args['version'];
-    if (kind is! String || !const [ZKind.preX, ZKind.preZ, ZKind.session].contains(kind)) {
-      throw const AdapterFailure('argument_invalide', 'Argument « kind » invalide (pre-x, pre-z ou z-session).');
+    if (kind is! String || !const [ZKind.preX, ZKind.preZ, ZKind.session, ZKind.terminalDay].contains(kind)) {
+      throw const AdapterFailure('argument_invalide', 'Argument « kind » invalide (pre-x, pre-z, z-session ou z-jour-terminal).');
     }
     if (version is! String || !const [ZVersion.detailed, ZVersion.short].contains(version)) {
       throw const AdapterFailure('argument_invalide', 'Argument « version » invalide (detailed ou short).');
     }
     // Pré-Z : même droit que la clôture (comme l'écran Android et l'hôte Windows).
-    if (kind == ZKind.preZ && !engine.hasRight(operator, 'caisse_cloturer')) {
+    if ((kind == ZKind.preZ || kind == ZKind.terminalDay) && !engine.hasRight(operator, 'caisse_cloturer')) {
       throw AdapterFailure('document_interdit', '${operator.name} n’a pas le droit d’éditer le pré-Z.');
     }
     // Z de session : toujours une réimpression (duplicata) par défaut.
-    final duplicate = args['duplicate'] ?? kind == ZKind.session;
+    final duplicate = args['duplicate'] ?? (kind == ZKind.session || kind == ZKind.terminalDay);
     if (duplicate is! bool) throw const AdapterFailure('argument_invalide', 'Argument « duplicate » invalide.');
     final (paper, columns) = _closureWidth(args);
 

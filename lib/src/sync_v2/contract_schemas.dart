@@ -1,4 +1,4 @@
-// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b, lot 10 catalogue c87b57c1, lot 11 modifier un ticket 2c11cfbd) — ne pas modifier à la main.
+// Généré depuis test/fixtures/contrat-v2/schemas (contrat v2, révision 2.1, restaurant-1 R-5, lot Z local c3610bbb, lot 9 prix modifiable 4176383b, lot 10 catalogue c87b57c1, lot 11 modifier un ticket 2c11cfbd, lot 12 sessions locales 1ba7dc61 + f04d42f1) — ne pas modifier à la main.
 // Régénérer après mise à jour des schémas ; test/contrat_v2_test.dart vérifie l'égalité.
 
 /// Schémas du contrat v2 embarqués : le moteur (Android et hôte Windows, sans fichiers ni assets) valide ses
@@ -964,6 +964,22 @@ const contractV2Schemas = <String, String>{
                                     "description": "same_day : le jour même (fuseau de la boutique) ET session de la vente ouverte ; open_session : tant que la session de la vente est ouverte. Jamais une session close."
                                 }
                             }
+                        },
+                        "sessions_locales": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : sessions locales séparées. Absente sans la capacité.",
+                            "type": "object",
+                            "required": [
+                                "max"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "max": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 50,
+                                    "description": "Sessions que le terminal peut ouvrir (et clôturer) tant que le serveur ne les a pas intégrées ; au-delà, il demande une connexion avant d'en ouvrir une autre (Paramètres › Caisse hors ligne, 20 par défaut)."
+                                }
+                            }
                         }
                     }
                 },
@@ -1320,6 +1336,42 @@ const contractV2Schemas = <String, String>{
                                         }
                                     ],
                                     "description": "Utilisateur qui a arbitré ; null sans arbitrage."
+                                }
+                            }
+                        },
+                        "session_serveur": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : sur une ouverture_session intégrée, la session serveur qui lui correspond (id local ↔ id serveur). Une ouverture rattachée à une session déjà ouverte au serveur (ouverte au web) rend cette session.",
+                            "type": "object",
+                            "required": [
+                                "session_uuid"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "session_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            }
+                        },
+                        "journee": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : sur une cloture_journee intégrée, le rapprochement du serveur.",
+                            "type": "object",
+                            "required": [
+                                "jour",
+                                "sessions",
+                                "ecart"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "jour": {
+                                    "$ref": "commun.json#/$defs/jour"
+                                },
+                                "sessions": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "ecart": {
+                                    "type": "integer",
+                                    "description": "Somme des écarts (terminal − serveur) sur les théoriques par moyen ; 0 si le Z du terminal concorde."
                                 }
                             }
                         }
@@ -3826,6 +3878,9 @@ const contractV2Schemas = <String, String>{
         },
         {
             "$ref": "#/$defs/vente_modification"
+        },
+        {
+            "$ref": "#/$defs/cloture_journee"
         }
     ],
     "$defs": {
@@ -8196,6 +8251,129 @@ const contractV2Schemas = <String, String>{
                     "$ref": "#/$defs/contenu_vente_modification"
                 }
             }
+        },
+        "contenu_cloture_journee": {
+            "type": "object",
+            "required": [
+                "jour",
+                "sessions",
+                "totaux",
+                "tickets",
+                "chiffre_affaires"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "jour": {
+                    "$ref": "commun.json#/$defs/jour",
+                    "description": "Jour d'exploitation clos (fuseau de la boutique, boutique.regles.fuseau)."
+                },
+                "sessions": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "uniqueItems": true,
+                    "items": {
+                        "$ref": "commun.json#/$defs/uuid"
+                    },
+                    "description": "Sessions du terminal réunies sur ce Z de journée : uuid de l'ouverture_session locale ou de la session serveur, chacune clôturée par une cloture_session de ce terminal émise avant cette opération."
+                },
+                "totaux": {
+                    "type": "array",
+                    "maxItems": 30,
+                    "description": "Totaux par moyen imprimés sur le Z de journée du terminal (somme de ses Z de session).",
+                    "items": {
+                        "type": "object",
+                        "required": [
+                            "moyen",
+                            "theorique",
+                            "compte"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                            "moyen": {
+                                "$ref": "commun.json#/$defs/code"
+                            },
+                            "theorique": {
+                                "$ref": "commun.json#/$defs/montant_signe"
+                            },
+                            "compte": {
+                                "oneOf": [
+                                    {
+                                        "type": "null"
+                                    },
+                                    {
+                                        "$ref": "commun.json#/$defs/montant"
+                                    }
+                                ],
+                                "description": "null : moyen non compté."
+                            }
+                        }
+                    }
+                },
+                "tickets": {
+                    "type": "integer",
+                    "minimum": 0
+                },
+                "chiffre_affaires": {
+                    "$ref": "commun.json#/$defs/montant_signe"
+                },
+                "detail": {
+                    "description": "Facultatif : bloc de détail imprimé (DetailCloture, version 1), conservé pour le duplicata.",
+                    "oneOf": [
+                        {
+                            "type": "null"
+                        },
+                        {
+                            "$ref": "donnees-z-local-1.json#/$defs/detail_cloture"
+                        }
+                    ]
+                }
+            }
+        },
+        "cloture_journee": {
+            "description": "Capacité session.multiple (2.1 lot 12) : clôture de la journée de caisse du terminal, hors connexion. Le terminal imprime son Z de journée, qui réunit ses sessions clôturées du jour, puis émet cette opération. Intégrée quand toutes les sessions listées sont clôturées au serveur (sinon recue, raison journee.sessions_en_attente) ; totaux rapprochés du calcul du serveur, écart noté, jamais refusé. Idempotente par uuid.",
+            "type": "object",
+            "required": [
+                "uuid",
+                "type",
+                "appareil",
+                "sequence",
+                "cree_le",
+                "operateur_id",
+                "versions",
+                "empreinte",
+                "contenu"
+            ],
+            "additionalProperties": false,
+            "properties": {
+                "uuid": {
+                    "$ref": "commun.json#/$defs/uuid"
+                },
+                "type": {
+                    "const": "cloture_journee"
+                },
+                "appareil": {
+                    "$ref": "#/$defs/appareil"
+                },
+                "sequence": {
+                    "$ref": "#/$defs/sequence"
+                },
+                "cree_le": {
+                    "$ref": "commun.json#/$defs/horodatage"
+                },
+                "operateur_id": {
+                    "$ref": "commun.json#/$defs/identifiant_serveur"
+                },
+                "versions": {
+                    "$ref": "#/$defs/versions"
+                },
+                "empreinte": {
+                    "$ref": "commun.json#/$defs/empreinte"
+                },
+                "contenu": {
+                    "$ref": "#/$defs/contenu_cloture_journee"
+                }
+            }
         }
     }
 }
@@ -8483,6 +8661,41 @@ const contractV2Schemas = <String, String>{
                                         }
                                     ],
                                     "description": "Utilisateur qui a arbitré ; null sans arbitrage."
+                                }
+                            }
+                        },
+                        "session_serveur": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : session serveur d'une ouverture_session intégrée (id local ↔ id serveur).",
+                            "type": "object",
+                            "required": [
+                                "session_uuid"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "session_uuid": {
+                                    "$ref": "commun.json#/$defs/uuid"
+                                }
+                            }
+                        },
+                        "journee": {
+                            "description": "Capacité session.multiple (2.1 lot 12) : rapprochement d'une cloture_journee intégrée.",
+                            "type": "object",
+                            "required": [
+                                "jour",
+                                "sessions",
+                                "ecart"
+                            ],
+                            "additionalProperties": false,
+                            "properties": {
+                                "jour": {
+                                    "$ref": "commun.json#/$defs/jour"
+                                },
+                                "sessions": {
+                                    "type": "integer",
+                                    "minimum": 1
+                                },
+                                "ecart": {
+                                    "type": "integer"
                                 }
                             }
                         }

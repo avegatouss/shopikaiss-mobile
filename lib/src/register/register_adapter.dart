@@ -56,6 +56,10 @@ class AdapterFailure implements Exception {
 /// Clôture (contrat 2.1) : closeSession {cash, comment, counts: [{method, amount, justification}]}, panier vide, identifiant
 /// d'opération facultatif. L'attendu n'est jamais exposé.
 ///
+/// Sessions locales (2.1 lot 12, `session.multiple`) : localSessions (liste, plafond, jour d'exploitation), closeDay
+/// (Z de journée du terminal, identifiant d'opération facultatif ; puis closureDocument kind `z-jour-terminal`),
+/// syncStatus (état, compte à rebours) ; status porte `sync` et les capacités `open_session` (plafond) et `close_day`.
+///
 /// Clients (contrat 2.1) : searchCustomers {query}, createCustomer {name, phone}, setCustomer {uuid, name} ; uuid absent =
 /// client de passage. La vue donne `customer`.
 ///
@@ -156,6 +160,12 @@ class LocalRegisterAdapter {
     switch (command) {
       case 'status':
         return _status();
+      case 'syncStatus':
+        return engine.syncStatus.toJson(engine.now);
+      case 'localSessions':
+        return _localSessions();
+      case 'closeDay':
+        return _closeDay(operationId);
       case 'pair':
         return _pair(args);
       case 'login':
@@ -325,7 +335,7 @@ class LocalRegisterAdapter {
 
   // ------------------------------------------------------------------ Lecture
 
-  Map<String, dynamic> _status() => {
+  Future<Map<String, dynamic>> _status() async => {
     'version': registerAdapterVersion,
     'ready': engine.snapshot != null && engine.blockReason == null,
     'block_reason': engine.blockReason,
@@ -339,7 +349,11 @@ class LocalRegisterAdapter {
     'permanent_local': engine.permanentLocal,
     'reachable': engine.reachable,
     'session': _sessionView(),
-    'capabilities': _capabilities(),
+    'capabilities': await _capabilities(),
+    // Sessions locales (2.1 lot 12) : état de synchro toujours affiché, jour d'exploitation de la prochaine session.
+    'sync': engine.syncStatus.toJson(engine.now),
+    'multiple_sessions': engine.multipleSessionsSupported,
+    'business_day': await engine.businessDay(),
   };
 
   Map<String, dynamic>? _sessionView() {
@@ -349,9 +363,11 @@ class LocalRegisterAdapter {
   }
 
   /// Ce que l'écran peut proposer maintenant, avec le motif d'un refus. Contrôles répétés à l'exécution par le moteur.
-  Map<String, dynamic> _capabilities() {
+  Future<Map<String, dynamic>> _capabilities() async {
     final reason = engine.blockReason;
     final rules = engine.snapshot?.rules;
+    final opening = await engine.sessionOpeningBlocker();
+    final dayClosing = await engine.dayClosureBlocker(_operator);
     Map<String, dynamic> cap(String? refusal, {bool network = false}) => {'allowed': refusal == null, 'reason': refusal, 'network_required': network};
     return {
       'sell': cap(reason ??
@@ -362,8 +378,9 @@ class LocalRegisterAdapter {
               : engine.sessionOpen
               ? 'Une session est déjà ouverte sur ce terminal.'
               : (rules?.sessionOpening ?? false)
-              ? null
+              ? opening
               : 'L’ouverture de session locale n’est pas autorisée : ouvrez-la en ligne.')),
+      'close_day': cap(dayClosing),
       'pair': cap(null, network: true),
       'synchronize': cap(engine.paired ? null : 'Application non appairée.', network: true),
       'close_session': cap(_operator == null ? 'Identifiez le caissier.' : (engine.canCloseSession(_operator!) ? null : 'Clôture non autorisée sur ce terminal.')),
@@ -821,6 +838,38 @@ class LocalRegisterAdapter {
     }
     _emit('session');
     return _status();
+  }
+
+  /// Sessions de ce terminal (2.1 lot 12), plafond et jour d'exploitation de la prochaine session.
+  Future<Map<String, dynamic>> _localSessions() async => {
+    'multiple': engine.multipleSessionsSupported,
+    'max': engine.localSessionsMax,
+    'business_day': await engine.businessDay(),
+    'today': engine.today,
+    'sessions': [for (final s in (await engine.localSessions()).reversed) s.toJson()],
+  };
+
+  /// Z de journée du terminal (2.1 lot 12) : idempotent par identifiant d'opération ; le document s'obtient ensuite par
+  /// closureDocument {kind: z-jour-terminal}.
+  Future<Map<String, dynamic>> _closeDay(String? operationId) async {
+    final operator = _operator;
+    if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant de clôturer la journée.');
+    if (_draft.lines.isNotEmpty) throw const AdapterFailure('panier_en_cours', 'Terminez ou videz le panier avant de clôturer la journée.');
+    final OfflineOperation day;
+    try {
+      day = await engine.closeDay(operator, operationUuid: operationId);
+    } on OfflineRefusal catch (e) {
+      throw AdapterFailure('journee_refusee', e.message);
+    }
+    _emit('session');
+    return {
+      'operation_id': day.uuid,
+      'day': day.content['jour'],
+      'sessions': (day.content['sessions'] as List).length,
+      'tickets': day.content['tickets'],
+      'revenue': day.content['chiffre_affaires'],
+      'server_status': day.serverStatus,
+    };
   }
 
   /// Ouverture de session locale par le caissier identifié ([float] : fond de caisse compté, en francs).

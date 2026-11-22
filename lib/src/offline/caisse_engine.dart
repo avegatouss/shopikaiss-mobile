@@ -9,6 +9,7 @@ import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
 import '../restaurant/resto_interface.dart';
 import 'catalogue_edit.dart';
+import 'local_sessions.dart';
 import 'models.dart';
 import 'money.dart';
 import 'notifier.dart';
@@ -175,6 +176,62 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Test de la boutique : met à jour [reachable] et le dernier contact.
   Future<bool> probe();
+
+  // ------------------------------------------------------------------ Sessions locales et synchro (2.1 lot 12)
+
+  /// Dernier essai de synchronisation (test ou envoi), pour le compte à rebours de l'indicateur.
+  DateTime? lastSyncAttempt;
+
+  /// Délai entre deux envois automatiques : `delais.changements_secondes` en v2, sinon le sondage publié (20 s).
+  int get syncIntervalSeconds => snapshot?.rules.probeSeconds ?? 20;
+
+  /// Opérations reçues par la boutique mais en attente d'une session précédente (raisons `session.*`, `journee.*`).
+  int waitingCount = 0;
+
+  /// Envoi automatique dû : aucun essai encore, ou délai écoulé depuis le dernier.
+  bool get syncDue => lastSyncAttempt == null || !now.isBefore(lastSyncAttempt!.add(Duration(seconds: syncIntervalSeconds)));
+
+  /// État de synchronisation pour la barre de la caisse.
+  SyncStatus get syncStatus => SyncStatus(
+    pending: pendingCount,
+    arbitration: localArbitrationCount,
+    waiting: waitingCount,
+    refused: refusedCount,
+    intervalSeconds: syncIntervalSeconds,
+    reachable: reachable,
+    lastContact: lastContact,
+    offlineSince: offlineSince,
+    lastAttempt: lastSyncAttempt,
+    syncing: syncing,
+  );
+
+  /// Capacité `session.multiple` accordée : sessions locales séparées, plafond, Z de journée du terminal.
+  bool get multipleSessionsSupported => false;
+
+  /// Plafond publié `boutique.regles.sessions_locales.max` (20 par défaut).
+  int get localSessionsMax => 20;
+
+  /// Sessions de ce terminal, de la plus ancienne à la plus récente (vide sans la capacité).
+  Future<List<LocalSession>> localSessions() async => const [];
+
+  /// Pourquoi une session ne peut pas s'ouvrir maintenant (plafond, clôture à arbitrer sans la capacité), ou null.
+  Future<String?> sessionOpeningBlocker() async => null;
+
+  /// Jour d'exploitation de la prochaine session (`AAAA-MM-JJ`) : aujourd'hui, ou le lendemain du dernier Z de journée
+  /// du terminal s'il a déjà clos aujourd'hui.
+  Future<String> businessDay() async => PassDay.of(now, null);
+
+  /// Jour civil de la boutique aujourd'hui (`AAAA-MM-JJ`).
+  String get today => PassDay.of(now, null);
+
+  /// Pourquoi [operator] ne peut pas clôturer la journée maintenant, ou null.
+  Future<String?> dayClosureBlocker(Operator? operator) async => 'Clôture de journée non disponible sur ce terminal.';
+
+  /// Z de journée du terminal (« clôture du registre ») : réunit ses sessions clôturées depuis le dernier, émet
+  /// `cloture_journee`. Idempotent par [operationUuid]. Le document s'imprime ensuite par [closureDocument]
+  /// ([ZKind.terminalDay]).
+  Future<OfflineOperation> closeDay(Operator operator, {String? operationUuid}) =>
+      throw const OfflineRefusal('Clôture de journée non disponible sur ce terminal.');
 
   /// Met le catalogue à jour. Renvoie le message d'erreur, ou null.
   Future<String?> refreshSnapshot();

@@ -138,6 +138,10 @@ class CaisseV2Client {
   /// `boutique.regles.modification_ticket`, `operateur.approbateur_modification`. Accordée seulement avec `contrat.2_1`.
   static const saleEditCapability = 'vente.modification';
 
+  /// Sessions locales séparées (2.1 lot 12) : ouverture malgré une clôture à arbitrer, plafond
+  /// `boutique.regles.sessions_locales`, opération `cloture_journee`. Accordée seulement avec `contrat.2_1`.
+  static const multipleSessionsCapability = 'session.multiple';
+
   /// Bornes du contrat pour `POST /operations`.
   static const maxBatch = 50;
   static const maxBodyBytes = 524288;

@@ -85,6 +85,9 @@ class V2Keys {
 
   /// Résultat d'une `creation_produit` / `modification_produit` (2.1 lot 10) : `details` du serveur, par opération.
   static const productResultPrefix = 'v2.produit.';
+
+  /// Correspondance ouverture locale → session serveur (`details.session_serveur`, 2.1 lot 12), objet JSON.
+  static const serverSessions = 'v2.sessions_serveur';
   static const imageWindow = 'v2.images_plage';
 
   /// Dernière lecture complète du journal (horodatage UTC) et échec de la dernière tentative (lot Z local : mention
@@ -390,6 +393,15 @@ class V2Store {
   };
 
   /// Nombre d'opérations par (type, état local).
+  /// Opérations reçues en attente d'une session (raisons `session.*` et `journee.*`, 2.1 lot 12) : pas des refus.
+  Future<int> waitingCount() async {
+    final rows = await db.rawQuery(
+      "SELECT COUNT(*) AS n FROM v2_operations WHERE etat = ? AND (raison LIKE '%\"code\":\"session.%' OR raison LIKE '%\"code\":\"journee.%')",
+      [V2OperationState.received],
+    );
+    return rows.first['n'] as int;
+  }
+
   Future<Map<(String, String), int>> stateCounts() async {
     final rows = await db.rawQuery('SELECT type, etat, COUNT(*) AS n FROM v2_operations GROUP BY type, etat');
     return {for (final r in rows) (r['type'] as String, r['etat'] as String): r['n'] as int};
@@ -529,6 +541,10 @@ class V2Store {
     if (zRestaurant != null) await write('${V2Keys.zRestaurantPrefix}$uuid', jsonEncode(zRestaurant), txn);
     final product = r['details'] is Map ? {for (final k in const ['produit_uuid_canonique', 'produit_resolution']) if ((r['details'] as Map)[k] != null) k: (r['details'] as Map)[k]} : const {};
     if (product.isNotEmpty) await write('${V2Keys.productResultPrefix}$uuid', jsonEncode(product), txn);
+    if (((r['details'] as Map?)?['session_serveur'] as Map?)?['session_uuid'] case final String server) {
+      final known = Map<String, dynamic>.from(jsonDecode(await read(V2Keys.serverSessions, txn) ?? '{}') as Map);
+      if (known[uuid] != server) await write(V2Keys.serverSessions, jsonEncode({...known, uuid: server}), txn);
+    }
     await txn.update(
       'v2_operations',
       {

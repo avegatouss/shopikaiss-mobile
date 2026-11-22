@@ -86,7 +86,10 @@ class V2Sync {
           '${contract21 && (shared(CaisseV2Client.productCreateCapability) || shared(CaisseV2Client.productEditCapability)) ? '+catalogue1' : ''}'
           // `ticket1` : première annonce de `vente.modification` (2.1 lot 11), instantané pour recevoir l'option de la
           // boutique et les responsables `approbateur_modification`.
-          '${contract21 && shared(CaisseV2Client.saleEditCapability) ? '+ticket1' : ''}';
+          '${contract21 && shared(CaisseV2Client.saleEditCapability) ? '+ticket1' : ''}'
+          // `sessions1` : première annonce de `session.multiple` (2.1 lot 12), instantané pour recevoir
+          // `boutique.regles.sessions_locales`.
+          '${contract21 && shared(CaisseV2Client.multipleSessionsCapability) ? '+sessions1' : ''}';
       if (await store.read(V2Keys.cursor) == null) {
         await bootstrap('premier_demarrage', report);
       } else if ((await store.read(V2Keys.contractRevision) ?? '2.0') != revision) {
