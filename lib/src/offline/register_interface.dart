@@ -66,6 +66,7 @@ class RegisterInterface {
     'note': 'Note',
     'session': 'Session de caisse',
     'calculatrice': 'Calculatrice',
+    'salle_tables': 'Salle et tables',
     'clavier': 'Clavier',
     'back_office': 'Back-office web',
     'retour_web': 'Caisse web / Reconnecter',

@@ -154,6 +154,37 @@ class SyncStatus {
   };
 }
 
+/// Dernière remise à zéro appliquée sur le terminal (2.1 lot 17).
+class ShopResetInfo {
+  const ShopResetInfo({required this.uuid, required this.at, required this.appliedAt, required this.erased, required this.unintegrated});
+
+  factory ShopResetInfo.fromJson(Map m) => ShopResetInfo(
+    uuid: m['uuid'] as String,
+    at: DateTime.parse(m['le'] as String),
+    appliedAt: DateTime.tryParse('${m['applique_le']}'),
+    erased: (m['operations'] as List? ?? const []).cast<String>(),
+    unintegrated: (m['non_integrees'] as List? ?? const []).cast<String>(),
+  );
+
+  final String uuid;
+  final DateTime at;
+  final DateTime? appliedAt;
+  final List<String> erased;
+  final List<String> unintegrated;
+
+  /// L'opération [operationUuid] (ou une intention datée [createdAt]) appartient aux essais effacés.
+  bool covers(String? operationUuid, {DateTime? createdAt}) =>
+      (operationUuid != null && erased.contains(operationUuid)) || (createdAt != null && createdAt.toUtc().isBefore(at));
+
+  Map<String, dynamic> toJson() => {
+    'uuid': uuid,
+    'at': at.toUtc().toIso8601String(),
+    'applied_at': appliedAt?.toUtc().toIso8601String(),
+    'erased_operation_ids': erased,
+    'unintegrated_operation_ids': unintegrated,
+  };
+}
+
 /// Message d'attente lisible pour une raison `recue` du lot 12 (jamais un refus).
 String? waitingReasonLabel(String? code) => switch (code) {
   'session.cloture_precedente' => 'Attend la clôture de la session précédente',

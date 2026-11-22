@@ -3357,6 +3357,17 @@ class V2Engine extends CaisseEngine {
   }
 
   @override
+  Future<ShopResetInfo?> lastShopReset() async {
+    final raw = await v2.read(V2Keys.resetDetails);
+    if (raw == null) return null;
+    try {
+      return ShopResetInfo.fromJson(jsonDecode(raw) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
   Future<void> acknowledgeShopReset() async {
     shopResetNotice = null;
     await v2.write(V2Keys.resetNotice, null);

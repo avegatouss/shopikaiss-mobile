@@ -108,6 +108,12 @@ void main() {
     final status = await adapter.execute('status', {}, null);
     expect((status['shop_reset'] as Map)['supported'], isTrue);
     expect((status['shop_reset'] as Map)['notice'], contains('remise à zéro'));
+    expect((status['shop_reset'] as Map)['uuid'], resetUuid);
+    expect((status['shop_reset'] as Map)['erased_count'], greaterThanOrEqualTo(4));
+    final proof = (await adapter.execute('shopResetOperations', {}, null))['reset'] as Map;
+    expect(proof['erased_operation_ids'], containsAll([first.uuid, second.uuid]));
+    expect(proof['unintegrated_operation_ids'], [second.uuid]);
+    expect(DateTime.parse(proof['at'] as String), at.subtract(Duration(microseconds: at.microsecond, milliseconds: at.millisecond)));
     expect(((await adapter.execute('acknowledgeShopReset', {}, null))['shop_reset'] as Map)['notice'], isNull);
     await adapter.close();
 

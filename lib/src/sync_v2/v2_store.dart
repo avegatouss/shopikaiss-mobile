@@ -108,6 +108,10 @@ class V2Keys {
   static const resetNotice = 'v2.remise_avis';
   static const resetArchive = 'v2.remise_archive';
 
+  /// Preuve de la dernière remise appliquée (pour les journaux d'intentions hors base de Windows) : `{uuid, le,
+  /// applique_le, operations: [uuid effacés], non_integrees: [uuid effacés jamais intégrés]}`.
+  static const resetDetails = 'v2.remise_detail';
+
   /// Dernier logo de la boutique téléchargé (capacité `boutique.logo`) : `{uuid, empreinte, png}` (PNG normalisé pour
   /// l'impression), gardé hors connexion jusqu'au suivant.
   static const shopLogo = 'v2.logo_boutique';
@@ -479,7 +483,7 @@ class V2Store {
   /// opérateurs, réglages), appairage, séquence, identifiants locaux. [uuid] est mémorisé dans la même transaction.
   ///
   /// Rend les opérations effacées jamais intégrées (non envoyées ou refusées, à archiver) et le nombre d'effacées.
-  Future<({List<Map<String, dynamic>> unsent, int erased})> resetShop(String uuid, DateTime at) => db.transaction((txn) async {
+  Future<({List<Map<String, dynamic>> unsent, int erased, List<String> ids})> resetShop(String uuid, DateTime at) => db.transaction((txn) async {
     final erased = <String>[];
     final unsent = <Map<String, dynamic>>[];
     var keptInEpoch = false;
@@ -521,7 +525,18 @@ class V2Store {
     final next = int.parse(await read(V2Keys.nextSequence, txn) ?? '1');
     if (!keptInEpoch && epoch != null) await write(V2Keys.resetBase, '$epoch:${next - 1}', txn);
     await write(V2Keys.resetUuid, uuid, txn);
-    return (unsent: unsent, erased: erased.length);
+    await write(
+      V2Keys.resetDetails,
+      jsonEncode({
+        'uuid': uuid,
+        'le': at.toUtc().toIso8601String(),
+        'applique_le': _now(),
+        'operations': erased,
+        'non_integrees': [for (final o in unsent) o['uuid']],
+      }),
+      txn,
+    );
+    return (unsent: unsent, erased: erased.length, ids: erased);
   }, exclusive: true);
 
   // ---------------------------------------------------------------- file

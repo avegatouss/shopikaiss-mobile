@@ -294,6 +294,11 @@ abstract class CaisseEngine extends EngineNotifier {
   /// L'avis de remise à zéro a été lu.
   Future<void> acknowledgeShopReset() async {}
 
+  /// Dernière remise à zéro appliquée sur ce terminal (uuid, instant `le` de la boutique, application sur le poste,
+  /// opérations effacées, dont celles jamais intégrées), ou null. Sert à écarter les intentions gardées hors base
+  /// (Windows) : une intention dont l'opération est effacée, ou datée d'avant `at`, ne doit jamais être rejouée.
+  Future<ShopResetInfo?> lastShopReset() async => null;
+
   // ------------------------------------------------------------------ Mobile money → espèces (2.1 lot 16)
 
   /// Règle `boutique.regles.transfert_especes` publiée et capacité `transfert.especes` accordée.

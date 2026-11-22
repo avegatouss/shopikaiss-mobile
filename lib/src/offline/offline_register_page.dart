@@ -948,6 +948,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final operator = _operator;
     if (operator == null || _cart.isEmpty) return;
     if (_engine.preSaleBlocker(operator) case final refusal?) return _refuse(refusal, title: 'Prévente impossible');
+    if (_globalEntry != null || _delivery > 0) return _refuse('Retirez la remise globale et la livraison avant de mettre ce panier en prévente : la prévente ne les reprend pas.', title: 'Prévente impossible');
     final created = await showCreatePreSale(context, engine: _engine, operator: operator, lines: List.of(_cart), customer: _customer);
     if (created == null || !mounted) return;
     await _engine.deleteDraft(_draftUuid);

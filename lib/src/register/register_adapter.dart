@@ -62,8 +62,10 @@ class AdapterFailure implements Exception {
 /// syncStatus (état, compte à rebours) ; status porte `sync` et les capacités `open_session` (plafond) et `close_day`.
 ///
 /// Remise à zéro (2.1 lot 17) : faite par le moteur à la synchronisation (rien à appeler). `status.shop_reset` =
-/// {supported, notice} ; `notice` (texte) à montrer UNE fois, puis acknowledgeShopReset {} (le panier en cours qui retirait
-/// une prévente ou corrigeait un ticket effacés est vidé).
+/// {supported, notice, uuid, at, erased_count} ; `notice` (texte) à montrer UNE fois, puis acknowledgeShopReset {} (le
+/// panier en cours qui retirait une prévente ou corrigeait un ticket effacés est vidé). shopResetOperations {} → {uuid, at,
+/// applied_at, erased_operation_ids, unintegrated_operation_ids} (null sans remise) : une intention gardée hors base dont
+/// l'opération y figure, ou datée d'avant `at`, ne se rejoue jamais.
 ///
 /// Prévente (2.1 lot 15) : preSales {query, open_only}, createPreSale {customer_name, customer_phone, customer_id,
 /// pickup_at, deposit, method, received, reference, note} sur les lignes du panier (identifiant d'opération ; panier vidé),
@@ -187,6 +189,8 @@ class LocalRegisterAdapter {
         return _shopLogo();
       case 'acknowledgeShopReset':
         return _acknowledgeShopReset();
+      case 'shopResetOperations':
+        return {'reset': (await engine.lastShopReset())?.toJson()};
       case 'preSales':
         return _preSales(args);
       case 'createPreSale':
@@ -401,7 +405,15 @@ class LocalRegisterAdapter {
     // Interface publiée pour ce terminal (2.1 lot 13), forme du contrat, sans les préférences locales d'Android.
     'register_interface': engine.publishedInterface.toJson(),
     // Remise à zéro de la boutique (2.1 lot 17) : avis à montrer une fois (null sinon).
-    'shop_reset': {'supported': engine.shopResetSupported, 'notice': engine.shopResetNotice},
+    'shop_reset': switch (await engine.lastShopReset()) {
+      final r => {
+        'supported': engine.shopResetSupported,
+        'notice': engine.shopResetNotice,
+        'uuid': r?.uuid,
+        'at': r?.at.toUtc().toIso8601String(),
+        'erased_count': r?.erased.length ?? 0,
+      },
+    },
     // Logo publié par la boutique (capacité boutique.logo) : `uuid` change quand un nouveau logo est téléchargé ; le
     // PNG se lit par la commande shopLogo. Déjà appliqué à escpos_base64 des documents rendus par l'adaptateur.
     'shop_logo': {'published': engine.shopLogoPublished, 'uuid': engine.shopLogoUuid},
@@ -950,6 +962,8 @@ class LocalRegisterAdapter {
   Future<Map<String, dynamic>> _createPreSale(Map<String, dynamic> args, String? operationId) async {
     final operator = _operator ?? (throw const AdapterFailure('caissier_requis', 'Identifiez le caissier.'));
     if (_draft.edit != null || _draft.preSale != null) throw const AdapterFailure('panier_occupe', 'Ce panier retire déjà une prévente ou corrige un ticket.');
+    // Le contrat de la prévente ne porte que les lignes : une remise globale ou une livraison seraient perdues.
+    if (_draft.globalDiscount > 0 || _draft.delivery > 0) throw const AdapterFailure('prevente_refusee', 'Retirez la remise globale et la livraison avant de mettre ce panier en prévente : la prévente ne les reprend pas.');
     final id = _requireOperationId(operationId);
     final lines = _editLines();
     final deposit = args['deposit'] == null ? 0 : _int(args, 'deposit');

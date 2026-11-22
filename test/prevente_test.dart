@@ -155,6 +155,11 @@ void main() {
     expect((((await adapter.execute('status', {}, null))['capabilities'] as Map)['pre_sale'] as Map)['allowed'], isTrue);
     await adapter.execute('addProduct', {'product_id': savon(e).id}, null);
     await adapter.execute('addProduct', {'product_id': savon(e).id}, null);
+    // Livraison au panier : la prévente ne la reprend pas, refus explicite plutôt qu'un montant perdu.
+    await adapter.execute('setDelivery', {'amount': 200}, null);
+    await expectLater(adapter.execute('createPreSale', {'customer_name': 'Koffi'}, 'abcdef00-0000-4000-8000-0000000000b9'),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'prevente_refusee')));
+    await adapter.execute('setDelivery', {'amount': 0}, null);
     final created = (await adapter.execute('createPreSale', {'customer_name': 'Koffi', 'deposit': 400, 'method': 'especes', 'received': 500}, 'abcdef00-0000-4000-8000-0000000000b1'))['pre_sale'] as Map;
     expect((created['total'], created['deposit'], created['due']), (1000, 400, 600));
     expect(((await adapter.execute('view', {}, null))['lines'] as List), isEmpty, reason: 'panier vidé');
