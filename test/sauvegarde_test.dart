@@ -117,6 +117,35 @@ void main() {
     expect(CaisseBackup.inspect(kept.first.readAsBytesSync()).platform, 'android');
   });
 
+  test('sauvegarde incomplète, lignes manquantes ou contenu altéré : refusée sans rien toucher (audit M03)', () async {
+    final base = await open('incomplete.db');
+    final e = await engine(base);
+    await e.v2.write('audit_temoin', 'conserver');
+    final (bytes, _) = await e.createBackup();
+    Map decode() => jsonDecode(utf8.decode(GZipCodec().decode(bytes))) as Map;
+    List<int> encode(Map data) => GZipCodec().encode(utf8.encode(jsonEncode(data)));
+
+    final empty = decode()..['tables'] = <String, dynamic>{};
+    await expectLater(e.restoreBackup(encode(empty)), throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('incomplète'))));
+
+    final noControl = decode()..remove('controle');
+    ((noControl['tables'] as Map)).remove('kv');
+    await expectLater(e.restoreBackup(encode(noControl)), throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('incomplète'))));
+
+    final fewer = decode();
+    ((fewer['tables'] as Map)['kv'] as List).removeLast();
+    await expectLater(e.restoreBackup(encode(fewer)), throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('nombre de lignes'))));
+
+    final altered = decode();
+    final kv = (altered['tables'] as Map)['kv'] as List;
+    (kv.firstWhere((r) => (r as Map)['cle'] == 'audit_temoin') as Map)['valeur'] = 'modifie';
+    await expectLater(e.restoreBackup(encode(altered)), throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('empreinte'))));
+
+    expect(await e.v2.read('audit_temoin'), 'conserver', reason: 'rien n’a été effacé');
+    await e.restoreBackup(bytes);
+    expect(await e.v2.read('audit_temoin'), 'conserver', reason: 'la sauvegarde intacte se restaure');
+  });
+
   test('version de base différente : refusée sans rien toucher', () async {
     final base = await open('caisse.db');
     final e = await engine(base);

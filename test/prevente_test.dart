@@ -103,6 +103,29 @@ void main() {
     expect(server.received.values.every((r) => r['etat'] == 'integree'), isTrue, reason: 'toutes conformes au contrat');
   });
 
+  test('panne entre vente et conversion : rien n’est gardé, la prévente ne se retire qu’une fois (audit M01)', () async {
+    serve();
+    final e = await engine();
+    await e.closeSession(awa(e), cash: 0);
+    await e.openSession(0, awa(e));
+    final p = await e.createPreSale(awa(e), customerName: 'Test audit', lines: [CartLine(product: savon(e))], deposit: 200, depositMethod: method(e, 'especes'));
+    await base.database.execute(
+        "CREATE TRIGGER panne_conversion BEFORE INSERT ON v2_operations WHEN NEW.type = 'prevente_convertir' BEGIN SELECT RAISE(ABORT, 'panne'); END");
+    final extras = SaleExtras(preSale: PreSaleUse(uuid: p.uuid, code: p.code, deposit: p.deposit));
+    final pay = [CartPayment(method: method(e, 'especes'), amount: 300, received: 300)];
+    await expectLater(e.recordSale(e.preSaleCart(p), pay, awa(e), extras: extras), throwsA(anything));
+    expect(await e.v2.operationsOfType('vente'), isEmpty, reason: 'vente annulée avec sa conversion (même transaction)');
+    expect((await e.preSales()).single.open, isTrue);
+
+    await base.database.execute('DROP TRIGGER panne_conversion');
+    final sale = await e.recordSale(e.preSaleCart(p), pay, awa(e), extras: extras);
+    expect(sale.isSale, isTrue);
+    expect((await e.v2.operationsOfType('vente')).length, 1);
+    expect((await e.preSales()).single.open, isFalse);
+    await expectLater(e.recordSale(e.preSaleCart(p), pay, awa(e), extras: extras), refused('déjà retirée'));
+    expect((await e.v2.operationsOfType('vente')).length, 1, reason: 'l’acompte ne sert qu’une fois');
+  });
+
   test('désistement avec remboursement partiel Wave, sans acompte, prévente d’un autre poste, refus', () async {
     serve();
     final e = await engine();

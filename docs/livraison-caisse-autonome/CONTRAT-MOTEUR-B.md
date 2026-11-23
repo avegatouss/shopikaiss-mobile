@@ -78,7 +78,7 @@ class BEngineAdapter implements WindowsEngineAdapter {
 | `preparePayment` | — | `payable`, `payable_label`, `methods[]` |
 | `setPayment` | `method`, `amount?` (= à payer par défaut), `received?` (espèces), `reference?` | vue + `change` (raccourci de `setPayments`) |
 | `setPayments` | `payments[]` (≤ 10) : `method`, `amount`, `received?` (espèces), `reference?` (moyen déclaré, ≤ 100) | vue + `change` ; somme = à payer, une seule ligne d'espèces. **Édition invalide : paiements préparés effacés, puis refus `paiement_invalide`** |
-| `commitSale` | `operation_id` (UUID minuscule, choisi par l'écran AVANT) | `state: committed`, `operation_id`, `number`, `total`, `server_status` |
+| `commitSale` | `operation_id` (UUID minuscule, choisi par l'écran AVANT) ; `draft_id?`, `draft_revision?` (repris de la vue affichée) | `state: committed`, `operation_id`, `number`, `total`, `server_status`. Si `draft_id`/`draft_revision` sont fournis et ne sont plus ceux du panier courant : refus `panier_modifie`, rien d'écrit (recharger la vue) |
 | `saleStatus` | `operation_id` | `committed` (mêmes champs) ou `{state: not_found, definitive: true}` |
 | `history` | `limit?` (≤ 200) | `items[]` |
 | `reprint` | `operation_id` | `lines[]` du duplicata (largeur `paperWidth`) |
@@ -187,6 +187,7 @@ Par produit dans la vue : `favorite`, `promotion` (libellé ou null, présentati
 ## Ticket original et images
 
 - `printTicket` (identifiant d'opération) : première impression sans mention, puis « REIMPRESSION » ; rend `duplicate`. `reprint` force toujours la réimpression. Aucune des deux ne crée de vente.
+- Confirmation d'impression (23/11, recommandée) : `printTicket {deferred_confirmation: true}` ne retient pas l'original ; l'hôte appelle `confirmTicketPrinted` (identifiant d'opération) une fois le ticket réellement sorti → `{operation_id, printed: true}` (`vente_inconnue` sinon). Une imprimante en échec laisse donc l'original pour l'essai suivant. Sans le drapeau, comportement d'origine (original retenu dès la demande).
 - `image.path` (vue produit) : fichier JPEG local, ou null tant qu'il n'est pas téléchargé. Le téléchargement se fait après une synchronisation, panier vide, 30 images par passage, et respecte `Retry-After`.
 
 ## Remise autorisée par un responsable (2.1, lot 1c)

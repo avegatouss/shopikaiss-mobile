@@ -216,11 +216,19 @@ const restoDisplayScript = r'''(function () {
       ecrire(CLE_RECUS, JSON.stringify(recus));
       bip();
     }
-    if (aAccuser.length) {
-      appel('POST', '/api/accuse', { bons: aAccuser.slice(0, 200) }, function (statut) {
-        if (statut === 200) { for (var j = 0; j < aAccuser.length; j++) { accuses[aAccuser[j]] = true; } }
-      });
-    }
+    accuser(aAccuser);
+  }
+
+  // Par lots de 200 (limite du serveur) : seul le lot reçu est marqué, puis le suivant part ; un échec laisse le reste
+  // à renvoyer au prochain affichage.
+  function accuser(liste) {
+    if (!liste.length) { return; }
+    var lot = liste.slice(0, 200);
+    appel('POST', '/api/accuse', { bons: lot }, function (statut) {
+      if (statut !== 200) { return; }
+      for (var j = 0; j < lot.length; j++) { accuses[lot[j]] = true; }
+      accuser(liste.slice(200));
+    });
   }
 
   function carte(b, nouveau) {

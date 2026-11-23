@@ -934,6 +934,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// Prévente retirée par le panier : son acompte est déduit à l'encaissement.
   PreSaleUse? _preSaleUse;
 
+  /// Essai d'encaissement en cours : identifiant de vente gardé pour ce panier tant que l'issue n'est pas établie.
+  ({String draft, String uuid})? _saleAttempt;
+
   void _openPreSales() {
     final operator = _operator;
     if (operator == null) return;
@@ -1098,9 +1101,10 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     if (document == null) return _toast('Documents de clôture non disponibles sur ce terminal.');
     final width = widget.session.rollWidth > 0 ? widget.session.rollWidth : 58;
     final printout = document.layout(paperWidth: width);
-    await _printText(printout.lines, failure: 'Document non imprimé', bytes: printout.bytes(), framed: true);
+    final printed = await _printText(printout.lines, failure: 'Document non imprimé', bytes: printout.bytes(), framed: true);
+    // Un aperçu à l'écran ou un échec d'imprimante n'atteste aucune édition (audit M06).
     final operator = _operator;
-    if (operator != null && document.editionType != null) await _engine.recordEdition(operator, document);
+    if (printed && operator != null && document.editionType != null) await _engine.recordEdition(operator, document);
   }
 
   /// Choix du client de la vente : recherche par nom ou téléphone, création si le caissier en a le droit.
@@ -1252,9 +1256,19 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     'suspendu': true,
   };
 
-  Future<void> _suspendCart() async {
-    if (_cart.isEmpty) return;
-    if (_editing != null) return _toast('Modification du ticket en cours : validez-la ou abandonnez-la.');
+  /// Faux si le panier reste à l'écran (refus) : l'appelant ne le remplace pas.
+  Future<bool> _suspendCart() async {
+    if (_cart.isEmpty) return true;
+    if (_editing != null) {
+      _toast('Modification du ticket en cours : validez-la ou abandonnez-la.');
+      return false;
+    }
+    // Retrait de prévente : l'attente perdrait l'acompte et la réservation (audit M04). La prévente reste ouverte :
+    // abandonner le retrait puis le reprendre plus tard depuis la liste des préventes.
+    if (_preSaleUse != null) {
+      _toast('Retrait de la prévente ${_preSaleUse!.code} : encaissez-le ou abandonnez-le (la prévente reste ouverte), il ne se met pas en attente.');
+      return false;
+    }
     // Prix saisi : le panier partagé ne le porte pas, la mise en attente reste sur ce terminal (sauf panier repris,
     // refusé par le moteur).
     final entered = _cart.any((l) => l.enteredPrice != null);
@@ -1268,16 +1282,21 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           previous: _shared,
         );
       } on OfflineRefusal catch (e) {
-        return _toast(e.message);
+        _toast(e.message);
+        return false;
       }
     }
-    if (!await _engine.saveDraft(_draftUuid, 1, _draftContent())) return _toast('Ce panier a déjà été enregistré.');
+    if (!await _engine.saveDraft(_draftUuid, 1, _draftContent())) {
+      _toast('Ce panier a déjà été enregistré.');
+      return false;
+    }
     setState(() {
       _clearCart();
       _draftUuid = const Uuid().v4();
     });
     await _refreshSuspended();
     _toast('Panier mis en attente.');
+    return true;
   }
 
   /// Reprise d'un panier en attente, au catalogue et aux prix courants ; un article disparu est signalé et retiré.
@@ -1330,7 +1349,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         return _toast(e.message);
       }
     }
-    if (_cart.isNotEmpty) await _suspendCart();
+    if (_cart.isNotEmpty && !await _suspendCart()) return;
     final lines = <CartLine>[];
     var missing = 0;
     for (final raw in (draft.content['lignes'] as List).cast<Map>()) {
@@ -1384,7 +1403,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     } on OfflineRefusal catch (e) {
       return _toast(e.message);
     }
-    if (_cart.isNotEmpty) await _suspendCart();
+    if (_cart.isNotEmpty && !await _suspendCart()) return;
     setState(() {
       _clearCart();
       _cart.addAll([for (final l in taken.lines) l..tier = _tier]);
@@ -2706,7 +2725,11 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       _displayPayment = null;
     }
     if (payments == null || !mounted) return _publishDisplay();
-    final OfflineOperation operation;
+    // Même identifiant de vente pour chaque essai de ce panier : un nouvel essai après une réponse perdue rend la vente
+    // déjà enregistrée au lieu d'en créer une seconde (audit M02).
+    final attempt = _saleAttempt?.draft == _draftUuid ? _saleAttempt! : (draft: _draftUuid, uuid: const Uuid().v4());
+    _saleAttempt = attempt;
+    OfflineOperation operation;
     try {
       final totals = _totals(snapshot);
       operation = await _engine.recordSale(
@@ -2714,6 +2737,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         payments,
         _operator!,
         draftUuid: _draftUuid,
+        operationUuid: attempt.uuid,
         extras: SaleExtras(
           wholesale: _tier.cart,
           globalDiscount: totals.globalDiscount,
@@ -2730,26 +2754,42 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     } on OfflineRefusal catch (e) {
       return _refuse(e.message, title: 'Encaissement refusé');
     } catch (e, stack) {
-      // Mémoire du terminal pleine, base locale illisible… : la vente n'existe pas, rien n'est imprimé, le panier reste.
-      await ErrorJournal.record('Vente hors ligne non enregistrée : $e', stack);
+      // Erreur technique (mémoire pleine, base illisible, incident après l'écriture…) : l'issue est vérifiée dans le
+      // journal avant de parler au caissier ; jamais « non enregistrée » sans l'avoir établi.
+      await ErrorJournal.record('Encaissement hors ligne en erreur : $e', stack);
+      OfflineOperation? found;
+      var known = true;
+      try {
+        found = await _engine.saleStatus(attempt.uuid);
+      } catch (_) {
+        known = false;
+      }
       if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          icon: const Icon(Icons.error, color: Colors.red, size: 48),
-          title: const Text('Vente NON enregistrée'),
-          content: const Text(
-            'Le terminal n’a pas pu enregistrer cette vente : ne remettez pas la marchandise et ne rendez pas la monnaie '
-            'avant d’avoir réessayé. Le panier est conservé. Si le problème persiste, libérez de la place sur le terminal ou reconnectez-le.',
+      if (found == null || !found.isSale) {
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            icon: Icon(known ? Icons.error : Icons.help, color: known ? Colors.red : Colors.orange, size: 48),
+            title: Text(known ? 'Vente NON enregistrée' : 'Encaissement à vérifier'),
+            content: Text(
+              known
+                  ? 'Le terminal n’a pas pu enregistrer cette vente : ne remettez pas la marchandise et ne rendez pas la monnaie '
+                      'avant d’avoir réessayé. Le panier est conservé. Si le problème persiste, libérez de la place sur le terminal ou reconnectez-le.'
+                  : 'Le terminal ne peut pas dire si cette vente est enregistrée. Ne remettez pas la marchandise, ne rendez pas la monnaie et '
+                      'n’encaissez pas une seconde fois : réessayez « Payer » sur ce même panier (la vente déjà enregistrée sera retrouvée, jamais doublée).',
+            ),
+            actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
           ),
-          actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
-        ),
-      );
-      return;
+        );
+        return;
+      }
+      operation = found;
+      _toast('Vente ${found.number ?? ''} bien enregistrée malgré un incident technique.');
     }
+    _saleAttempt = null;
     final lines = List.of(_cart);
-    // Vente par pass : les paiements sont ceux que le moteur a répartis entre les passes.
-    final paid = passes == null ? payments : _engine.ticketParts(operation).$2;
+    // Vente par pass, retrait de prévente : le reçu suit l'opération figée (acompte compris, audit M05).
+    final paid = passes == null && preSale == null ? payments : _engine.ticketParts(operation).$2;
     // Afficheur client : « Merci », total réglé et rendu, jusqu'à l'article suivant (20 s au plus).
     final rendered = paid.fold<int>(0, (sum, p) => sum + p.change);
     _displayCompleted = customerDisplayState(
@@ -2759,7 +2799,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       payment: {
         'amount_due': payable,
         'paid': payable,
-        'received': paid.fold<int>(0, (sum, p) => sum + (p.method.isCash ? (p.received ?? p.cashDue) : p.amount)),
+        'received': paid.fold<int>(0, (sum, p) => sum + (p.method.code == preSaleDepositMethod ? 0 : p.method.isCash ? (p.received ?? p.cashDue) : p.amount)),
         'change': rendered,
         'remaining': 0,
         'methods': [for (final p in paid) {'name': p.method.name, 'amount': p.amount}],
@@ -2779,8 +2819,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     // Le tiroir s'ouvre pour les espèces, que le ticket soit imprimé ou non.
     final session = widget.session;
     if (session.hasPrinter && paid.any((p) => p.method.isCash)) unawaited(session.channel.openDrawer());
-    var printed = _look.ticketMode == 'auto';
-    if (printed) await _print(snapshot, operation, lines, paid);
+    // L'original n'est compté imprimé qu'une fois sorti : un échec laisse « Imprimer le ticket » (pas de duplicata).
+    var printed = _look.ticketMode == 'auto' && await _print(snapshot, operation, lines, paid);
     final change = rendered;
     if (!mounted) return;
     await showDialog<void>(
@@ -2800,8 +2840,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
           actions: [
             TextButton(
               onPressed: () async {
-                await _print(snapshot, operation, lines, paid, duplicate: printed);
-                setDialog(() => printed = true);
+                if (await _print(snapshot, operation, lines, paid, duplicate: printed)) setDialog(() => printed = true);
               },
               child: Text(printed ? 'Réimprimer' : 'Imprimer le ticket'),
             ),
@@ -3161,7 +3200,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     await _print(snapshot, operation, lines, payments, duplicate: true, operatorName: operatorName);
   }
 
-  Future<void> _print(
+  /// Vrai si le ticket est parti à l'imprimante (faux : échec, ou aperçu sans imprimante).
+  Future<bool> _print(
     Snapshot snapshot,
     OfflineOperation operation,
     List<CartLine> lines,
@@ -3186,7 +3226,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final settings = await ReceiptSettings.read(_engine);
     final printed = ReceiptSettings.saleLines(text);
     final compact = model?.compact ?? false;
-    await _printText(
+    return _printText(
       printed,
       failure: 'Ticket non imprimé',
       saved: ' : la vente est bien enregistrée.',
@@ -3328,7 +3368,8 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
 
   /// [framed] : document autre qu'un ticket de vente (X, Z, transfert, bon, préfacture) : logo en tout premier, entête et
   /// pied de la boutique (demande du responsable, 22/11).
-  Future<void> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false, Uint8List? bytes, bool framed = false}) async {
+  /// Vrai si l'imprimante a accepté le document ; faux sur échec ou simple aperçu à l'écran.
+  Future<bool> _printText(List<String> text, {required String failure, String saved = '.', bool compact = false, Uint8List? bytes, bool framed = false}) async {
     final session = widget.session;
     if (session.hasPrinter) {
       var raw = bytes ?? offlineTicketBytes(text, compact: compact);
@@ -3339,9 +3380,9 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
       }
       final result = await session.channel.printRaw(raw);
       if (!result.ok) _toast('$failure (${result.error})$saved');
-      return;
+      return result.ok;
     }
-    if (!mounted) return;
+    if (!mounted) return false;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
@@ -3352,6 +3393,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer'))],
       ),
     );
+    return false;
   }
 }
 

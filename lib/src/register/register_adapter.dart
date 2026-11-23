@@ -46,7 +46,13 @@ class AdapterFailure implements Exception {
 ///
 /// Commandes (`execute`) : status, pair, login, logout, openSession, view, search, addProduct, scan, changeQuantity,
 /// removeLine, setLineDiscount, setGlobalDiscount, setDelivery, setNote, clear, suspendDraft, drafts, resumeDraft,
-/// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, reprint, synchronize.
+/// deleteDraft, preparePayment, setPayment, setPayments, commitSale, saleStatus, history, printTicket, confirmTicketPrinted,
+/// reprint, synchronize.
+///
+/// Impression confirmée (audit 23/11) : printTicket {deferred_confirmation: true} ne retient pas l'original ; l'hôte
+/// appelle confirmTicketPrinted {operation_id} une fois le ticket réellement sorti. Sans ce drapeau : comportement
+/// d'origine (original retenu dès la demande). commitSale accepte draft_id et draft_revision (vue) : s'ils sont fournis
+/// et ne correspondent plus au panier courant, refus `panier_modifie` sans rien écrire.
 ///
 /// Retours (contrat 2.1, fermés par défaut) : returnableSale {sale_id}, previewReturn {sale_id, lines: [{line_id, quantity}]},
 /// commitReturn {sale_id, lines, reason} avec un identifiant d'opération facultatif. Quantités en unité de base.
@@ -374,7 +380,9 @@ class LocalRegisterAdapter {
       case 'history':
         return _history(args);
       case 'printTicket':
-        return _printTicket(_requireOperationId(operationId));
+        return _printTicket(_requireOperationId(operationId), deferred: args['deferred_confirmation'] == true);
+      case 'confirmTicketPrinted':
+        return _confirmTicketPrinted(_requireOperationId(operationId));
       case 'reprint':
         return _ticket(_requireOperationId(operationId), duplicate: true);
       case 'synchronize':
@@ -634,6 +642,7 @@ class LocalRegisterAdapter {
               'original_total_label': formatFcfa(((_draft.edit!['total_origine'] as num?) ?? 0).toInt()),
             },
       'draft_id': _draft.uuid,
+      'draft_revision': _draft.revision,
       'suspended_count': suspended,
       'store_name': snapshot?.store.name ?? '',
       'sync_label': _syncLabel(),
@@ -1935,6 +1944,12 @@ class LocalRegisterAdapter {
       await _clearConsumedDraft();
       return _committed(already);
     }
+    // Panier vu par l'écran : s'il a changé depuis (autre fenêtre, reprise, synchronisation), rien n'est encaissé.
+    final seenDraft = args['draft_id'];
+    final seenRevision = args['draft_revision'];
+    if ((seenDraft != null && seenDraft != _draft.uuid) || (seenRevision is num && seenRevision.toInt() != _draft.revision)) {
+      throw const AdapterFailure('panier_modifie', 'Le panier a changé depuis l’affichage : vérifiez-le puis encaissez à nouveau.');
+    }
     final snapshot = _snapshot();
     final operator = _operator;
     if (operator == null) throw const AdapterFailure('caissier_requis', 'Identifiez le caissier avant d’encaisser.');
@@ -2136,11 +2151,20 @@ class LocalRegisterAdapter {
   }
 
   /// Première impression sans mention, « REIMPRESSION » ensuite (comme le web, §5.3) ; retenue par vente sur le terminal.
-  Future<Map<String, dynamic>> _printTicket(String operationId) async {
+  /// [deferred] : l'original n'est retenu qu'à la confirmation de l'hôte (confirmTicketPrinted), après la sortie réelle
+  /// du papier — un échec d'imprimante ne fait plus sortir le ticket suivant en duplicata.
+  Future<Map<String, dynamic>> _printTicket(String operationId, {bool deferred = false}) async {
     final key = 'ticket_imprime.$operationId';
     final ticket = await _ticket(operationId, duplicate: await engine.store.read(key) != null);
-    await engine.store.write(key, '1');
+    if (!deferred) await engine.store.write(key, '1');
     return ticket;
+  }
+
+  Future<Map<String, dynamic>> _confirmTicketPrinted(String operationId) async {
+    final sale = await engine.saleStatus(operationId);
+    if (sale == null || !sale.isSale) throw const AdapterFailure('vente_inconnue', 'Vente introuvable sur ce terminal.');
+    await engine.store.write('ticket_imprime.$operationId', '1');
+    return {'operation_id': operationId, 'printed': true};
   }
 
   Future<Map<String, dynamic>> _ticket(String operationId, {required bool duplicate}) async {

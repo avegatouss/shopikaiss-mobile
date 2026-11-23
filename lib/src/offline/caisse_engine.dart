@@ -1177,7 +1177,11 @@ abstract class CaisseEngine extends EngineNotifier {
       final code = '${m['moyen']}';
       final method =
           s?.methods.where((x) => x.code == code).firstOrNull ??
-          PaymentMethodInfo({'code': code, 'nom': code == PassRules.method ? 'Pass événement' : code, 'especes': code == 'especes'});
+          PaymentMethodInfo({
+            'code': code,
+            'nom': code == PassRules.method ? 'Pass événement' : code == preSaleDepositMethod ? 'Acompte déjà versé' : code,
+            'especes': code == 'especes',
+          });
       final amount = (m['montant'] as num).toInt();
       final received = (m['recu'] as num?)?.toInt();
       final rounding = (m['ecart_arrondi'] as num?)?.toInt();

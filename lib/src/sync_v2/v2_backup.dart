@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:sqflite_common/sqlite_api.dart';
 
 import '../offline/store.dart';
@@ -134,7 +135,13 @@ class CaisseBackup {
           unsent: operations.where((r) => V2OperationState.unsent.contains(r['etat'])).length,
           operations: operations.length,
         );
-        final json = jsonEncode({'format': format, 'version': formatVersion, 'sauvegarde': info.toJson(), 'tables': tables});
+        // Contrôle (audit M03) : nombre de lignes de chaque table et empreinte du contenu, vérifiés avant toute
+        // suppression à la restauration.
+        final control = {
+          'lignes': {for (final e in tables.entries) e.key: e.value.length},
+          'empreinte': sha256.convert(utf8.encode(jsonEncode(tables))).toString(),
+        };
+        final json = jsonEncode({'format': format, 'version': formatVersion, 'sauvegarde': info.toJson(), 'controle': control, 'tables': tables});
         return (Uint8List.fromList(GZipCodec(level: 6).encode(utf8.encode(json))), info);
       });
 
@@ -199,6 +206,16 @@ class CaisseBackup {
       for (final name in tables.keys) {
         if (!existing.contains(name)) throw CaisseBackupRefusal('Sauvegarde illisible : table « $name » inconnue.');
       }
+      // Sauvegarde complète exigée (audit M03) : même version de base = mêmes tables, chacune présente.
+      final missing = existing.where((t) => !tables.containsKey(t)).toList()..sort();
+      if (missing.isNotEmpty) throw CaisseBackupRefusal('Sauvegarde incomplète (table « ${missing.first} » absente) : rien n’a été modifié.');
+      for (final e in tables.entries) {
+        if (e.value is! List || (e.value as List).any((r) => r is! Map)) throw CaisseBackupRefusal('Sauvegarde illisible : table « ${e.key} » abîmée.');
+      }
+      if ((tables['v2_operations'] as List?)?.length case final n? when n != info.operations) {
+        throw const CaisseBackupRefusal('Sauvegarde incohérente (nombre d’opérations) : rien n’a été modifié.');
+      }
+      _checkControl(data['controle'], tables);
       final kept = <String, String>{};
       for (final key in localKeys) {
         final rows = await txn.query('kv', where: 'cle = ?', whereArgs: [key], limit: 1);
@@ -223,6 +240,22 @@ class CaisseBackup {
       await txn.insert('kv', {'cle': V2Keys.restoredFrom, 'valeur': jsonEncode(info.toJson())}, conflictAlgorithm: ConflictAlgorithm.replace);
       return info;
     });
+  }
+
+  /// Nombre de lignes par table et empreinte du contenu ; une sauvegarde d'avant le contrôle (sans `controle`) reste
+  /// lisible, avec les seules vérifications de complétude.
+  static void _checkControl(Object? control, Map<String, dynamic> tables) {
+    if (control == null) return;
+    if (control is! Map || control['lignes'] is! Map || control['empreinte'] is! String) {
+      throw const CaisseBackupRefusal('Sauvegarde abîmée (contrôle illisible) : rien n’a été modifié.');
+    }
+    final counts = (control['lignes'] as Map).cast<String, dynamic>();
+    if (counts.length != tables.length || tables.entries.any((e) => counts[e.key] != (e.value as List).length)) {
+      throw const CaisseBackupRefusal('Sauvegarde incomplète (nombre de lignes) : rien n’a été modifié.');
+    }
+    if (sha256.convert(utf8.encode(jsonEncode(tables))).toString() != control['empreinte']) {
+      throw const CaisseBackupRefusal('Sauvegarde abîmée (empreinte différente) : rien n’a été modifié.');
+    }
   }
 
   static Map _read(List<int> bytes) {

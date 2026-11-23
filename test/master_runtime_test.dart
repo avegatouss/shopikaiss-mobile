@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -25,6 +26,18 @@ class _FakePlatform implements MasterPlatform {
 
   @override
   Future<void> stopService() async => events.add('stop');
+}
+
+class _SlowPlatform extends _FakePlatform {
+  final entered = Completer<void>();
+  final finish = Completer<void>();
+
+  @override
+  Future<void> startService(String text) async {
+    entered.complete();
+    await finish.future;
+    events.add('start');
+  }
 }
 
 /// Téléphone en caisse maîtresse (lot R-6) : afficheur, service de premier plan, batterie et sauvegardes suivent la
@@ -109,6 +122,28 @@ void main() {
     await e.sync();
     await runtime.apply();
     expect([runtime.master, platform.events.last, runtime.batteryWarning], [false, 'stop', null]);
+  });
+
+  test('arrêt demandé pendant le démarrage : le service lancé est arrêté (audit M07)', () async {
+    serveRestoMaster(server);
+    final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid,
+        pinVerifier: FakeV2Server.pinVerifier, contract21: true, announceRestaurant: true);
+    await e.load('https://boutique.exemple.ci');
+    await e.pair('ABCD-EFGH', model: 'Essai', appVersion: 'essai');
+    await e.sync();
+    final platform = _SlowPlatform();
+    final settings = AppSettings(shopUrl: 'https://boutique.exemple.ci', driver: 'none', paperWidth: 0, serialPath: '', serialBaud: 0, bluetoothAddress: '', usbDevice: '', adminCode: '');
+    final runtime = MasterRuntime(engine: e, settings: settings, platform: platform, backupDirectory: dir);
+    final applying = runtime.apply();
+    await platform.entered.future;
+    final stopping = runtime.stop();
+    platform.finish.complete();
+    await applying;
+    await stopping;
+    expect([runtime.serviceRunning, platform.events], [false, ['start', 'stop']]);
+    runtime.dispose();
+    await runtime.apply();
+    expect(platform.events, ['start', 'stop'], reason: 'plus rien après destruction');
   });
 
   test('adresse du mode afficheur : réseau local seulement', () {

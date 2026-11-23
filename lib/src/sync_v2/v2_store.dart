@@ -552,9 +552,22 @@ class V2Store {
   /// Enregistre une vente v2 : séquence réservée, opération figée (empreinte calculée sur la séquence réservée),
   /// validée contre le contrat, mouvements et consommation du brouillon — tout ou rien.
   ///
-  /// [build] reçoit la séquence et rend l'opération complète SANS empreinte.
-  Future<Map<String, dynamic>> recordOperation(Map<String, dynamic> Function(int sequence) build, {String? draftUuid}) =>
+  /// [build] reçoit la séquence et rend l'opération complète SANS empreinte. [followUps] : opérations liées (conversion
+  /// d'une prévente retirée), enregistrées aux séquences suivantes dans la MÊME transaction — jamais l'une sans l'autre.
+  Future<Map<String, dynamic>> recordOperation(
+    Map<String, dynamic> Function(int sequence) build, {
+    String? draftUuid,
+    List<Map<String, dynamic> Function(int sequence)> followUps = const [],
+  }) =>
       db.transaction((txn) async {
+        final operation = await _insertOperation(txn, build, draftUuid);
+        for (final next in followUps) {
+          await _insertOperation(txn, next, null);
+        }
+        return operation;
+      }, exclusive: true);
+
+  Future<Map<String, dynamic>> _insertOperation(Transaction txn, Map<String, dynamic> Function(int sequence) build, String? draftUuid) async {
         final epoch = int.parse(await read(V2Keys.epoch, txn) ?? (throw const V2SaleRefused('Terminal non appairé en v2.')));
         final sequence = int.parse(await read(V2Keys.nextSequence, txn) ?? '1');
         final operation = build(sequence);
@@ -600,7 +613,7 @@ class V2Store {
         }
         await write(V2Keys.nextSequence, '${sequence + 1}', txn);
         return operation;
-      }, exclusive: true);
+  }
 
   /// Opérations à (re)transmettre, dans l'ordre des séquences : jamais envoyées ou d'issue inconnue — renvoyées à
   /// l'identique (texte figé).

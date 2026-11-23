@@ -2847,16 +2847,18 @@ class V2Engine extends CaisseEngine {
           ),
           draftUuid: draft,
           calculation: revision21 ? '2' : '1',
+          // Conversion émise juste après la vente (note A §3), dans la même transaction : une panne entre les deux ne
+          // laisse jamais une vente avec sa prévente encore ouverte (acompte réutilisable).
+          followUps: [
+            if (preSale != null)
+              (uuid: _newUuid(), type: 'prevente_convertir', content: (_) => {
+                'prevente_uuid': preSale.uuid,
+                'vente_operation_uuid': uuid,
+                'acompte_impute': preSale.deposit,
+              }),
+          ],
         );
         if (extras.sharedCart == _heldCart?.$1) _heldCart = null;
-        if (preSale != null) {
-          // Émise juste après la vente de conversion (note A §3).
-          await _record(_newUuid(), 'prevente_convertir', operator, (_) => {
-            'prevente_uuid': preSale.uuid,
-            'vente_operation_uuid': uuid,
-            'acompte_impute': preSale.deposit,
-          });
-        }
         // Reste par lot : la vente suivante ne doit pas puiser dans ce qui vient de partir.
         if (allocation.isNotEmpty) await _rebuild();
         await _afterWrite();
@@ -2870,27 +2872,31 @@ class V2Engine extends CaisseEngine {
     Map<String, dynamic> Function(int sequence) content, {
     String? draftUuid,
     String calculation = '1',
+    List<({String uuid, String type, Map<String, dynamic> Function(int sequence) content})> followUps = const [],
   }) async {
     final epoch = int.parse(await v2.read(V2Keys.epoch) ?? (throw const OfflineRefusal('Terminal non appairé.')));
     final policies = await v2.read(V2Keys.policiesVersion) ?? '0';
     final cursor = await v2.read(V2Keys.cursor);
     final createdAt = now;
+    Map<String, dynamic> Function(int) build(String uuid, String type, Map<String, dynamic> Function(int) content, String calculation) =>
+        (sequence) => v2Operation(
+              uuid: uuid,
+              type: type,
+              deviceUuid: _device['uuid'] as String,
+              epoch: epoch,
+              sequence: sequence,
+              createdAt: createdAt,
+              operatorId: '${operator.id}',
+              policiesVersion: policies,
+              catalogueCursor: cursor,
+              content: content(sequence),
+              calculation: calculation,
+            );
     try {
       final operation = await v2.recordOperation(
-        (sequence) => v2Operation(
-          uuid: uuid,
-          type: type,
-          deviceUuid: _device['uuid'] as String,
-          epoch: epoch,
-          sequence: sequence,
-          createdAt: createdAt,
-          operatorId: '${operator.id}',
-          policiesVersion: policies,
-          catalogueCursor: cursor,
-          content: content(sequence),
-          calculation: calculation,
-        ),
+        build(uuid, type, content, calculation),
         draftUuid: draftUuid,
+        followUps: [for (final f in followUps) build(f.uuid, f.type, f.content, '1')],
       );
       return await _view({'operation': operation, 'etat': V2OperationState.toSend, 'numero_serveur': null, 'raison': null, 'maj_le': null});
     } on V2SaleInvalid catch (e) {

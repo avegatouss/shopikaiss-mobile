@@ -159,6 +159,32 @@ void main() {
     expect(await store.operations(), hasLength(1));
   });
 
+  test('printTicket différé : original tant que l’hôte n’a pas confirmé la sortie du papier (audit Windows, côté B)', () async {
+    await cartOf2Soaps();
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000a2';
+    await run('commitSale', {}, id);
+    expect((await run('printTicket', {'deferred_confirmation': true}, id))['duplicate'], isFalse);
+    expect((await run('printTicket', {'deferred_confirmation': true}, id))['duplicate'], isFalse, reason: 'imprimante en échec : toujours l’original');
+    expect(await run('confirmTicketPrinted', {}, id), {'operation_id': id, 'printed': true});
+    expect((await run('printTicket', {'deferred_confirmation': true}, id))['duplicate'], isTrue);
+    await expectLater(run('confirmTicketPrinted', {}, 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000ff'),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'vente_inconnue')));
+  });
+
+  test('commitSale : panier vu par l’écran différent du panier courant → refusé sans vente', () async {
+    await cartOf2Soaps();
+    final seen = await run('view');
+    await run('scan', {'code': '6190000000011'});
+    await run('setPayment', {'method': 'especes', 'received': 5000});
+    const id = 'aaaaaaaa-bbbb-4ccc-8ddd-0000000000a3';
+    await expectLater(run('commitSale', {'draft_id': seen['draft_id'], 'draft_revision': seen['draft_revision']}, id),
+        throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'panier_modifie')));
+    await expectLater(run('commitSale', {'draft_id': 'autre-panier'}, id), throwsA(isA<AdapterFailure>().having((f) => f.code, 'code', 'panier_modifie')));
+    expect(await store.operations(), isEmpty);
+    final now = await run('view');
+    expect((await run('commitSale', {'draft_id': now['draft_id'], 'draft_revision': now['draft_revision']}, id))['state'], 'committed');
+  });
+
   test('C-REQ-004 : le panier est conservé et retrouvé après redémarrage de l’hôte', () async {
     await cartOf2Soaps();
     final draft = (await run('view'))['draft_id'];

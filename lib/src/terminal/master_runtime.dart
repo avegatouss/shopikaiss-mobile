@@ -56,6 +56,10 @@ class MasterRuntime extends ChangeNotifier {
   bool _started = false;
   Timer? _backupTimer;
   Timer? _batteryTimer;
+  bool _disposed = false;
+
+  /// Démarrages, mises à jour et arrêts passent l'un après l'autre : un arrêt demandé pendant un démarrage attend sa fin
+  /// puis arrête ce qu'il a lancé (audit M07).
   Future<void> _pending = Future.value();
 
   /// Service d'afficheur en marche (null sinon).
@@ -103,7 +107,15 @@ class MasterRuntime extends ChangeNotifier {
   }
 
   /// Remet le téléphone dans l'état voulu (après un changement de réglage ou de désignation).
-  Future<void> apply() => _pending = _pending.then((_) => _apply()).catchError((Object _) {});
+  Future<void> apply() => _queue(() async {
+    if (!_disposed) await _apply();
+  });
+
+  Future<void> _queue(Future<void> Function() step) => _pending = _pending.then((_) => step()).catchError((Object _) {});
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
 
   Future<void> _apply() async {
     final master = this.master;
@@ -143,7 +155,7 @@ class MasterRuntime extends ChangeNotifier {
       }
     }
     if (master) await _readBattery(notify: false);
-    notifyListeners();
+    _notify();
   }
 
   Future<void> _readBattery({bool notify = true}) async {
@@ -152,7 +164,7 @@ class MasterRuntime extends ChangeNotifier {
       final value = await platform.battery();
       final changed = value != battery;
       battery = value;
-      if (changed && notify) notifyListeners();
+      if (changed && notify) _notify();
     } catch (_) {}
   }
 
@@ -166,32 +178,37 @@ class MasterRuntime extends ChangeNotifier {
       lastBackupAt = _clock();
       lastBackupPath = file.path;
       backupError = null;
-      notifyListeners();
+      _notify();
       return file;
     } catch (e) {
       _dirty = true;
       backupError = 'Sauvegarde automatique impossible : $e';
-      notifyListeners();
+      _notify();
       return null;
     }
   }
 
-  Future<void> stop() async {
+  /// Arrêt complet, après la mise à jour éventuellement en cours ; [apply] suivant relance si besoin.
+  Future<void> stop() {
     _backupTimer?.cancel();
     _batteryTimer?.cancel();
     engine.removeListener(_engineChanged);
     _started = false;
-    await _display?.stop();
-    if (_service) {
-      try {
-        await platform.stopService();
-      } catch (_) {}
-      _service = false;
-    }
+    return _queue(() async {
+      await _display?.stop();
+      if (_service) {
+        try {
+          await platform.stopService();
+        } catch (_) {}
+        _service = false;
+        _serviceText = null;
+      }
+    });
   }
 
   @override
   void dispose() {
+    _disposed = true;
     unawaited(stop());
     super.dispose();
   }

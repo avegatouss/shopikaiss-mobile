@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 import '../offline/caisse_engine.dart';
 import '../restaurant/resto_display_server.dart';
@@ -144,6 +145,9 @@ class _MasterSettingsSectionState extends State<MasterSettingsSection> {
     );
     if (ok != true) return;
     await _run(() async {
+      // Copie de secours de cette caisse avant remplacement (audit M03), à part des sauvegardes automatiques.
+      final (current, _) = await _engine.createBackup();
+      await CaisseBackup.writeRotating(Directory(p.join(_session.backupDirectory.path, 'avant-restauration')), current, at: DateTime.now(), keep: 3);
       await _engine.restoreBackup(bytes);
       await _session.master.apply();
       return 'Sauvegarde restaurée. Appairez maintenant ce téléphone (Caisse hors ligne ci-dessus), puis faites-le désigner caisse maîtresse.';
