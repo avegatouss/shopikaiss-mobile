@@ -900,6 +900,20 @@ extension _V2Restaurant on V2Engine {
         final deliveries = [for (final e in mine) if ((e['e'] as Map)['type'] == 'livraison') e['e'] as Map];
         final checks = {for (final e in mine) if ((e['e'] as Map)['type'] == 'verification') (e['e'] as Map)['tentative_uuid']: (e['e'] as Map)['constat']};
         final duplicated = mine.any((e) => (e['e'] as Map)['type'] == 'duplicata' && (e['x'] == 'transmis' || e['x'] == 'accuse'));
+        var status = 'new';
+        DateTime? statusAt;
+        for (final e in mine) {
+          final event = e['e'] as Map;
+          if (event['type'] != 'statut') continue;
+          final to = event['vers'] as String;
+          if (restoTicketStatuses.indexOf(to) > restoTicketStatuses.indexOf(status)) {
+            status = to;
+            statusAt = DateTime.tryParse('${event['le']}');
+          }
+        }
+        final printed = duplicated ||
+            checks.values.contains('sorti') ||
+            deliveries.any((d) => d['resultat'] == 'transmis' && d['cible'] != RestoTarget.ecranPoste.code);
         final unknown = [for (final d in deliveries) if (d['resultat'] == 'a_verifier' && !checks.containsKey(d['tentative_uuid'])) d['tentative_uuid'] as String];
         final reached = deliveries.any((d) => d['resultat'] == 'accuse' || d['resultat'] == 'transmis') || checks.values.contains('sorti') || duplicated;
         final state = unknown.isNotEmpty
@@ -918,10 +932,46 @@ extension _V2Restaurant on V2Engine {
           state: state,
           checkAttempt: unknown.firstOrNull,
           checked: checks.isNotEmpty,
+          status: status,
+          statusAt: statusAt,
+          printed: printed,
         ));
       }
     }
     return views.reversed.toList();
+  }
+
+  /// Statut de préparation d'un bon (RESTAURANT-1 §4.5), noté au journal et remonté par `resto_bons_etats` : `source`
+  /// `afficheur` (page du poste, R-6) ou `caisse`. Il n'avance que dans le flux du poste (`preparation` : new →
+  /// in_progress → ready → served ; `handover` : new → served) ; déjà atteint : rien n'est noté (rejeu sans effet).
+  /// Sans [operator] (afficheur) : l'opérateur qui a envoyé le bon.
+  Future<RestoTicketView> _restoTicketStatus(String ticketUuid, String to, {required String source, Operator? operator}) async {
+    final ctx = _resto ?? (throw const OfflineRefusal(_unavailable));
+    if (!ctx.master) throw const OfflineRefusal('Cette caisse n’est pas la caisse maîtresse du lieu.');
+    if (source != 'afficheur' && source != 'caisse') throw ArgumentError.value(source, 'source');
+    final view = (await _restoTicketViews()).where((t) => t.ticket.uuid == ticketUuid).firstOrNull ?? (throw const OfflineRefusal('Bon introuvable sur ce terminal.'));
+    final flow = ctx.stations[view.ticket.stationUuid]?.flow ?? 'preparation';
+    final allowed = flow == 'handover' ? const ['served'] : const ['in_progress', 'ready', 'served'];
+    if (!allowed.contains(to)) throw OfflineRefusal('Statut « $to » impossible pour ce poste.');
+    if (restoTicketStatuses.indexOf(to) <= restoTicketStatuses.indexOf(view.status)) return view;
+    var author = operator;
+    if (author == null) {
+      final sender = (await _restoJournalRead()).where((e) => (e['e'] as Map)['bon_uuid'] == ticketUuid).firstOrNull?['o'];
+      final id = int.tryParse('${sender ?? ''}') ?? snapshot?.operators.firstOrNull?.id;
+      if (id == null) throw const OfflineRefusal('Aucun opérateur connu sur ce terminal.');
+      author = snapshot?.operators.where((o) => o.id == id).firstOrNull ?? Operator({'id': id, 'nom': ''});
+    }
+    await _restoJournalAdd(author, {
+      'type': 'statut',
+      'bon_uuid': ticketUuid,
+      'de': view.status,
+      'vers': to,
+      'le': _restoStamp(),
+      'source': source,
+    });
+    await _restoFlush();
+    notifyListeners();
+    return (await _restoTicketViews()).firstWhere((t) => t.ticket.uuid == ticketUuid);
   }
 
   /// Vérification sur place d'une livraison à l'issue inconnue : c'est elle qui fait tomber l'alerte côté serveur.

@@ -102,7 +102,18 @@ enum RestoDeliveryState {
 
 /// Bon de production vu par la caisse : contenu immuable et état de sa livraison.
 class RestoTicketView {
-  const RestoTicketView({required this.ticket, required this.stationName, required this.orderNumber, this.table, required this.state, this.checkAttempt, this.checked = false});
+  const RestoTicketView({
+    required this.ticket,
+    required this.stationName,
+    required this.orderNumber,
+    this.table,
+    required this.state,
+    this.checkAttempt,
+    this.checked = false,
+    this.status = 'new',
+    this.statusAt,
+    this.printed = false,
+  });
 
   final RestoTicket ticket;
   final String stationName;
@@ -115,7 +126,24 @@ class RestoTicketView {
 
   /// Vérifié sur place (sorti ou non).
   final bool checked;
+
+  /// Statut de préparation (`resto_bons_etats` type `statut`) : `new`, `in_progress`, `ready` ou `served` ; il ne recule
+  /// jamais.
+  final String status;
+
+  /// Instant du dernier changement de statut, ou null (toujours `new`).
+  final DateTime? statusAt;
+
+  /// Sorti sur papier (imprimante du poste, secours, duplicata ou vérifié « sorti ») : l'afficheur le montre « déjà
+  /// imprimé ».
+  final bool printed;
+
+  /// Terminé pour le poste : prêt (flux `preparation`) ou servi.
+  bool get done => status == 'ready' || status == 'served';
 }
+
+/// Statuts d'un bon dans l'ordre (RESTAURANT-1 §4.5) : un statut ne recule jamais.
+const restoTicketStatuses = ['new', 'in_progress', 'ready', 'served'];
 
 class RestoRoom {
   const RestoRoom({required this.uuid, required this.code, required this.name, required this.order});

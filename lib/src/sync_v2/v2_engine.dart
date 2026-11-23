@@ -611,6 +611,10 @@ class V2Engine extends CaisseEngine {
   Future<void> restoVerifyTicket(Operator operator, String ticketUuid, {required bool printed}) => _restoVerify(operator, ticketUuid, printed: printed);
 
   @override
+  Future<RestoTicketView> restoTicketStatus(String ticketUuid, String to, {required String source, Operator? operator}) =>
+      _restoTicketStatus(ticketUuid, to, source: source, operator: operator);
+
+  @override
   Future<RestoOutcome?> restoDuplicateTicket(Operator operator, String ticketUuid, String reason) => _restoDuplicate(operator, ticketUuid, reason);
 
   @override

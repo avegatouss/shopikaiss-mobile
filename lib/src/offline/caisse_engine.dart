@@ -797,6 +797,11 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Bons de production de ce terminal (d'une commande si [orderUuid]) et état de leur livraison.
   Future<List<RestoTicketView>> restoTickets({String? orderUuid}) async => const [];
 
+  /// Statut de préparation d'un bon (`new` → `in_progress` → `ready` → `served`, jamais en arrière), [source] `afficheur`
+  /// ou `caisse` ; sans [operator] : l'opérateur qui a envoyé le bon (page d'afficheur, R-6).
+  Future<RestoTicketView> restoTicketStatus(String ticketUuid, String to, {required String source, Operator? operator}) =>
+      throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
+
   /// Vérification sur place d'un bon livré avec une issue inconnue.
   Future<void> restoVerifyTicket(Operator operator, String ticketUuid, {required bool printed}) =>
       throw const OfflineRefusal('Restaurant non disponible sur ce terminal.');
