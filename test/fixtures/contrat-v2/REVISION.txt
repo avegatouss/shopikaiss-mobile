@@ -1,7 +1,7 @@
 Copie du contrat v2 de la session A — ne pas modifier ici.
 Source : shopikaiss-web, docs/architecture/caisse-autonome/contrat-v2/
-Commit : origin/main 2b548b6d (lots 17 et 18 + logo intégrés par A). Schémas, fixtures et canonicalisation recopiés tels
-quels ; identiques à la fusion B précédente (59866319 + logo efc01465), au texte d'une description près. 236 fixtures, 16 schémas.
+Commit : origin/feat/prevente-ventilation dc1fbc71 (main 011ab838 + acompte ventilé, regles.prevente.z_acompte). Seuls donnees-2.1.json,
+fixtures/index.json et les deux fixtures de la règle changent ; 238 fixtures, 16 schémas. Avant : main 2b548b6d (lots 17, 18 et logo).
 Précédent : 59866319 + efc01465 fusionnés (lot 18, d7e7cc3), efc01465 (logo, eb2d222), 51f0745d (lot 17, 27cd200), 3ba28b1d (223 fixtures, e39dc61), 92bffdb5 (221), 194 (lots 10-11).
 Mise à jour : recopier depuis le commit de la nouvelle révision, régénérer lib/src/sync_v2/contract_schemas.dart
 (générateur dans le suivi B), puis relancer test/contrat_v2_test.dart et test/sync_v2_client_test.dart.

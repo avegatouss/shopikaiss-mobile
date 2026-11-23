@@ -777,6 +777,12 @@
                                 "actif": {
                                     "type": "boolean",
                                     "description": "false : l’écran Prévente n’est pas proposé."
+                                },
+                                "z_acompte": {
+                                    "description": "Capacité prevente.ventilation seulement (décision du 23/11/2026) : présente seulement si la boutique a choisi de ventiler l’acompte (Paramètres › Règles de gestion › Prévente). Le pré-X et le Z du poste AJOUTENT alors une rubrique « Ventes par moyen (acomptes ventilés) » où l’acompte imputé à une vente de conversion est rangé sous son moyen d’origine (acompte_moyen de la prévente publiée, ou preuve locale de sa création ; un moyen inconnu reste « Acompte prévente », jamais supposé espèces). Présentation seulement : le détail figé du Z (donnees-z-local-1), le tiroir, les espèces attendues et les opérations ne changent pas. Absente : présentation du contrat.",
+                                    "enum": [
+                                        "moyen_origine"
+                                    ]
                                 }
                             }
                         },

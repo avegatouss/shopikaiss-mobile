@@ -219,6 +219,7 @@ class V2Engine extends CaisseEngine {
           CaisseV2Client.interfaceCapability,
           CaisseV2Client.cashTransferCapability,
           CaisseV2Client.preSaleCapability,
+          CaisseV2Client.preSaleVentilationCapability,
           CaisseV2Client.shopResetCapability,
           CaisseV2Client.shopLogoCapability,
           CaisseV2Client.referencesCapability,

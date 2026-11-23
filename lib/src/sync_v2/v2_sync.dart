@@ -117,6 +117,9 @@ class V2Sync {
           // `prevente1` : première annonce de `prevente.v1` (lot 15), instantané pour recevoir la règle, le droit et les
           // préventes ouvertes publiées.
           '${contract21 && shared(CaisseV2Client.preSaleCapability) ? '+prevente1' : ''}'
+          // `ventilation1` : première annonce de `prevente.ventilation`, instantané pour recevoir `regles.prevente.z_acompte`
+          // d'une boutique qui ventile déjà (le journal ne republie pas la boutique).
+          '${contract21 && shared(CaisseV2Client.preSaleVentilationCapability) ? '+ventilation1' : ''}'
           // `remise1` : première annonce de `remise.zero` (lot 17), instantané pour recevoir `regles.remise_a_zero` d'une
           // remise déjà faite (le journal ne republie pas la boutique).
           '${contract21 && shared(CaisseV2Client.shopResetCapability) ? '+remise1' : ''}'

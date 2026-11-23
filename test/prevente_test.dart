@@ -123,25 +123,28 @@ void main() {
         extras: SaleExtras(preSale: PreSaleUse(uuid: wave.uuid, code: wave.code, deposit: wave.deposit)));
 
     final preX = (await e.closureDocument(ZKind.preX, ZVersion.detailed))!;
-    final titles = [for (final s in (preX.ticket['sections'] as List).cast<Map>()) s['titre']];
+    final titles = [for (final s in (preX.ticket['rubriques'] as List).cast<Map>()) s['titre']];
     expect(titles.indexOf('Ventes par moyen (acomptes ventilés)'), titles.indexOf('Encaissements par moyen') + 1, reason: 'juste après les encaissements');
     expect([for (final r in (preX.model['paiements'] as List).cast<Map>()) '${r['code']}:${r['count']}:${r['amount']}'],
         unorderedEquals(['acompte_prevente:2:1200', 'especes:2:800']), reason: 'encaissements du contrat inchangés');
     expect([for (final r in (preX.model['paiements_ventiles'] as List).cast<Map>()) '${r['code']}:${r['count']}:${r['amount']}'],
         ['especes:2:1800', 'wave:0:200'], reason: 'acomptes rangés sous leur moyen d’origine ; total 2 000 = encaissements');
     final short = (await e.closureDocument(ZKind.preX, ZVersion.short))!;
-    expect([for (final s in (short.ticket['sections'] as List).cast<Map>()) s['titre']], contains('Ventes par moyen (acomptes ventilés)'));
+    expect([for (final s in (short.ticket['rubriques'] as List).cast<Map>()) s['titre']], contains('Ventes par moyen (acomptes ventilés)'));
     expect(preX.ticket.toString(), contains('Total des ventes'));
     expect(preX.ticket.toString(), contains(preSaleVentilationMention));
     expect((await e.closingGaps(800, const [])).cash, isFalse, reason: 'le tiroir attend l’argent reçu : 500 + 300');
 
-    // Détail figé envoyé au serveur : inchangé (acompte_prevente).
+    // Opérations envoyées au serveur : inchangées (paiement technique acompte_prevente, rien de ventilé).
     await e.closeSession(awa(e), cash: 800);
     await e.sync();
-    final closure = server.received.values.map((r) => r['operation'] as Map).lastWhere((o) => o['type'] == 'cloture_session');
-    expect(closure.toString(), contains('acompte_prevente'));
-    expect(closure.toString(), isNot(contains('acomptes ventilés')));
-  }, skip: 'Attend le schéma donnees-2.1 de A (regles.prevente.z_acompte, branche web feat/prevente-ventilation).');
+    final sent = server.received.values.map((r) => r['operation'] as Map).toList();
+    final conversions = [for (final o in sent) if (o['type'] == 'vente' && (o['contenu'] as Map)['prevente_uuid'] != null) o];
+    expect([for (final o in conversions) for (final p in ((o['contenu'] as Map)['paiements'] as List).cast<Map>()) '${p['moyen']}:${p['montant']}'],
+        unorderedEquals(['acompte_prevente:1000', 'especes:500', 'acompte_prevente:200', 'especes:300']));
+    expect(sent.toString(), isNot(contains('ventil')));
+    expect(server.received.values.every((r) => r['etat'] == 'integree'), isTrue);
+  });
 
   test('acompte ventilé : règle absente, origine inconnue ou remboursement d’un autre moyen → « Acompte prévente »', () async {
     serve();

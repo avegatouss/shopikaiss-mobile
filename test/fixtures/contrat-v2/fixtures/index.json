@@ -1179,6 +1179,17 @@
             "valide": true
         },
         {
+            "fichier": "valides/donnees-2.1--regle-prevente-acompte-ventile.json",
+            "schema": "donnees-2.1.json#/$defs/boutique/properties/regles/properties/prevente",
+            "valide": true
+        },
+        {
+            "fichier": "invalides/donnees-2.1--regle-prevente-acompte-especes.json",
+            "schema": "donnees-2.1.json#/$defs/boutique/properties/regles/properties/prevente",
+            "valide": false,
+            "erreur_attendue": "valeur hors liste"
+        },
+        {
             "fichier": "invalides/donnees-2.1--prevente-statut-convertie.json",
             "schema": "donnees-2.1.json#/$defs/prevente",
             "valide": false,
