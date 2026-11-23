@@ -2282,7 +2282,8 @@ class V2Engine extends CaisseEngine {
       if (product?.category case final String c when c.isNotEmpty) categories[e.key] = c;
       names[e.key] = product?.name ?? '${e.value['nom'] ?? ''}';
     }
-    final sessions = sessionsFromOperations(operations, openSession: open, aliases: {for (final e in _serverSessions.entries) e.value: e.key});
+    final aliases = {for (final e in _serverSessions.entries) e.value: e.key};
+    final sessions = sessionsFromOperations(operations, openSession: open, aliases: aliases);
     for (final s in sessions) {
       if (s.closure != null) s.closureState = states['${s.closure!['uuid']}'];
     }
@@ -2290,12 +2291,16 @@ class V2Engine extends CaisseEngine {
     final terminal = _device['terminal_uuid'] as String?;
     Map? day;
     if (zLocalSupported) {
-      applyZSession(sessions, (await v2.entities('z.session'))['z_session:$terminal']);
+      final publishedSession = (await v2.entities('z.session'))['z_session:$terminal'];
+      applyZSession(sessions, publishedSession == null ? null : {
+        ...publishedSession,
+        'session_uuid': aliases[publishedSession['session_uuid']] ?? publishedSession['session_uuid'],
+      });
       day = (await v2.entities('z.journee')).values.where((d) => ((d['terminaux'] as List?) ?? const []).contains(terminal)).firstOrNull;
     }
     return ClosureFacts(
       sessions: sessions,
-      openSessionUuid: sessionOpen ? _sessionUuid : null,
+      openSessionUuid: sessionOpen ? (aliases[_sessionUuid] ?? _sessionUuid) : null,
       categories: categories,
       productNames: names,
       zDay: day,

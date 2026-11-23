@@ -67,6 +67,28 @@ void main() {
 
   CartLine savon(V2Engine e) => CartLine(product: e.snapshot!.byCode('6190000000011')!.$1, quantity: BigInt.from(1000000));
 
+  test('pre-X keeps the open session after server UUID reconciliation', () async {
+    server
+      ..capabilities = [...server.capabilities, 'z.local']
+      ..put('z.session', 'z_session:$fakeTerminal', zSession());
+    final e = await paired();
+    const local = 'abcdef00-0000-4000-8000-000000000099';
+    await e.v2.write(V2Keys.serverSessions, jsonEncode({local: fakeSession}));
+    await e.load('https://boutique.exemple.ci');
+    expect(e.sessionOpen, isTrue);
+    final awa = e.snapshot!.operators.firstWhere((o) => o.id == 7);
+    final method = e.snapshot!.methods.firstWhere((m) => m.isCash);
+    await e.recordSale([savon(e)], [CartPayment(method: method, amount: 500, received: 500)], awa);
+    final facts = (await e.closureFacts())!;
+    expect(facts.openSession, isNotNull);
+    expect(facts.openSession!.uuid, local);
+    expect(facts.openSession!.float, 20000);
+    expect(facts.openSession!.sales, hasLength(1));
+    final doc = (await e.closureDocument(ZKind.preX, ZVersion.detailed))!;
+    expect(doc.edition, isNotNull);
+    expect(e.sessionOpen, isTrue);
+  });
+
   test('z.local : annoncée avec contrat.2_1, instantané à la première obtention, z.session et z.journee stockées', () async {
     final e = await paired();
     expect(server.requests.lastWhere((r) => r.path == '/etat').headers['X-Caisse-Capacites'], contains('z.local'));
