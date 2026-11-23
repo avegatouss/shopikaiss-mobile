@@ -162,6 +162,36 @@ class TerminalChannel {
     }
   }
 
+  /// Batterie : niveau (0 à 100, -1 inconnu) et branchement ; null sans canal natif.
+  Future<({int level, bool plugged})?> battery() async {
+    if (!supported) return null;
+    try {
+      final raw = await _channel.invokeMapMethod<String, dynamic>('battery');
+      if (raw == null) return null;
+      return (level: (raw['level'] as num?)?.toInt() ?? -1, plugged: raw['plugged'] == true);
+    } on PlatformException {
+      return null;
+    }
+  }
+
+  /// Service de premier plan de la caisse maîtresse (lot R-6) : processus, processeur et Wi-Fi gardés actifs.
+  Future<NativeResult> startMasterService(String text) => _call('startMasterService', {'text': text});
+
+  Future<NativeResult> stopMasterService() => _call('stopMasterService');
+
+  /// Enregistre [bytes] là où le gérant le choisit (sélecteur de documents du système).
+  Future<NativeResult> saveDocument(String name, Uint8List bytes) => _call('saveDocument', {'name': name, 'bytes': bytes});
+
+  /// Fichier choisi par le gérant dans le sélecteur de documents, ou null (annulé, illisible, trop gros).
+  Future<Uint8List?> openDocument() async {
+    if (!supported) return null;
+    try {
+      return await _channel.invokeMethod<Uint8List>('openDocument');
+    } on PlatformException {
+      return null;
+    }
+  }
+
   /// Nœuds `/dev/tty*` candidats : `[{path, writable}]`.
   Future<List<Map<String, dynamic>>> serialPorts() => _list('serialPorts');
 

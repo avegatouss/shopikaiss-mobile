@@ -201,6 +201,26 @@ class _RestaurantFloorState extends State<_RestaurantFloor> {
             content: Text(blocker),
             actions: [TextButton(onPressed: () => widget.host._tryOnline(), child: const Text('Synchroniser'))],
           ),
+        // Téléphone maître (lot R-6) : batterie sans secteur, page d'afficheur arrêtée.
+        ListenableBuilder(
+          listenable: widget.host.widget.session.master,
+          builder: (context, _) {
+            final master = widget.host.widget.session.master;
+            final warnings = [?master.batteryWarning, ?master.displayError];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final w in warnings)
+                  MaterialBanner(
+                    backgroundColor: Colors.red.shade50,
+                    leading: const Icon(Icons.battery_alert_outlined, color: Colors.red),
+                    content: Text(w),
+                    actions: const [SizedBox.shrink()],
+                  ),
+              ],
+            );
+          },
+        ),
         if (_alerts.isNotEmpty)
           MaterialBanner(
             backgroundColor: Colors.orange.shade50,

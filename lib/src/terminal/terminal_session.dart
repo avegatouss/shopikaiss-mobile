@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/widgets.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart' show databaseFactory, getDatabasesPath;
 
@@ -13,15 +16,28 @@ import '../restaurant/resto_engine.dart';
 import '../sync_v2/v2_engine.dart';
 import '../sync_v2/v2_transport.dart';
 import '../ui/screen_profile.dart';
+import 'master_runtime.dart';
 import 'terminal_channel.dart';
 
 /// État partagé de l'application : réglages, terminal détecté, pilote d'imprimante actif.
 class TerminalSession extends ChangeNotifier {
-  TerminalSession._(this.settings, this.info, this.appVersion, this.offline);
+  TerminalSession._(this.settings, this.info, this.appVersion, this.offline, this.backupDirectory);
 
   /// Session sans canal natif, pour les tests d'écran.
   @visibleForTesting
-  TerminalSession.forTest({required this.settings, required this.offline, this.info = TerminalInfo.unsupported, this.appVersion = 'test'});
+  TerminalSession.forTest({required this.settings, required this.offline, this.info = TerminalInfo.unsupported, this.appVersion = 'test'})
+    : backupDirectory = Directory.systemTemp;
+
+  /// Sauvegardes automatiques de la caisse (dossier privé de l'application).
+  final Directory backupDirectory;
+
+  /// Téléphone en caisse maîtresse restaurant (lot R-6) : afficheurs, service de premier plan, batterie, sauvegardes.
+  late final MasterRuntime master = MasterRuntime(
+    engine: offline,
+    settings: settings,
+    platform: _ChannelMasterPlatform(channel),
+    backupDirectory: backupDirectory,
+  );
 
   final AppSettings settings;
 
@@ -59,8 +75,10 @@ class TerminalSession extends ChangeNotifier {
       imageDirectory: p.join(await getDatabasesPath(), 'images'),
     );
     if (settings.configured) await offline.load(settings.origin);
-    final session = TerminalSession._(settings, TerminalInfo.unsupported, package.version, offline);
+    final backups = Directory(p.join(await getDatabasesPath(), 'sauvegardes'));
+    final session = TerminalSession._(settings, TerminalInfo.unsupported, package.version, offline, backups);
     await session.refresh();
+    session.master.start();
     return session;
   }
 
@@ -102,6 +120,36 @@ class TerminalSession extends ChangeNotifier {
     await settings.save();
     if (settings.configured) await offline.load(settings.origin);
     await refresh();
+    await master.apply();
+  }
+}
+
+class _ChannelMasterPlatform implements MasterPlatform {
+  _ChannelMasterPlatform(this.channel);
+
+  final TerminalChannel channel;
+  bool _asked = false;
+
+  @override
+  Future<({int level, bool plugged})?> battery() => channel.battery();
+
+  @override
+  Future<void> startService(String text) async {
+    if (!channel.supported) return;
+    // Android 13+ : sans cet accord, la notification du service est masquée (le service tourne quand même).
+    if (!_asked) {
+      _asked = true;
+      try {
+        await Permission.notification.request();
+      } catch (_) {}
+    }
+    final result = await channel.startMasterService(text);
+    if (!result.ok) throw StateError(result.error ?? 'service');
+  }
+
+  @override
+  Future<void> stopService() async {
+    if (channel.supported) await channel.stopMasterService();
   }
 }
 

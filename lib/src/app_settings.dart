@@ -31,7 +31,19 @@ class AppSettings {
     this.imageFit = 'cover',
     this.ticketMode = 'ask',
     this.startRouteMissing,
+    this.displayServer = false,
+    this.displayServerPort = 8787,
+    this.displayModeUrl = '',
   });
+
+  /// Caisse maîtresse restaurant (lot R-6) : page d'afficheur servie sur le Wi-Fi du lieu. Éteinte par défaut ; le port
+  /// est choisi sur le poste, jamais reçu du serveur.
+  bool displayServer;
+  int displayServerPort;
+
+  /// Mode « afficheur » (tablette, lot R-6) : adresse de la page de la caisse maîtresse (`http://IP:port/`), ouverte en
+  /// plein écran au démarrage ; vide = application de caisse normale. L'appareil n'est jamais appairé dans ce mode.
+  String displayModeUrl;
 
   /// Préférence dédiée : `/caisse/demarrer` absente du serveur (404/405), notée par origine (voir web/start_route.dart).
   static const startRouteMissingKey = 'startRouteMissing';
@@ -162,6 +174,9 @@ class AppSettings {
       imageFit: p.getString('imageFit') ?? 'cover',
       ticketMode: p.getString('ticketMode') ?? 'ask',
       startRouteMissing: await _startRouteMemory(p),
+      displayServer: p.getBool('displayServer') ?? false,
+      displayServerPort: p.getInt('displayServerPort') ?? 8787,
+      displayModeUrl: p.getString('displayModeUrl') ?? '',
     );
   }
 
@@ -204,6 +219,9 @@ class AppSettings {
     await p.setString('imageMode', imageMode);
     await p.setString('imageFit', imageFit);
     await p.setString('ticketMode', ticketMode);
+    await p.setBool('displayServer', displayServer);
+    await p.setInt('displayServerPort', displayServerPort);
+    await p.setString('displayModeUrl', displayModeUrl);
   }
 }
 

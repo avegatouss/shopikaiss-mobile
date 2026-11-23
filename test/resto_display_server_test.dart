@@ -12,7 +12,7 @@ import 'package:shopikaiss_terminal/src/sync_v2/v2_engine.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'support/fake_v2_server.dart';
-import 'sync_v2_engine_test.dart' show serve21;
+import 'support/resto_master.dart';
 
 /// Page d'afficheur servie par la caisse maîtresse (lot R-6, décision R10, plan §2 et §7.5).
 void main() {
@@ -22,10 +22,9 @@ void main() {
   late FakeV2Server server;
   var uuids = 0;
   String newUuid() => 'abcdef00-0000-4000-8000-${(++uuids).toString().padLeft(12, '0')}';
-  const pdv = 'b1000000-0000-4000-8000-000000000001';
-  const t1 = 'b4000000-0000-4000-8000-000000000001';
-  const cuisine = 'b2000000-0000-4000-8000-0000000000c1';
-  const bar = 'b2000000-0000-4000-8000-0000000000b1';
+  const t1 = restoTable;
+  const cuisine = restoKitchen;
+  const bar = restoBar;
 
   setUp(() async {
     dir = Directory.systemTemp.createTempSync('afficheur_');
@@ -38,37 +37,7 @@ void main() {
   });
 
   Future<V2Engine> master(DateTime Function() clock) async {
-    Map<String, dynamic> operateur(String id, String nom, List<String> droits) => {
-      'operateur_id': id, 'nom': nom, 'pin_empreinte': 'empreinte', 'droits': droits,
-      'remise_max_pourcent': null, 'remise_max_montant': null, 'approbateur_remise': false,
-    };
-    serve21(server);
-    server
-      ..capabilities = [...server.capabilities, 'session.cloture', 'restaurant.v1']
-      ..authorizationExpires = '2026-11-20T00:00:00Z'
-      ..restaurant = {'point_de_vente_uuid': pdv, 'profil': 'TABLE_SERVICE', 'maitre': true, 'generation': '3', 'derniers_numeros': null}
-      ..put('operateur', 'operateur:8', operateur('8', 'Koffi', ['caisse_service_table', 'caisse_table']), critical: true)
-      ..put('restaurant.point_de_vente', pdv, {
-        'code': 'SALLE', 'nom': 'Salle', 'profil': 'TABLE_SERVICE', 'actif': true, 'terminaux': [fakeTerminal], 'membres': null,
-        'reglages_vente': {'changement_client_paiement': true, 'reference_plateforme_avant_envoi': false, 'verrouillage_minutes': null},
-      }, critical: true)
-      ..put('restaurant.maitre', 'maitre:$pdv', {
-        'point_de_vente_uuid': pdv, 'generation': '3', 'terminal_uuid': fakeTerminal, 'appareil_uuid': fakeDevice, 'epoque': 3, 'designe_le': '2026-11-18T09:30:00Z',
-      }, critical: true)
-      ..put('restaurant.reglages', 'reglages:$pdv', {
-        'point_de_vente_uuid': pdv, 'envoi_production': true, 'plusieurs_commandes_par_table': false, 'prefixe_commande': 'PF', 'motif_annulation_commande': false,
-        'registre_obligatoire': false, 'prefacture_a_la_demande': true, 'retard_production_minutes': 15, 'sections_z': <String>[], 'fuseau': 'Africa/Abidjan',
-        'impression_mode': 'register', 'repli_premier_poste_actif': false, 'annulation_envoye_responsable': false,
-        'assistant': {'max_operations_par_jour': 0, 'max_montant_par_operation': 0, 'max_montant_par_jour': 0, 'max_remise_pourcent': 0},
-      }, critical: true)
-      ..put('restaurant.table', t1, {'point_de_vente_uuid': pdv, 'salle_uuid': null, 'nom': 'T1', 'code': 'T1', 'capacite': 4, 'ordre': 1, 'actif': true})
-      // Cuisine : écran et papier ; bar : écran seul (flux de remise directe).
-      ..put('restaurant.poste', cuisine, {'code': 'cui', 'nom': 'Cuisine', 'type': 'kitchen', 'flux': 'preparation', 'ecran': true, 'papier': true, 'ordre': 1, 'actif': true})
-      ..put('restaurant.poste', bar, {'code': 'bar', 'nom': 'Bar', 'type': 'bar', 'flux': 'handover', 'ecran': true, 'papier': false, 'ordre': 2, 'actif': true})
-      ..put('restaurant.routage', fakeSavon,
-          {'routage': 'station', 'poste_uuid': cuisine, 'categorie_poste_uuid': null, 'poste_effectif_uuid': cuisine, 'visible': true, 'ordre': 0, 'favori': false})
-      ..put('restaurant.routage', fakeService,
-          {'routage': 'station', 'poste_uuid': bar, 'categorie_poste_uuid': null, 'poste_effectif_uuid': bar, 'visible': true, 'ordre': 1, 'favori': false});
+    serveRestoMaster(server);
     final e = V2Engine.onStore(base, transport: server, appVersion: 'essai', platform: 'android', newUuid: newUuid,
         pinVerifier: FakeV2Server.pinVerifier, contract21: true, announceRestaurant: true, clock: clock);
     await e.load('https://boutique.exemple.ci');
@@ -219,5 +188,7 @@ void main() {
     bool private(String a) => RestoDisplayServer.isPrivateAddress(InternetAddress(a));
     expect(['192.168.1.20', '10.0.0.5', '172.16.4.1', '172.31.255.1', '127.0.0.1', '169.254.3.3', 'fe80::1', 'fd00::5', '::ffff:192.168.1.9'].every(private), isTrue);
     expect(['8.8.8.8', '172.32.0.1', '100.64.0.1', '2001:db8::1', '::ffff:8.8.8.8'].any(private), isFalse);
+    expect(['192.168.1.20', 'caisse.local', 'localhost', '::1'].every(RestoDisplayServer.localHost), isTrue);
+    expect(['attaque.exemple.com', '', null].any(RestoDisplayServer.localHost), isFalse);
   });
 }

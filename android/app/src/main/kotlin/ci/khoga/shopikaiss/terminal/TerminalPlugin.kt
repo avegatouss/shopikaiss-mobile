@@ -4,7 +4,9 @@ import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.content.IntentFilter
 import android.media.AudioManager
+import android.os.BatteryManager
 import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
@@ -39,6 +41,8 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
     private val keyboard = KeyboardBlocker(activity).also { it.start() }
     private var toneGenerator: ToneGenerator? = null
     private var pendingImage: MethodChannel.Result? = null
+    private var pendingSave: Pair<MethodChannel.Result, ByteArray>? = null
+    private var pendingOpen: MethodChannel.Result? = null
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -83,6 +87,17 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
                 result.success(OK)
             }
             "serialPorts" -> background(result) { PrinterManager.serialPorts() }
+            "battery" -> result.success(battery())
+            "startMasterService" -> {
+                MasterService.start(activity, call.argument<String>("text") ?: "Caisse maîtresse active")
+                result.success(OK)
+            }
+            "stopMasterService" -> {
+                MasterService.stop(activity)
+                result.success(OK)
+            }
+            "saveDocument" -> saveDocument(call, result)
+            "openDocument" -> openDocument(result)
             else -> result.notImplemented()
         }
     }
@@ -186,8 +201,108 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
         }
     }
 
-    /** Appelé par [MainActivity.onActivityResult] ; vrai si la réponse est celle du sélecteur de logo. */
+    /** Niveau de batterie (0 à 100, -1 inconnu) et branchement sur secteur ou USB. */
+    private fun battery(): Map<String, Any> {
+        val intent = activity.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+        val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+        val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+        val plugged = intent?.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) ?: 0
+        return mapOf("ok" to true, "level" to (if (level >= 0 && scale > 0) level * 100 / scale else -1), "plugged" to (plugged != 0))
+    }
+
+    /** Sauvegarde de la caisse : le gérant choisit où l'enregistrer (carte, clé USB, Drive) ; rien n'est écrit ailleurs. */
+    private fun saveDocument(call: MethodCall, result: MethodChannel.Result) {
+        val bytes = call.argument<ByteArray>("bytes")
+        if (bytes == null || pendingSave != null) {
+            result.success(failure("busy"))
+            return
+        }
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT)
+            .addCategory(Intent.CATEGORY_OPENABLE)
+            .setType("application/octet-stream")
+            .putExtra(Intent.EXTRA_TITLE, call.argument<String>("name") ?: "caisse.skcaisse")
+        pendingSave = result to bytes
+        try {
+            activity.startActivityForResult(intent, SAVE_DOCUMENT)
+        } catch (_: ActivityNotFoundException) {
+            pendingSave = null
+            result.success(failure("no_picker"))
+        }
+    }
+
+    /** Fichier de sauvegarde choisi par le gérant (200 Mo au plus), ou null. */
+    private fun openDocument(result: MethodChannel.Result) {
+        if (pendingOpen != null) {
+            result.success(null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).addCategory(Intent.CATEGORY_OPENABLE).setType("*/*")
+        pendingOpen = result
+        try {
+            activity.startActivityForResult(intent, OPEN_DOCUMENT)
+        } catch (_: ActivityNotFoundException) {
+            pendingOpen = null
+            result.success(null)
+        }
+    }
+
+    private fun onDocumentResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        val uri = data?.data
+        if (requestCode == SAVE_DOCUMENT) {
+            val (reply, bytes) = pendingSave ?: return
+            pendingSave = null
+            if (resultCode != Activity.RESULT_OK || uri == null) {
+                reply.success(failure("cancelled"))
+                return
+            }
+            Thread {
+                val outcome = try {
+                    val stream = activity.contentResolver.openOutputStream(uri, "wt") ?: throw IllegalStateException("no_stream")
+                    stream.use {
+                        it.write(bytes)
+                        it.flush()
+                    }
+                    OK
+                } catch (e: Exception) {
+                    failure(e.message ?: e.javaClass.simpleName)
+                }
+                main.post { reply.success(outcome) }
+            }.start()
+            return
+        }
+        val reply = pendingOpen ?: return
+        pendingOpen = null
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            reply.success(null)
+            return
+        }
+        Thread {
+            val bytes = try {
+                activity.contentResolver.openInputStream(uri)?.use { input ->
+                    val limit = 200 * 1024 * 1024
+                    val buffer = java.io.ByteArrayOutputStream()
+                    val chunk = ByteArray(64 * 1024)
+                    while (true) {
+                        val n = input.read(chunk)
+                        if (n < 0) break
+                        buffer.write(chunk, 0, n)
+                        if (buffer.size() > limit) throw IllegalStateException("too_large")
+                    }
+                    buffer.toByteArray()
+                }
+            } catch (_: Exception) {
+                null
+            }
+            main.post { reply.success(bytes) }
+        }.start()
+    }
+
+    /** Appelé par [MainActivity.onActivityResult] ; vrai si la réponse est celle d'un sélecteur de ce canal. */
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == SAVE_DOCUMENT || requestCode == OPEN_DOCUMENT) {
+            onDocumentResult(requestCode, resultCode, data)
+            return true
+        }
         if (requestCode != PICK_IMAGE) return false
         val reply = pendingImage ?: return true
         pendingImage = null
@@ -220,6 +335,10 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
     fun dispose() {
         pendingImage?.success(null)
         pendingImage = null
+        pendingSave?.first?.success(failure("cancelled"))
+        pendingSave = null
+        pendingOpen?.success(null)
+        pendingOpen = null
         channel.setMethodCallHandler(null)
         display.stop()
         io.execute { printers.close() }
@@ -232,6 +351,8 @@ class TerminalPlugin(private val activity: Activity, messenger: BinaryMessenger)
         const val CHANNEL = "ci.khoga.shopikaiss/terminal"
         private const val REQUEST_BLUETOOTH = 4101
         private const val PICK_IMAGE = 4102
+        private const val SAVE_DOCUMENT = 4103
+        private const val OPEN_DOCUMENT = 4104
         private val OK = mapOf("ok" to true)
         private fun failure(error: String) = mapOf("ok" to false, "error" to error)
     }

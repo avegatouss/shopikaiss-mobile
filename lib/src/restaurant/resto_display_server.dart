@@ -200,6 +200,8 @@ class RestoDisplayServer extends EngineNotifier {
       if (remote == null || !isPrivateAddress(remote)) {
         return await _json(response, 403, {'erreur': 'Réservé au réseau local du lieu.'});
       }
+      // Re-liaison DNS : une page d'un autre site ne peut pas viser ce service sous son propre nom.
+      if (!localHost(request.headers.host)) return await _json(response, 403, {'erreur': 'Adresse non reconnue.'});
       final path = request.uri.path;
       final method = request.method;
       if (method == 'GET' && (path == '/' || path == '/afficheur')) {
@@ -472,6 +474,13 @@ class RestoDisplayServer extends EngineNotifier {
       return (raw[0] & 0xfe) == 0xfc || (raw[0] == 0xfe && (raw[1] & 0xc0) == 0x80);
     }
     return false;
+  }
+
+  /// Nom d'hôte demandé : une adresse IP, `localhost` ou un nom `.local` du réseau du lieu.
+  static bool localHost(String? host) {
+    if (host == null || host.isEmpty) return false;
+    final name = host.toLowerCase();
+    return InternetAddress.tryParse(name) != null || name == 'localhost' || name.endsWith('.local');
   }
 
   static bool _privateV4(List<int> b) =>

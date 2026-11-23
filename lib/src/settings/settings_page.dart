@@ -10,6 +10,7 @@ import '../offline/offline_settings_section.dart';
 import '../ui/screen_profile.dart';
 import '../printer/escpos.dart';
 import '../terminal/terminal_channel.dart';
+import '../terminal/master_settings_section.dart';
 import '../terminal/terminal_session.dart';
 
 /// Réglages : adresse de la boutique, terminal détecté, imprimante, code d'accès.
@@ -300,6 +301,7 @@ class _SettingsPageState extends State<SettingsPage> {
               }),
             ]),
             OfflineSettingsSection(session: _session),
+            MasterSettingsSection(session: _session),
             DiagnosticsSection(session: _session),
             _Section(title: 'Personnalisation de la caisse', children: [
               Text('Couleur principale', style: theme.textTheme.labelLarge),

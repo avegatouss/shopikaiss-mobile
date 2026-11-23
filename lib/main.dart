@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'src/diagnostics.dart';
 import 'src/settings/settings_page.dart';
+import 'src/terminal/display_mode_page.dart';
 import 'src/terminal/terminal_session.dart';
 import 'src/web/caisse_page.dart';
 
@@ -29,7 +30,10 @@ class _ShopiKaissAppState extends State<ShopiKaissApp> {
       title: 'ShopiKaiss',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(colorSchemeSeed: const Color(0xFF0F3E2E), useMaterial3: true),
-      home: session.settings.configured
+      // Tablette afficheur (lot R-6) : la page de la caisse maîtresse du lieu, rien d'autre.
+      home: session.settings.displayModeUrl.isNotEmpty
+          ? DisplayModePage(session: session)
+          : session.settings.configured
           ? CaissePage(session: session)
           : SettingsPage(session: session, firstRun: true, onDone: () => setState(() {})),
     );
