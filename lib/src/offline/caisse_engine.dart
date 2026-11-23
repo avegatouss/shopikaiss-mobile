@@ -470,7 +470,7 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Responsable reconnu par son code seul : exactement un responsable doit correspondre (note A lot 11 §3). Les échecs
   /// sont comptés comme pour les autres codes (blocage progressif sur ce terminal).
-  Future<Operator> identifyEditApprover(String code) async {
+  Future<Operator> identifyEditApprover(String code) => _oneCodeAtATime(() async {
     const key = '${StoreKeys.approvalFailures}modification';
     final locked = await _lockedFor(key);
     if (locked != null) throw OfflineRefusal('Trop d’essais : réessayez dans ${locked.inSeconds + 1} s.');
@@ -492,12 +492,12 @@ abstract class CaisseEngine extends EngineNotifier {
     }
     await store.write(key, null);
     return matches.single;
-  }
+  });
 
   /// Code responsable seul (demande du responsable, 22/11) : le responsable est reconnu par son code de 8 chiffres
   /// parmi TOUS les codes publiés ; plusieurs correspondances valent un refus ; un code inconnu est compté (blocage
   /// progressif). Le responsable reconnu doit ensuite figurer dans [eligible], sinon [notAllowed] (son nom en tête).
-  Future<Operator> identifyApprover(String code, {required List<Operator> eligible, required String notAllowed}) async {
+  Future<Operator> identifyApprover(String code, {required List<Operator> eligible, required String notAllowed}) => _oneCodeAtATime(() async {
     const key = '${StoreKeys.approvalFailures}code';
     final locked = await _lockedFor(key);
     if (locked != null) throw OfflineRefusal('Trop d’essais : réessayez dans ${locked.inSeconds + 1} s.');
@@ -524,6 +524,16 @@ abstract class CaisseEngine extends EngineNotifier {
     final approver = matches.single;
     if (!eligible.any((o) => o.id == approver.id)) throw OfflineRefusal('${approver.name} $notAllowed');
     return approver;
+  });
+
+  /// Codes responsables vérifiés un à la fois (relecture du 23/11) : des essais simultanés liraient le même compteur
+  /// d'échecs et passeraient avant le blocage. File propre, indépendante de celle des écritures.
+  Future<void> _codeChecks = Future.value();
+
+  Future<T> _oneCodeAtATime<T>(Future<T> Function() check) {
+    final run = _codeChecks.then((_) => check());
+    _codeChecks = run.then((_) {}, onError: (Object _) {});
+    return run;
   }
 
   /// [code] est-il celui de [approver] (empreinte publiée) ? Sans compter d'échec : c'est [identifyApprover] qui compte.

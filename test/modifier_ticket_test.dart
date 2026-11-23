@@ -133,6 +133,20 @@ void main() {
     );
   });
 
+  test('codes responsables envoyés en même temps : comptés un à un, blocage dès le troisième échec (relecture du 23/11)', () async {
+    serve();
+    final e = await engine();
+    Operator named(String name) => e.snapshot!.operators.firstWhere((o) => o.name == name);
+    final results = await Future.wait([
+      for (var i = 0; i < 5; i++)
+        e.identifyApprover('0000000$i', eligible: [named('Mariam')], notAllowed: '.').then((_) => 'reconnu', onError: (Object r) => '$r'),
+    ]);
+    expect(results.where((r) => r == 'Code responsable inconnu.'), hasLength(3));
+    expect(results.where((r) => r.startsWith('Trop d’essais')), hasLength(2), reason: 'les essais simultanés ne passent pas avant le blocage');
+    await expectLater(e.identifyApprover('12345678', eligible: [named('Mariam')], notAllowed: '.'), throwsA(isA<OfflineRefusal>().having((r) => r.message, 'message', contains('Trop d’essais'))),
+        reason: 'même le bon code attend la fin du blocage');
+  });
+
   test('code responsable seul : un seul responsable reconnu ; inconnu compté ; doublon refusé', () async {
     serve();
     final e = await engine();
