@@ -21,6 +21,7 @@ import '../offline/models.dart';
 import '../offline/store.dart';
 import '../offline/ticket.dart';
 import '../offline/x_z_report.dart';
+import 'v2_backup.dart';
 import '../windows/platform/receipt_logo.dart' show normalizeReceiptLogo;
 import 'contract_schemas.dart';
 import 'schema_validator.dart';
@@ -270,6 +271,39 @@ class V2Engine extends CaisseEngine {
     final error = await refreshSnapshot();
     notifyListeners();
     return error;
+  }
+
+  @override
+  Future<(Uint8List, CaisseBackupInfo)> createBackup() =>
+      serialized(() => CaisseBackup.create(v2.db, platform: platform, appVersion: appVersion, now: now));
+
+  @override
+  Future<CaisseBackupInfo> restoreBackup(List<int> bytes) async {
+    final CaisseBackupInfo info;
+    try {
+      info = await serialized(() => CaisseBackup.restore(v2.db, bytes));
+    } on CaisseBackupRefusal catch (e) {
+      throw OfflineRefusal(e.message);
+    }
+    // Base remplacée : plus de jeton ; tout l'état en mémoire est relu de la sauvegarde.
+    _token = null;
+    _client?.token = null;
+    snapshot = null;
+    final origin = await v2.read(V2Keys.origin);
+    if (origin != null) await load(origin);
+    notifyListeners();
+    return info;
+  }
+
+  @override
+  Future<CaisseBackupInfo?> restoredBackup() async {
+    final raw = await v2.read(V2Keys.restoredFrom);
+    if (raw == null) return null;
+    try {
+      return CaisseBackupInfo.fromJson(jsonDecode(raw) as Map);
+    } catch (_) {
+      return null;
+    }
   }
 
   @override

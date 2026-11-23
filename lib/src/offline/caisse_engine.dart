@@ -9,6 +9,7 @@ import '../passes/pass_rules.dart';
 import '../restaurant/resto_context.dart';
 import '../restaurant/resto_engine.dart';
 import '../restaurant/resto_interface.dart';
+import '../sync_v2/v2_backup.dart';
 import 'cash_book.dart';
 import 'catalogue_edit.dart';
 import 'local_sessions.dart';
@@ -177,6 +178,16 @@ abstract class CaisseEngine extends EngineNotifier {
 
   /// Oublie l'appairage (la file reste sur le terminal).
   Future<void> unpair();
+
+  /// Sauvegarde locale cohérente de toute la caisse (plan §7.6, lot R-6) : octets du fichier et son en-tête.
+  Future<(Uint8List, CaisseBackupInfo)> createBackup() => throw const OfflineRefusal('Sauvegarde non disponible sur ce terminal.');
+
+  /// Remplace la caisse par une sauvegarde (même version de base, aucune opération non envoyée ici) ; la caisse n'est
+  /// plus appairée : un nouvel appairage déclare la reprise au serveur.
+  Future<CaisseBackupInfo> restoreBackup(List<int> bytes) => throw const OfflineRefusal('Sauvegarde non disponible sur ce terminal.');
+
+  /// En-tête de la sauvegarde restaurée sur ce poste, ou null.
+  Future<CaisseBackupInfo?> restoredBackup() async => null;
 
   /// Test de la boutique : met à jour [reachable] et le dernier contact.
   Future<bool> probe();

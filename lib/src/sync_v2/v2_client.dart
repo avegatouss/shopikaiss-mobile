@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math';
 
 import 'canonical_json.dart';
@@ -215,8 +216,15 @@ class CaisseV2Client {
     return pairing;
   }
 
+  /// Déclaration de reprise d'une caisse restaurée (RESTAURANT-1 §2.3), envoyée avec `/etat` tant qu'elle est posée ;
+  /// lue par le serveur seulement avec `restaurant.v1`.
+  Map<String, dynamic>? recovery;
+
   Future<Map<String, dynamic>> state() async => Map<String, dynamic>.from(
-    await _call('GET', '/etat', headers: {'X-Caisse-Capacites': capabilities.join(',')}, schema: 'etat.json', timeout: const Duration(seconds: 8)) as Map,
+    await _call('GET', '/etat', headers: {
+      'X-Caisse-Capacites': capabilities.join(','),
+      if (recovery != null && capabilities.contains(restaurantCapability)) 'X-Caisse-Reprise': jsonEncode(recovery),
+    }, schema: 'etat.json', timeout: const Duration(seconds: 8)) as Map,
   );
 
   Future<Map<String, dynamic>> createSnapshot(String reason) async =>

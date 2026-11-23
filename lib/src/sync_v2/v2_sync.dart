@@ -57,7 +57,24 @@ class V2Sync {
       return report;
     }
     try {
-      final state = await client.state();
+      final recovery = await store.read(V2Keys.recovery);
+      client.recovery = recovery == null ? null : (jsonDecode(recovery) as Map).cast<String, dynamic>();
+      final Map<String, dynamic> state;
+      try {
+        state = await client.state();
+      } on V2Failure catch (e) {
+        // Déclaration jugée illisible (422) : elle ne bloque jamais la synchronisation ; le gérant voit la reprise au
+        // changement de caisse maîtresse.
+        if (client.recovery != null && e.status == 422) {
+          await store.write(V2Keys.recovery, null);
+          client.recovery = null;
+        }
+        rethrow;
+      }
+      if (client.recovery != null) {
+        await store.write(V2Keys.recovery, null);
+        client.recovery = null;
+      }
       await store.write(V2Keys.serverState, jsonEncode(state));
       // Forme des données : 2.1 si les deux côtés ont `contrat.2_1`. Changement de forme : nouvel instantané complet,
       // jamais un mélange des deux formes dans la projection.

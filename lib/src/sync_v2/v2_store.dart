@@ -115,6 +115,13 @@ class V2Keys {
   /// Dernier logo de la boutique téléchargé (capacité `boutique.logo`) : `{uuid, empreinte, png}` (PNG normalisé pour
   /// l'impression), gardé hors connexion jusqu'au suivant.
   static const shopLogo = 'v2.logo_boutique';
+
+  /// Caisse restaurée d'une sauvegarde (lot R-6) : déclaration `X-Caisse-Reprise` {appareil_uuid, epoque,
+  /// derniere_sequence} à envoyer au prochain `/etat`, effacée dès que le serveur l'a reçue.
+  static const recovery = 'v2.reprise';
+
+  /// En-tête de la dernière sauvegarde restaurée sur ce poste (affichage).
+  static const restoredFrom = 'v2.restauree_de';
 }
 
 /// Types de changement connus de ce client (donnees.json, révision 2.0.1 : `boutique` ajouté, B-REQ-005).
