@@ -2667,6 +2667,39 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
   /// [passes] : vente payée par pass (vérifiés dans la feuille de scan), sans fenêtre de paiement.
   Future<void> _checkout(Snapshot snapshot, int payable, {List<PassCheck>? passes}) async {
     if (_editing != null) return _validateSaleEdit(snapshot);
+    // Essai précédent resté incertain (audit M02, relecture de A) : la vente est cherchée AVANT de rouvrir le paiement.
+    // Déjà enregistrée : rien de plus n'est encaissé, le ticket suit la vente figée, même si le panier a changé depuis.
+    if (_saleAttempt case final pending? when pending.draft == _draftUuid) {
+      final OfflineOperation? found;
+      try {
+        found = await _engine.saleStatus(pending.uuid);
+      } catch (_) {
+        return _refuse('Le terminal ne peut toujours pas lire ses ventes : n’encaissez pas de nouveau, réessayez dans un instant.', title: 'Encaissement à vérifier');
+      }
+      if (!mounted) return;
+      if (found != null && found.isSale) {
+        final total = (found.content['total'] as num?)?.toInt() ?? payable;
+        final number = found.number ?? '';
+        if (!_engine.saleMatches(found, _cart, payable)) {
+          await showDialog<void>(
+            context: context,
+            builder: (context) => AlertDialog(
+              icon: const Icon(Icons.warning_amber, color: Colors.orange, size: 48),
+              title: Text('Vente déjà enregistrée : ${formatFcfa(total)}'),
+              content: Text(
+                'Le premier essai a bien enregistré la vente $number pour ${formatFcfa(total)}. '
+                'Le panier modifié depuis (${formatFcfa(payable)}) n’est PAS encaissé : ne demandez rien de plus au client pour cette vente. '
+                'Le ticket reprend la vente enregistrée.',
+              ),
+              actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Compris'))],
+            ),
+          );
+          if (!mounted) return;
+        }
+        _saleAttempt = null;
+        return _saleDone(snapshot, found, null, total);
+      }
+    }
     try {
       allocateLots(snapshot, _cart);
     } on OfflineRefusal catch (e) {
@@ -2730,6 +2763,7 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
     final attempt = _saleAttempt?.draft == _draftUuid ? _saleAttempt! : (draft: _draftUuid, uuid: const Uuid().v4());
     _saleAttempt = attempt;
     OfflineOperation operation;
+    var recovered = false;
     try {
       final totals = _totals(snapshot);
       operation = await _engine.recordSale(
@@ -2784,12 +2818,25 @@ class _OfflineRegisterPageState extends State<OfflineRegisterPage> {
         return;
       }
       operation = found;
+      recovered = true;
       _toast('Vente ${found.number ?? ''} bien enregistrée malgré un incident technique.');
     }
     _saleAttempt = null;
-    final lines = List.of(_cart);
-    // Vente par pass, retrait de prévente : le reçu suit l'opération figée (acompte compris, audit M05).
-    final paid = passes == null && preSale == null ? payments : _engine.ticketParts(operation).$2;
+    // Vente par pass, retrait de prévente, vente retrouvée : le reçu suit l'opération figée (audit M02 et M05).
+    final frozen = passes != null || preSale != null || recovered;
+    return _saleDone(snapshot, operation, frozen ? null : (List.of(_cart), payments), payable, passes: passes);
+  }
+
+  /// Après l'encaissement : afficheur, panier vidé, tiroir, ticket et fenêtre de la vente. [entered] : lignes et paiements
+  /// saisis ; null = reçu construit depuis l'opération enregistrée.
+  Future<void> _saleDone(
+    Snapshot snapshot,
+    OfflineOperation operation,
+    (List<CartLine>, List<CartPayment>)? entered,
+    int payable, {
+    List<PassCheck>? passes,
+  }) async {
+    final (lines, paid) = entered ?? _engine.ticketParts(operation);
     // Afficheur client : « Merci », total réglé et rendu, jusqu'à l'article suivant (20 s au plus).
     final rendered = paid.fold<int>(0, (sum, p) => sum + p.change);
     _displayCompleted = customerDisplayState(

@@ -409,6 +409,11 @@ abstract class CaisseEngine extends EngineNotifier {
     return previous != null && _composition(lines) == _composition(ticketParts(previous).$1);
   }
 
+  /// La vente enregistrée [sale] correspond-elle au panier affiché : mêmes articles et quantités, même total ? Faux :
+  /// le panier a changé après un premier essai déjà enregistré (audit M02).
+  bool saleMatches(OfflineOperation sale, List<CartLine> lines, int payable) =>
+      _composition(lines) == _composition(ticketParts(sale).$1) && (sale.content['total'] as num?)?.toInt() == payable;
+
   static String _composition(List<CartLine> lines) {
     final quantities = <String, BigInt>{};
     for (final line in lines) {
