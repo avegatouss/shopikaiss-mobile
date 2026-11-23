@@ -952,6 +952,13 @@ abstract class CaisseEngine extends EngineNotifier {
   /// Codes des moyens de paiement publiés comme espèces (booléen `especes`), locaux ou non ; vide hors contrat v2.
   Future<Set<String>> publishedCashCodes() async => const {};
 
+  /// Acompte ventilé dans le pré-X et le Z (option de boutique, PREVENTE-VENTILATION-Z) : acompte net par moyen
+  /// d'origine de chaque prévente, ou null (présentation du contrat). Présentation seulement.
+  Future<Map<String, Map<String, int>>?> preSaleOrigins() async => null;
+
+  Future<ZContext> _closureContext(Snapshot s) async =>
+      ZContext.of(s, publishedCashCodes: await publishedCashCodes(), preSaleOrigins: await preSaleOrigins());
+
   /// Document de clôture prêt à imprimer ([ZKind.preX], [ZKind.session], [ZKind.preZ]), calculé sans réseau à partir
   /// de [closureFacts] ; null : documents locaux non disponibles. Lève [ClosureUnavailable] s'il n'y a pas de session à
   /// imprimer. Commun à Android et à l'hôte Windows (qui rend `ticket`).
@@ -959,7 +966,7 @@ abstract class CaisseEngine extends EngineNotifier {
     final facts = await closureFacts();
     final s = snapshot;
     if (facts == null || s == null) return null;
-    return buildClosureDocument(facts, ZContext.of(s, publishedCashCodes: await publishedCashCodes()), kind: kind, version: version, now: now, duplicate: duplicate);
+    return buildClosureDocument(facts, await _closureContext(s), kind: kind, version: version, now: now, duplicate: duplicate);
   }
 
   /// Z de journée du terminal (2.1 lot 12) visé par l'uuid de sa `cloture_journee`, même après les journées suivantes.
@@ -967,7 +974,7 @@ abstract class CaisseEngine extends EngineNotifier {
     final facts = await closureFacts();
     final s = snapshot;
     if (facts == null || s == null) return null;
-    return buildClosureDocument(facts, ZContext.of(s, publishedCashCodes: await publishedCashCodes()),
+    return buildClosureDocument(facts, await _closureContext(s),
         kind: ZKind.terminalDay, version: version, now: now, duplicate: duplicate, dayClosureUuid: dayClosureUuid);
   }
 

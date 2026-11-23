@@ -146,6 +146,10 @@ class CaisseV2Client {
   /// Prévente / réservations (2.1 lot 15) : opérations `prevente_*`, type `prevente`, règle `boutique.regles.prevente`.
   static const preSaleCapability = 'prevente.v1';
 
+  /// Acompte ventilé dans le pré-X et le Z (PREVENTE-VENTILATION-Z, 23/11) : règle `regles.prevente.z_acompte`,
+  /// présentation seulement. Accordée avec `contrat.2_1` et `prevente.v1`.
+  static const preSaleVentilationCapability = 'prevente.ventilation';
+
   /// Transfert de fin de journée des mobile money vers les espèces (lot 16) : opération `transfert_especes`, règle
   /// `boutique.regles.transfert_especes`, droit `transfert_especes`. Accordée seulement avec `contrat.2_1`.
   static const cashTransferCapability = 'transfert.especes';

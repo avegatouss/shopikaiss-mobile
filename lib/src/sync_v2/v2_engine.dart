@@ -1614,7 +1614,7 @@ class V2Engine extends CaisseEngine {
     if (await dayClosureBlocker(operator) case final refusal?) throw OfflineRefusal(refusal);
     final facts = (await closureFacts())!;
     if (facts.sessionsWithoutDay.isEmpty) throw const OfflineRefusal('Aucune session clôturée depuis le dernier Z de journée.');
-    final context = ZContext.of(snapshot!, publishedCashCodes: await publishedCashCodes());
+    final context = ZContext.of(snapshot!, publishedCashCodes: await publishedCashCodes(), preSaleOrigins: await preSaleOrigins());
     final sessions = facts.sessionsWithoutDay;
     final detail = terminalDayDetail(facts, context, sessions);
     final summary = detail['summary'] as Map;
@@ -2263,6 +2263,38 @@ class V2Engine extends CaisseEngine {
   Future<Set<String>> publishedCashCodes() async => {
     for (final m in (await v2.entities('moyen_paiement')).values) if (m['especes'] == true && m['code'] is String) m['code'] as String,
   };
+
+  /// Règle `regles.prevente.z_acompte = "moyen_origine"` publiée (seulement si ce poste annonce `prevente.ventilation`).
+  bool get preSaleVentilation =>
+      preSaleSupported && _serverOffers(CaisseV2Client.preSaleVentilationCapability) && (_shopRules?['prevente'] as Map?)?['z_acompte'] == 'moyen_origine';
+
+  /// Origine des acomptes : preuve locale de création (moins les remboursements locaux), sinon `acompte_moyen` de la
+  /// prévente publiée. Une prévente sans origine connue n'y figure pas : son acompte reste « Acompte prévente ».
+  @override
+  Future<Map<String, Map<String, int>>?> preSaleOrigins() async {
+    if (!preSaleVentilation) return null;
+    final origins = <String, Map<String, int>>{};
+    for (final e in (await v2.entities('prevente')).entries) {
+      final method = e.value['acompte_moyen'];
+      final amount = e.value['acompte'];
+      if (method is String && amount is int && amount > 0) origins[e.key] = {method: amount};
+    }
+    for (final row in await v2.operationsOfType('prevente_creer')) {
+      final c = (row['operation'] as Map)['contenu'] as Map;
+      final method = c['acompte_moyen'];
+      final amount = c['acompte'];
+      if (method is String && amount is int && amount > 0) origins[c['prevente_uuid'] as String] = {method: amount};
+    }
+    for (final row in await v2.operationsOfType('prevente_annuler')) {
+      final c = (row['operation'] as Map)['contenu'] as Map;
+      final refund = c['remboursement'];
+      final own = origins[c['prevente_uuid']];
+      if (refund is! Map || own == null) continue;
+      final method = '${refund['moyen']}';
+      own[method] = (own[method] ?? 0) - ((refund['montant'] as num?)?.toInt() ?? 0);
+    }
+    return origins;
+  }
 
   /// Bloc de détail de la session ouverte, au format du contrat, tel que le Z de session l'imprimera ; null s'il ne
   /// peut être calculé ou n'est pas conforme (la clôture part alors sans détail : le serveur calcule le sien).

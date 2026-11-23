@@ -32,10 +32,13 @@ void main() {
     dir.deleteSync(recursive: true);
   });
 
-  void serve({bool option = true}) {
-    serve21(server, rules: {if (option) 'prevente': {'actif': true}});
+  void serve({bool option = true, bool ventilated = false}) {
+    serve21(server, rules: {if (option) 'prevente': {'actif': true, if (ventilated) 'z_acompte': 'moyen_origine'}});
     server
-      ..capabilities = ['instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1', 'session.cloture', 'prevente.v1']
+      ..capabilities = [
+        'instantane.v1', 'stock.couverture', 'vente.especes', 'vente.paiement_declare', 'contrat.2_1', 'session.cloture', 'prevente.v1',
+        if (ventilated) 'prevente.ventilation',
+      ]
       ..put('moyen_paiement', 'moyen:wave', {'code': 'wave', 'nom': 'Wave', 'especes': false, 'local': true, 'reference': 'aucune'})
       ..put('politique', 'paiements.moyens_locaux', {'cle_politique': 'paiements.moyens_locaux', 'valeur': ['especes', 'wave'], 'source': 'boutique', 'verrouillee': false})
       ..put('operateur', 'operateur:7', {
@@ -101,6 +104,65 @@ void main() {
     final convert = server.received.values.firstWhere((r) => (r['operation'] as Map)['type'] == 'prevente_convertir')['operation'] as Map;
     expect((convert['contenu'] as Map), {'prevente_uuid': created.uuid, 'vente_operation_uuid': sale.uuid, 'acompte_impute': 1000});
     expect(server.received.values.every((r) => r['etat'] == 'integree'), isTrue, reason: 'toutes conformes au contrat');
+  });
+
+  test('acompte ventilé (option de boutique) : présentation seulement, tiroir et encaissements inchangés', () async {
+    // Exemple de PREVENTE-VENTILATION-Z : 1 000 d'acompte en espèces une session, retrait avec 500 en espèces la suivante.
+    serve(ventilated: true);
+    final e = await engine();
+    await e.closeSession(awa(e), cash: 0);
+    await e.openSession(0, awa(e));
+    final cash = await e.createPreSale(awa(e), customerName: 'Koffi', lines: [CartLine(product: savon(e), quantity: qty(3))],
+        deposit: 1000, depositMethod: method(e, 'especes'), received: 1000);
+    final wave = await e.createPreSale(awa(e), customerName: 'Ama', lines: [CartLine(product: savon(e))], deposit: 200, depositMethod: method(e, 'wave'));
+    await e.closeSession(awa(e), cash: 1000);
+    await e.openSession(0, awa(e));
+    await e.recordSale(e.preSaleCart(cash), [CartPayment(method: method(e, 'especes'), amount: 500, received: 500)], awa(e),
+        extras: SaleExtras(preSale: PreSaleUse(uuid: cash.uuid, code: cash.code, deposit: cash.deposit)));
+    await e.recordSale(e.preSaleCart(wave), [CartPayment(method: method(e, 'especes'), amount: 300, received: 300)], awa(e),
+        extras: SaleExtras(preSale: PreSaleUse(uuid: wave.uuid, code: wave.code, deposit: wave.deposit)));
+
+    final preX = (await e.closureDocument(ZKind.preX, ZVersion.detailed))!;
+    final titles = [for (final s in (preX.ticket['sections'] as List).cast<Map>()) s['titre']];
+    expect(titles.indexOf('Ventes par moyen (acomptes ventilés)'), titles.indexOf('Encaissements par moyen') + 1, reason: 'juste après les encaissements');
+    expect([for (final r in (preX.model['paiements'] as List).cast<Map>()) '${r['code']}:${r['count']}:${r['amount']}'],
+        unorderedEquals(['acompte_prevente:2:1200', 'especes:2:800']), reason: 'encaissements du contrat inchangés');
+    expect([for (final r in (preX.model['paiements_ventiles'] as List).cast<Map>()) '${r['code']}:${r['count']}:${r['amount']}'],
+        ['especes:2:1800', 'wave:0:200'], reason: 'acomptes rangés sous leur moyen d’origine ; total 2 000 = encaissements');
+    final short = (await e.closureDocument(ZKind.preX, ZVersion.short))!;
+    expect([for (final s in (short.ticket['sections'] as List).cast<Map>()) s['titre']], contains('Ventes par moyen (acomptes ventilés)'));
+    expect(preX.ticket.toString(), contains('Total des ventes'));
+    expect(preX.ticket.toString(), contains(preSaleVentilationMention));
+    expect((await e.closingGaps(800, const [])).cash, isFalse, reason: 'le tiroir attend l’argent reçu : 500 + 300');
+
+    // Détail figé envoyé au serveur : inchangé (acompte_prevente).
+    await e.closeSession(awa(e), cash: 800);
+    await e.sync();
+    final closure = server.received.values.map((r) => r['operation'] as Map).lastWhere((o) => o['type'] == 'cloture_session');
+    expect(closure.toString(), contains('acompte_prevente'));
+    expect(closure.toString(), isNot(contains('acomptes ventilés')));
+  }, skip: 'Attend le schéma donnees-2.1 de A (regles.prevente.z_acompte, branche web feat/prevente-ventilation).');
+
+  test('acompte ventilé : règle absente, origine inconnue ou remboursement d’un autre moyen → « Acompte prévente »', () async {
+    serve();
+    final e = await engine();
+    expect(await e.preSaleOrigins(), isNull, reason: 'sans la règle, présentation du contrat');
+    await e.closeSession(awa(e), cash: 0);
+    await e.openSession(0, awa(e));
+    final p = await e.createPreSale(awa(e), customerName: 'Koffi', lines: [CartLine(product: savon(e))], deposit: 200, depositMethod: method(e, 'wave'));
+    await e.recordSale(e.preSaleCart(p), [CartPayment(method: method(e, 'especes'), amount: 300, received: 300)], awa(e),
+        extras: SaleExtras(preSale: PreSaleUse(uuid: p.uuid, code: p.code, deposit: p.deposit)));
+    final facts = (await e.closureFacts())!;
+    final session = facts.sessions.last;
+    final detail = sessionDetail(facts, session, ZContext.of(e.snapshot!));
+    final payments = (detail['payments'] as List).cast<Map>();
+    List<String> rows(Map<String, Map<String, int>> origins) => [
+      for (final r in ventilatedPayments(payments, [session], ZContext.of(e.snapshot!, preSaleOrigins: origins))!) '${r['code']}:${r['count']}:${r['amount']}',
+    ];
+    expect(rows({}), unorderedEquals(['especes:1:300', 'acompte_prevente:1:200']), reason: 'origine inconnue : jamais supposée espèces');
+    expect(rows({p.uuid: {'wave': 200, 'especes': -50}}), unorderedEquals(['especes:1:300', 'acompte_prevente:1:200']), reason: 'nets incohérents');
+    expect(rows({p.uuid: {'wave': 250}}), unorderedEquals(['especes:1:300', 'acompte_prevente:1:200']), reason: 'nets ≠ imputé');
+    expect(rows({p.uuid: {'wave': 200}}), unorderedEquals(['especes:1:300', 'wave:0:200']));
   });
 
   test('panne entre vente et conversion : rien n’est gardé, la prévente ne se retire qu’une fois (audit M01)', () async {

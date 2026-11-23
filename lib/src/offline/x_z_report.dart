@@ -357,6 +357,44 @@ String zAmount(int amount) => '${amount < 0 ? '-' : ''}${_group(amount.abs().toS
 int _int(Object? v) => (v as num?)?.toInt() ?? 0;
 
 /// Vente retenue au chiffre d'affaires : une vente réglée par pass est « hors chiffre d'affaires ».
+const preSaleVentilationMention = 'Présentation seulement : le tiroir compte l’argent reçu dans la session.';
+
+/// Rubrique « Ventes par moyen (acomptes ventilés) » (PREVENTE-VENTILATION-Z, option de boutique du 23/11) : les
+/// encaissements par moyen, l'acompte imputé de chaque vente de conversion de [sessions] rangé sous son moyen d'origine.
+/// Moyen inconnu, ou acomptes nets qui ne couvrent pas exactement l'imputé : le montant reste en « Acompte prévente »,
+/// jamais supposé espèces. Présentation seulement : ni le détail, ni le tiroir, ni les opérations ne changent. Null si la
+/// règle est absente.
+List<Map<String, dynamic>>? ventilatedPayments(List<Map> payments, Iterable<ClosureSession> sessions, ZContext context) {
+  final origins = context.preSaleOrigins;
+  if (origins == null) return null;
+  final rows = <String, Map<String, dynamic>>{
+    for (final p in payments) '${p['code']}': {'code': '${p['code']}', 'label': p['label'], 'count': _int(p['count']), 'amount': _int(p['amount'])},
+  };
+  final names = context.methodNames;
+  for (final s in sessions) {
+    for (final sale in s.sales) {
+      if (!_counted(sale)) continue;
+      final content = sale['contenu'] as Map;
+      final uuid = content['prevente_uuid'] as String?;
+      if (uuid == null) continue;
+      final imputed = ((content['paiements'] as List?) ?? const []).cast<Map>().where((p) => p['moyen'] == preSaleDepositMethod).fold(0, (sum, p) => sum + _int(p['montant']));
+      final deposit = rows[preSaleDepositMethod];
+      if (imputed <= 0 || deposit == null) continue;
+      final nets = {for (final e in (origins[uuid] ?? const <String, int>{}).entries) if (e.value != 0) e.key: e.value};
+      if (nets.isEmpty || nets.values.any((v) => v < 0) || nets.values.fold(0, (a, b) => a + b) != imputed) continue;
+      for (final e in nets.entries) {
+        final row = rows.putIfAbsent(e.key, () => {'code': e.key, 'label': names[e.key] ?? e.key, 'count': 0, 'amount': 0});
+        row['amount'] = (row['amount'] as int) + e.value;
+      }
+      deposit['amount'] = (deposit['amount'] as int) - imputed;
+      deposit['count'] = (deposit['count'] as int) - 1;
+    }
+  }
+  final deposit = rows[preSaleDepositMethod];
+  if (deposit != null && deposit['amount'] == 0) rows.remove(preSaleDepositMethod);
+  return rows.values.toList();
+}
+
 bool _counted(Map sale) => ((sale['contenu'] as Map)['passages'] as List? ?? const []).isEmpty;
 
 /// Bloc de détail des ventes et retours de [sessions] : synthèse, encaissements par moyen, articles par catégorie,
@@ -717,17 +755,30 @@ String _day(DateTime date) {
 
 /// Contexte d'impression tiré du référentiel : boutique, terminal, moyens, caissiers.
 class ZContext {
-  ZContext({required this.storeName, required this.terminalName, required this.methods, required this.operatorName, this.currency = 'FCFA', this.publishedCashCodes = const {}});
+  ZContext({
+    required this.storeName,
+    required this.terminalName,
+    required this.methods,
+    required this.operatorName,
+    this.currency = 'FCFA',
+    this.publishedCashCodes = const {},
+    this.preSaleOrigins,
+  });
 
   /// Contexte depuis le référentiel du terminal.
-  factory ZContext.of(Snapshot snapshot, {Set<String> publishedCashCodes = const {}}) => ZContext(
+  factory ZContext.of(Snapshot snapshot, {Set<String> publishedCashCodes = const {}, Map<String, Map<String, int>>? preSaleOrigins}) => ZContext(
     storeName: snapshot.store.name.isNotEmpty ? snapshot.store.name : snapshot.store.legalName,
     terminalName: snapshot.terminal.name,
     methods: snapshot.methods,
     operatorName: (id) => snapshot.operatorById(id)?.name ?? '',
     currency: snapshot.store.currency,
     publishedCashCodes: publishedCashCodes,
+    preSaleOrigins: preSaleOrigins,
   );
+
+  /// Acompte ventilé (`regles.prevente.z_acompte = "moyen_origine"`, PREVENTE-VENTILATION-Z) : par prévente, acompte net
+  /// par moyen d'origine (reçu − remboursé). Null : règle absente, présentation du contrat.
+  final Map<String, Map<String, int>>? preSaleOrigins;
 
   final String storeName;
   final String terminalName;
@@ -848,7 +899,7 @@ Map<String, dynamic> sessionZModel(ClosureFacts facts, ClosureSession session, Z
   // Z d'une clôture du lot Z local : le détail figé dans la clôture, tel qu'envoyé au serveur, jamais recalculé.
   final frozen = session.frozenDetail;
   final detail = frozen != null ? detailFromContract(frozen) : sessionDetail(facts, session, context);
-  return _assemble(kind, context.storeName, null, header, detail, now: now, duplicate: duplicate, parts: {
+  return _assemble(kind, context.storeName, null, header, detail, now: now, duplicate: duplicate, context: context, covered: [session], parts: {
     'especes': lines,
     'ecart': cash.difference,
     'controle_moyens': blind ? <Map<String, dynamic>>[] : _methodControl([session], context),
@@ -901,7 +952,7 @@ Map<String, dynamic> dayZModel(ClosureFacts facts, ZContext context, {required D
   final difference = total((c) => c.difference);
   final open = [for (final s in sessions) if (!s.closed) s];
   final detail = closureDetail(facts, sessions, methodNames: context.methodNames, cashCode: context.cashCode);
-  return _assemble(ZKind.preZ, context.storeName, null, header, detail, now: now, parts: {
+  return _assemble(ZKind.preZ, context.storeName, null, header, detail, now: now, context: context, covered: sessions, parts: {
     'especes': [
       _moneyOrDash('Fond', total((c) => c.float)),
       _moneyOrDash('Théorique', total((c) => c.expected), bold: true),
@@ -998,7 +1049,7 @@ Map<String, dynamic> terminalDayZModel(ClosureFacts facts, ZContext context, Lis
   ];
   final difference = total((c) => c.difference);
   final detail = terminalDayDetail(facts, context, sessions);
-  return _assemble(ZKind.terminalDay, context.storeName, null, header, detail, now: now, duplicate: duplicate, parts: {
+  return _assemble(ZKind.terminalDay, context.storeName, null, header, detail, now: now, duplicate: duplicate, context: context, covered: sessions, parts: {
     'especes': [
       _moneyOrDash('Fond', total((c) => c.float)),
       _moneyOrDash('Théorique', total((c) => c.expected), bold: true),
@@ -1025,8 +1076,12 @@ Map<String, dynamic> _assemble(
   required Map<String, dynamic> parts,
   required List<String> mentions,
   String? warning,
+  ZContext? context,
+  List<ClosureSession> covered = const [],
 }) {
   final provisional = kind == ZKind.preX || kind == ZKind.preZ;
+  // Duplicata d'un Z figé : il garde sa présentation d'origine (le détail ne change jamais).
+  final ventilated = duplicate || context == null ? null : ventilatedPayments((detail['payments'] as List).cast<Map>(), covered, context);
   final summary = {...detail['summary'] as Map<String, dynamic>, 'cash_difference': parts['ecart']};
   final edited = zDate(now);
   return {
@@ -1041,6 +1096,7 @@ Map<String, dynamic> _assemble(
     'entete': [zValue(provisional ? 'Édité le' : (duplicate ? 'Réimprimé le' : 'Imprimé le'), edited, bold: provisional), ...header],
     'synthese': summary,
     'paiements': detail['payments'],
+    'paiements_ventiles': ventilated,
     'remboursements': detail['refunds'],
     'especes': parts['especes'] ?? const [],
     'sessions': parts['sessions'] ?? const [],
@@ -1075,17 +1131,32 @@ Map<String, dynamic> closureTicket(Map<String, dynamic> model, String version) {
     ];
   }
 
+  void ventilatedSection() {
+    final rows = (model['paiements_ventiles'] as List?)?.cast<Map>();
+    if (rows == null) return;
+    sections.add({
+      'titre': 'Ventes par moyen (acomptes ventilés)',
+      'lignes': [
+        for (final r in rows) zMoney('${r['label']} (${r['count']})', r['amount'] as int),
+        zMoney('Total des ventes', rows.fold(0, (sum, r) => sum + (r['amount'] as int)), bold: true),
+        zValue(preSaleVentilationMention, ''),
+      ],
+    });
+  }
+
   if (short) {
     sections.add({'titre': 'Résumé', 'lignes': _resume(summary)});
     if (model['modifications'] case final Map edits) {
       sections.add({'titre': 'Tickets modifiés', 'lignes': [zValue('Nombre de tickets modifiés', '${edits['count']}'), zMoney('Total des modifications', _int(edits['difference']), bold: true)]});
     }
     sections.add({'titre': 'Par moyen de paiement', 'lignes': paymentLines(false)});
+    ventilatedSection();
     final top = [for (final (i, row) in (model['top'] as List).cast<Map>().indexed) zMoney('${i + 1}. ${row['label']} x${zQuantity(row['quantity'] as BigInt)}', row['amount'] as int)];
     sections.add({'titre': 'Top $zTop des articles', 'lignes': top.isEmpty ? [zValue('Aucune vente', '')] : top});
   } else {
     sections.add({'titre': 'Synthèse', 'lignes': _synthesis(summary)});
     sections.add({'titre': 'Encaissements par moyen', 'lignes': paymentLines(true)});
+    ventilatedSection();
     final refunds = (model['remboursements'] as List).cast<Map>();
     if (refunds.isNotEmpty) sections.add({'titre': 'Remboursements par moyen', 'lignes': [for (final r in refunds) zMoney('${r['label']}', -(r['amount'] as int))]});
     if ((model['especes'] as List).isNotEmpty) sections.add({'titre': 'Espèces', 'lignes': model['especes']});
@@ -1797,6 +1868,9 @@ Map<String, dynamic> journeyPreZModel(ClosureFacts facts, ZContext context, {req
     detail,
     now: now,
     warning: partial ? partialDayMention : null,
+    // Ventes des autres postes : moyen d'origine inconnu ici, leur acompte reste « Acompte prévente ».
+    context: context,
+    covered: [...local, ?own],
     parts: {
       'especes': [
         _moneyOrDash('Fond', total((s) => s.fond)),
